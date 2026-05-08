@@ -11,22 +11,22 @@ Internal manufacturing Andon alert system built with Flask, SQLAlchemy, and SQLi
 pip install -r requirements.txt
 ```
 
-3. Set the database if needed:
+3. Set the database if needed in `.env`:
 
-```bash
-export DATABASE_URL=sqlite:///instance/andon.db
+```text
+DATABASE_URL="sqlite:///instance/andon.db"
 ```
 
 For MySQL later, switch to:
 
-```bash
-export DATABASE_URL=mysql+pymysql://user:password@host/dbname
+```text
+DATABASE_URL="mysql+pymysql://user:password@host/dbname"
 ```
 
 For PostgreSQL, switch to:
 
-```bash
-export DATABASE_URL=postgresql+psycopg://andon_user:password@localhost:5432/andon_db
+```text
+DATABASE_URL="postgresql+psycopg://andon_user:password@localhost:5432/andon_db"
 ```
 
 ## Initialize Database
@@ -51,12 +51,9 @@ After installing PostgreSQL on Windows and installing `requirements.txt`, run th
 
 The script creates the PostgreSQL role/database if needed, sets `DATABASE_URL` for that PowerShell session, creates the tables, and seeds the default data.
 
-For future PowerShell sessions, set the same connection string before running the app:
+It also writes a local `.env` file with `DATABASE_URL`, `SECRET_KEY`, `HOST`, `PORT`, and `SOCKETIO_ENABLED`, so future runs only need:
 
 ```powershell
-$env:DATABASE_URL = "postgresql+psycopg://andon_user:change_this_password@localhost:5432/andon_db"
-$env:SECRET_KEY = "change-this-secret"
-$env:SOCKETIO_ENABLED = "true"
 python run_socketio.py
 ```
 
@@ -71,8 +68,10 @@ flask --app andon_system:create_app run
 For local Socket.IO testing with the production entrypoint:
 
 ```bash
-SOCKETIO_ENABLED=true python run_socketio.py
+python run_socketio.py
 ```
+
+`run_socketio.py` reads `.env` automatically and defaults to `0.0.0.0:5001` when `HOST` and `PORT` are not set.
 
 For production deployments, use a WebSocket-capable worker. Normal Gunicorn sync workers are not enough for WebSockets.
 

@@ -30,6 +30,53 @@ function Invoke-Psql {
     }
 }
 
+function Escape-DotEnvValue {
+    param([string]$Value)
+    return $Value.Replace("\", "\\").Replace('"', '\"')
+}
+
+function Get-DotEnvValue {
+    param([string]$Path, [string]$Key)
+    if (-not (Test-Path $Path)) {
+        return $null
+    }
+
+    foreach ($line in Get-Content $Path) {
+        if ($line -match "^\s*$([regex]::Escape($Key))\s*=\s*(.*)\s*$") {
+            return $Matches[1].Trim().Trim('"').Trim("'")
+        }
+    }
+
+    return $null
+}
+
+function Set-DotEnvValue {
+    param([string]$Path, [string]$Key, [string]$Value)
+    $lineValue = "$Key=`"$(Escape-DotEnvValue $Value)`""
+
+    if (Test-Path $Path) {
+        $lines = Get-Content $Path
+    } else {
+        $lines = @()
+    }
+
+    $updated = $false
+    $newLines = @(foreach ($line in $lines) {
+        if ($line -match "^\s*$([regex]::Escape($Key))\s*=") {
+            $updated = $true
+            $lineValue
+        } else {
+            $line
+        }
+    })
+
+    if (-not $updated) {
+        $newLines += $lineValue
+    }
+
+    Set-Content -Path $Path -Value $newLines
+}
+
 Assert-SafeIdentifier -Value $DatabaseName -Name "DatabaseName"
 Assert-SafeIdentifier -Value $AppUser -Name "AppUser"
 
@@ -58,8 +105,25 @@ Invoke-Psql -Database $DatabaseName -Sql "ALTER SCHEMA public OWNER TO $AppUser;
 
 $encodedPassword = [uri]::EscapeDataString($AppPassword)
 $env:DATABASE_URL = "postgresql+psycopg://${AppUser}:${encodedPassword}@${PostgresHost}:${PostgresPort}/${DatabaseName}"
+$env:HOST = "0.0.0.0"
+$env:PORT = "5001"
+$env:SOCKETIO_ENABLED = "true"
+
+$envPath = Join-Path (Get-Location) ".env"
+$existingSecret = Get-DotEnvValue -Path $envPath -Key "SECRET_KEY"
+if (-not $existingSecret -or $existingSecret -eq "change-this-secret" -or $existingSecret -eq "dev-andon-secret-key") {
+    $existingSecret = "$([guid]::NewGuid().ToString("N"))$([guid]::NewGuid().ToString("N"))"
+}
+
+$env:SECRET_KEY = $existingSecret
+Set-DotEnvValue -Path $envPath -Key "DATABASE_URL" -Value $env:DATABASE_URL
+Set-DotEnvValue -Path $envPath -Key "SECRET_KEY" -Value $env:SECRET_KEY
+Set-DotEnvValue -Path $envPath -Key "SOCKETIO_ENABLED" -Value $env:SOCKETIO_ENABLED
+Set-DotEnvValue -Path $envPath -Key "HOST" -Value $env:HOST
+Set-DotEnvValue -Path $envPath -Key "PORT" -Value $env:PORT
 
 Write-Host "Using DATABASE_URL=$env:DATABASE_URL"
+Write-Host "Wrote runtime settings to $envPath"
 python scripts/init_andon_db.py
 
 if (-not $SkipSeed) {
@@ -68,6 +132,6 @@ if (-not $SkipSeed) {
 
 Write-Host ""
 Write-Host "PostgreSQL setup complete."
-Write-Host "For this PowerShell session, DATABASE_URL is already set."
-Write-Host "For future sessions, run:"
-Write-Host "`$env:DATABASE_URL = `"$env:DATABASE_URL`""
+Write-Host "Future app runs will read .env automatically."
+Write-Host "Start the app with:"
+Write-Host "python run_socketio.py"

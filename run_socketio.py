@@ -8,8 +8,8 @@ app = create_app(os.getenv("FLASK_CONFIG") or os.getenv("APP_ENV") or "developme
 
 
 if __name__ == "__main__":
-    host = os.getenv("HOST", "127.0.0.1")
-    port = int(os.getenv("PORT", "5000"))
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "5001"))
     if socketio is not None and app.config.get("SOCKETIO_ENABLED"):
         socketio.run(app, host=host, port=port, debug=app.debug, allow_unsafe_werkzeug=True)
     else:
