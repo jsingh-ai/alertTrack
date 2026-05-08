@@ -38,6 +38,22 @@ def utc_now():
     return datetime.now(timezone.utc)
 
 
+def _duration_seconds(start, end):
+    if not start or not end:
+        return None
+    start = _ensure_aware(start)
+    end = _ensure_aware(end)
+    return int((end - start).total_seconds())
+
+
+def _ensure_aware(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def list_active_alerts(status: str | None = None):
     company_id = get_current_company_id()
     query = AndonAlert.query

@@ -1,6 +1,7 @@
 {% extends "andon/base.html" %}
+{% block body_class %}admin-screen-shell{% endblock %}
 {% block content %}
-<div class="container-fluid">
+<div class="container-fluid admin-page-shell">
   {% set page_title = "Admin Setup" %}
   {% set page_subtitle = "Maintain companies, departments, machine groups, users, and escalation rules." %}
   {% include "andon/_page_header.html" %}
@@ -118,13 +119,6 @@
               {% endfor %}
             </tbody>
           </table>
-        </div>
-        <div class="admin-filter-chip-shell mt-2">
-          <div class="admin-filter-chip d-none" id="machineGroupFilterChip">
-            <span class="admin-filter-chip__label">Machine Group</span>
-            <span class="admin-filter-chip__value" id="machineGroupFilterChipValue">All</span>
-            <button class="admin-filter-chip__clear" type="button" id="clearMachineGroupFilter" aria-label="Clear machine group filter">×</button>
-          </div>
         </div>
       </div>
     </div>

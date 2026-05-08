@@ -262,6 +262,7 @@ def _filters():
         "end": request.args.get("end"),
         "department_id": request.args.get("department_id", type=int),
         "machine_id": request.args.get("machine_id", type=int),
+        "machine_group": request.args.get("machine_group"),
         "issue_category_id": request.args.get("issue_category_id", type=int),
     }
 

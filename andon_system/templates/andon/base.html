@@ -26,7 +26,7 @@
     <aside class="app-sidebar" id="appSidebar" aria-label="Primary">
       <div class="app-sidebar__inner">
         <div class="app-sidebar__brand-row">
-          <a class="app-sidebar__brand" href="{{ url_for('pages.landing_page') }}">
+        <a class="app-sidebar__brand" href="{{ url_for('pages.operator_page') }}">
             <span class="app-sidebar__mark">PG</span>
             <span class="app-sidebar__brand-copy">
               <span class="app-sidebar__brand-name">{{ app_brand }}</span>
@@ -44,8 +44,7 @@
 
         <nav class="app-nav">
           {% set nav_items = [
-            ("pages.landing_page", "Overview", "bi-house-door"),
-            ("pages.operator_page", "Operator", "bi-bell"),
+            ("pages.operator_page", "Operator", "bi-house-door"),
             ("pages.board_page", "Board", "bi-display"),
             ("pages.reports_page", "Reports", "bi-graph-up"),
             ("pages.admin_page", "Admin", "bi-gear"),
@@ -160,6 +159,18 @@
         setTheme(getTheme() === "dark" ? "light" : "dark");
       }
 
+      function hasAdminAccess() {
+        return window.sessionStorage.getItem("andon-admin-access") === "true";
+      }
+
+      function grantAdminAccess() {
+        window.sessionStorage.setItem("andon-admin-access", "true");
+      }
+
+      function revokeAdminAccess() {
+        window.sessionStorage.removeItem("andon-admin-access");
+      }
+
       themeToggleBtn?.addEventListener("click", toggleTheme);
       themeToggleBtnMobile?.addEventListener("click", toggleTheme);
       sidebarCollapseBtn?.addEventListener("click", () => {
@@ -169,8 +180,27 @@
       sidebarMobileClose?.addEventListener("click", closeMobileSidebar);
       appSidebarOverlay?.addEventListener("click", closeMobileSidebar);
 
+      document.querySelectorAll("[data-nav-link]").forEach((link) => {
+        link.addEventListener("click", (event) => {
+          const href = link.getAttribute("href") || "";
+          if (!href.includes("/andon/admin")) return;
+          event.preventDefault();
+          const password = window.prompt("Enter admin password");
+          if (password === "123") {
+            grantAdminAccess();
+            window.location.href = href;
+          } else if (password !== null) {
+            revokeAdminAccess();
+          }
+        });
+      });
+
       setTheme(getTheme());
       setSidebarMode(getSidebarMode());
+
+      if (window.location.pathname.startsWith("/andon/admin") && !hasAdminAccess()) {
+        window.location.replace("{{ url_for('pages.operator_page') }}");
+      }
 
       if (window.matchMedia) {
         const mq = window.matchMedia("(max-width: 991.98px)");

@@ -42,7 +42,30 @@ def build_board_state():
         .order_by(AndonAlert.created_at.desc())
         .all()
     )
-    users = user_query.filter_by(is_active=True).order_by(User.display_name.asc()).all()
+    visible_machines = [machine for machine in machines if machine.is_active and (machine.department is None or machine.department.is_active)]
+    visible_departments = departments
+    visible_issue_categories = [
+        category
+        for category in issue_categories
+        if category.department and category.department.is_active
+    ]
+    visible_users = [
+        user
+        for user in user_query.filter_by(is_active=True).order_by(User.display_name.asc()).all()
+        if (user.department is None or user.department.is_active)
+        and (user.machine_group is None or user.machine_group.is_active)
+    ]
+
+    visible_machine_ids = {machine.id for machine in visible_machines}
+    visible_category_ids = {category.id for category in visible_issue_categories}
+    visible_department_ids = {department.id for department in visible_departments}
+    active_alerts = [
+        alert
+        for alert in active_alerts
+        if alert.machine_id in visible_machine_ids
+        and (alert.department_id is None or alert.department_id in visible_department_ids)
+        and (alert.issue_category_id is None or alert.issue_category_id in visible_category_ids)
+    ]
 
     alert_by_machine = {}
     for alert in active_alerts:
@@ -62,14 +85,14 @@ def build_board_state():
                 "is_active": machine.is_active,
                 "active_alert": _serialize_active_alert(alert_by_machine.get(machine.id)),
             }
-            for machine in machines
+            for machine in visible_machines
         ],
         "departments": [
             {
                 "id": department.id,
                 "name": department.name,
             }
-            for department in departments
+            for department in visible_departments
         ],
         "issue_groups": [
             {
@@ -86,8 +109,7 @@ def build_board_state():
                     for problem in sorted(category.problems or [], key=lambda item: item.name.lower())
                 ],
             }
-            for category in issue_categories
-            if category.department and category.department.is_active
+            for category in visible_issue_categories
         ],
         "users": [
             {
@@ -99,13 +121,13 @@ def build_board_state():
                 "machine_group_id": user.machine_group_id,
                 "machine_group_name": user.machine_group.name if user.machine_group else None,
             }
-            for user in users
+            for user in visible_users
         ],
         "filters": {
-            "machine_types": _unique_values(machine.machine_type for machine in machines),
-            "areas": _unique_values(machine.area for machine in machines),
-            "lines": _unique_values(machine.line for machine in machines),
-            "departments": _unique_values(machine.department.name for machine in machines if machine.department),
+            "machine_types": _unique_values(machine.machine_type for machine in visible_machines),
+            "areas": _unique_values(machine.area for machine in visible_machines),
+            "lines": _unique_values(machine.line for machine in visible_machines),
+            "departments": _unique_values(machine.department.name for machine in visible_machines if machine.department),
         },
     }
 

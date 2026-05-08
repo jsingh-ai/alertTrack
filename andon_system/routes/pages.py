@@ -14,14 +14,14 @@ pages_bp = Blueprint("pages", __name__)
 
 @pages_bp.route("/andon")
 def landing_page():
-    return render_template("andon/dashboard.html")
+    return redirect(url_for("pages.operator_page"))
 
 
 @pages_bp.post("/andon/company/select")
 def select_company():
     slug = request.form.get("company_slug")
     set_current_company_slug(slug)
-    return redirect(request.referrer or url_for("pages.landing_page"))
+    return redirect(request.referrer or url_for("pages.operator_page"))
 
 
 @pages_bp.route("/andon/operator")
@@ -42,11 +42,20 @@ def board_page():
 @pages_bp.route("/andon/reports")
 def reports_page():
     company = get_current_company()
+    machines = Machine.query.filter_by(company_id=company.id).order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all() if company else []
+    machine_groups = []
+    seen_groups = set()
+    for machine in machines:
+        if not machine.machine_type or machine.machine_type in seen_groups:
+            continue
+        seen_groups.add(machine.machine_type)
+        machine_groups.append(machine.machine_type)
     return render_template(
         "andon/reports.html",
         current_company=company,
         departments=Department.query.filter_by(company_id=company.id, is_active=True).order_by(Department.name.asc()).all() if company else [],
-        machines=Machine.query.filter_by(company_id=company.id, is_active=True).order_by(Machine.name.asc()).all() if company else [],
+        machines=machines,
+        machine_groups=machine_groups,
     )
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import inspect, text
 
 from .extensions import db
@@ -108,19 +110,24 @@ def _backfill_alert_durations():
     ).all()
     updated = False
     for row in rows:
+        created_at = _parse_datetime(row.created_at)
+        acknowledged_at = _parse_datetime(row.acknowledged_at)
+        resolved_at = _parse_datetime(row.resolved_at)
+        cancelled_at = _parse_datetime(row.cancelled_at)
+
         acknowledged_seconds = row.acknowledged_seconds
-        if acknowledged_seconds is None and row.created_at and row.acknowledged_at:
-            acknowledged_seconds = int((row.acknowledged_at - row.created_at).total_seconds())
+        if acknowledged_seconds is None and created_at and acknowledged_at:
+            acknowledged_seconds = int((acknowledged_at - created_at).total_seconds())
             db.session.execute(
                 text("UPDATE andon_alerts SET acknowledged_seconds = :value WHERE id = :id"),
                 {"value": acknowledged_seconds, "id": row.id},
             )
             updated = True
 
-        clear_at = row.resolved_at or row.cancelled_at
+        clear_at = resolved_at or cancelled_at
         ack_to_clear_seconds = row.ack_to_clear_seconds
-        if ack_to_clear_seconds is None and row.acknowledged_at and clear_at:
-            ack_to_clear_seconds = int((clear_at - row.acknowledged_at).total_seconds())
+        if ack_to_clear_seconds is None and acknowledged_at and clear_at:
+            ack_to_clear_seconds = int((clear_at - acknowledged_at).total_seconds())
             db.session.execute(
                 text("UPDATE andon_alerts SET ack_to_clear_seconds = :value WHERE id = :id"),
                 {"value": ack_to_clear_seconds, "id": row.id},
@@ -135,6 +142,20 @@ def _add_column_if_missing(connection, inspector, table_name, column_name, colum
     columns = {column["name"] for column in inspector.get_columns(table_name)} if table_name in set(inspector.get_table_names()) else set()
     if column_name not in columns:
         connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"))
+
+
+def _parse_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        normalized = value.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+    return None
 
 
 def _infer_machine_type(machine_code: str, name: str) -> str | None:
