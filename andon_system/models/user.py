@@ -2,11 +2,14 @@ from sqlalchemy import func
 
 from ..extensions import db
 
+USER_ROLES = ("Operator", "Manager", "Supervisor")
+
 
 class User(db.Model):
     __tablename__ = "users"
     __table_args__ = (
         db.UniqueConstraint("company_id", "username", name="uq_users_company_username"),
+        db.CheckConstraint("role IN ('Operator', 'Manager', 'Supervisor')", name="ck_users_role_allowed"),
         db.Index("ix_users_company_id", "company_id"),
         db.Index("ix_users_department_id", "department_id"),
         db.Index("ix_users_machine_group_id", "machine_group_id"),

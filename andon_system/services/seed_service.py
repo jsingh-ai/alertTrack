@@ -75,10 +75,11 @@ def seed_default_data():
         group_rows[machine["machine_type"]].is_active = True
 
     users = [
-        {"display_name": "Maintenance Tech 1", "username": "maint1", "role": "Maintenance", "department": "Maintenance", "machine_group": "Press", "work_id": "M-1001", "email": "maint1@example.com", "phone_number": "555-0101"},
-        {"display_name": "Maintenance Tech 2", "username": "maint2", "role": "Maintenance", "department": "Maintenance", "machine_group": "Extrusion", "work_id": "M-1002", "email": "maint2@example.com", "phone_number": "555-0102"},
-        {"display_name": "Quality Tech 1", "username": "qual1", "role": "Quality", "department": "Quality", "machine_group": "Slitter", "work_id": "Q-2001", "email": "qual1@example.com", "phone_number": "555-0201"},
-        {"display_name": "Material Handler 1", "username": "mat1", "role": "Materials", "department": "Materials", "machine_group": "Bag Machine", "work_id": "M-3001", "email": "mat1@example.com", "phone_number": "555-0301"},
+        {"display_name": "Maintenance Tech 1", "username": "maint1", "role": "Operator", "department": "Maintenance", "machine_group": "Press", "work_id": "M-1001", "email": "maint1@example.com", "phone_number": "555-0101"},
+        {"display_name": "Maintenance Tech 2", "username": "maint2", "role": "Operator", "department": "Maintenance", "machine_group": "Extrusion", "work_id": "M-1002", "email": "maint2@example.com", "phone_number": "555-0102"},
+        {"display_name": "Quality Tech 1", "username": "qual1", "role": "Operator", "department": "Quality", "machine_group": "Slitter", "work_id": "Q-2001", "email": "qual1@example.com", "phone_number": "555-0201"},
+        {"display_name": "Material Handler 1", "username": "mat1", "role": "Operator", "department": "Materials", "machine_group": "Bag Machine", "work_id": "M-3001", "email": "mat1@example.com", "phone_number": "555-0301"},
+        {"display_name": "Production Manager 1", "username": "mgr1", "role": "Manager", "department": "Production", "machine_group": "Press", "work_id": "P-5001", "email": "mgr1@example.com", "phone_number": "555-0501"},
         {"display_name": "Supervisor 1", "username": "sup1", "role": "Supervisor", "department": "Supervisor", "machine_group": "Press", "work_id": "S-4001", "email": "sup1@example.com", "phone_number": "555-0401"},
     ]
     for user in users:

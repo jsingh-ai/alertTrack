@@ -12,7 +12,7 @@ from ..models.escalation import EscalationRule
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
-from ..models.user import User
+from ..models.user import USER_ROLES, User
 from ..services.cache_service import invalidate_cache
 from ..services.realtime_service import emit_admin_metadata_updated
 
@@ -476,6 +476,7 @@ def create_user():
     company_id = _company_id()
     display_name = (request.form.get("display_name") or "").strip()
     work_id = (request.form.get("work_id") or "").strip() or None
+    role = (request.form.get("role") or USER_ROLES[0]).strip()
     machine_group_id = _int_or_none(request.form.get("machine_group_id"))
     department_id = _int_or_none(request.form.get("department_id"))
     if not display_name:
@@ -506,13 +507,18 @@ def create_user():
             return jsonify({"ok": False, "message": "Please select a department"}), 400
         flash("Please select a department", "warning")
         return redirect(url_for("pages.admin_page"))
+    if role not in USER_ROLES:
+        if _is_ajax_request():
+            return jsonify({"ok": False, "message": "Please select a valid role"}), 400
+        flash("Please select a valid role", "warning")
+        return redirect(url_for("pages.admin_page"))
 
     user = User(
         company_id=company_id,
         employee_id=work_id,
         display_name=display_name,
         username=None,
-        role="Staff",
+        role=role,
         email=request.form.get("email") or None,
         phone_number=request.form.get("phone_number") or None,
         department_id=department_id,
@@ -531,6 +537,7 @@ def create_user():
                 "work_id": user.employee_id,
                 "email": user.email,
                 "phone_number": user.phone_number,
+                "role": user.role,
                 "department_id": user.department_id,
                 "department_name": user.department.name if user.department else None,
                 "machine_group_id": user.machine_group_id,
@@ -550,6 +557,7 @@ def update_user(user_id):
         return _error_or_404("User not found")
     display_name = (request.form.get("display_name") or "").strip()
     work_id = (request.form.get("work_id") or "").strip() or None
+    role = (request.form.get("role") or user.role or USER_ROLES[0]).strip()
     machine_group_id = _int_or_none(request.form.get("machine_group_id"))
     department_id = _int_or_none(request.form.get("department_id"))
     email = (request.form.get("email") or "").strip() or None
@@ -583,9 +591,15 @@ def update_user(user_id):
             return jsonify({"ok": False, "message": "Please select a department"}), 400
         flash("Please select a department", "warning")
         return redirect(url_for("pages.admin_page"))
+    if role not in USER_ROLES:
+        if _is_ajax_request():
+            return jsonify({"ok": False, "message": "Please select a valid role"}), 400
+        flash("Please select a valid role", "warning")
+        return redirect(url_for("pages.admin_page"))
 
     user.display_name = display_name
     user.employee_id = work_id
+    user.role = role
     user.email = email
     user.phone_number = phone_number
     user.machine_group_id = machine_group.id
@@ -601,6 +615,7 @@ def update_user(user_id):
                 "work_id": user.employee_id,
                 "email": user.email,
                 "phone_number": user.phone_number,
+                "role": user.role,
                 "department_id": user.department_id,
                 "department_name": user.department.name if user.department else None,
                 "machine_group_id": user.machine_group_id,

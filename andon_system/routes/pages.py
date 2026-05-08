@@ -6,7 +6,7 @@ from ..models.escalation import EscalationRule
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
-from ..models.user import User
+from ..models.user import USER_ROLES, User
 from ..services.escalation_service import FIXED_ESCALATION_PHASES, ensure_fixed_escalation_rules
 
 pages_bp = Blueprint("pages", __name__)
@@ -111,5 +111,6 @@ def admin_page():
         issue_groups=issue_groups,
         escalation_rules=[escalation_rules_map[level] for level in sorted(escalation_rules_map.keys())],
         escalation_phase_labels=FIXED_ESCALATION_PHASES,
+        user_roles=USER_ROLES,
         current_company=company,
     )

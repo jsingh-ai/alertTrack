@@ -261,7 +261,7 @@
           <p class="text-secondary small mb-0">Users are linked to a machine group and a department. The dropdowns use the live records already in the database.</p>
         </div>
         <form class="row g-2 mb-3 js-ajax-form" method="post" action="{{ url_for('admin.create_user') }}" id="userCreateForm" data-kind="user-create">
-          <div class="col-md-3">
+          <div class="col-md-2">
             <label class="form-label">Work ID</label>
             <input class="form-control" name="work_id" placeholder="Work ID">
           </div>
@@ -276,6 +276,14 @@
           <div class="col-md-2">
             <label class="form-label">Phone</label>
             <input class="form-control" name="phone_number" placeholder="Phone number">
+          </div>
+          <div class="col-md-1">
+            <label class="form-label">Role</label>
+            <select class="form-select" name="role" id="userRoleSelect" required>
+              {% for role in user_roles %}
+                <option value="{{ role }}"{% if role == "Operator" %} selected{% endif %}>{{ role }}</option>
+              {% endfor %}
+            </select>
           </div>
           <div class="col-md-1">
             <label class="form-label">Group</label>
@@ -301,10 +309,10 @@
         </form>
         <div class="table-responsive">
           <table class="table table-sm table-dark table-striped align-middle">
-            <thead><tr><th>Work ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Group</th><th>Department</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Work ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Group</th><th>Department</th><th>Status</th><th></th></tr></thead>
             <tbody id="userTableBody">
               {% for user in users %}
-              <tr id="user-row-{{ user.id }}" data-user-id="{{ user.id }}" data-user-machine-group-id="{{ user.machine_group_id or '' }}" data-user-department-id="{{ user.department_id or '' }}">
+              <tr id="user-row-{{ user.id }}" data-user-id="{{ user.id }}" data-user-role="{{ user.role or '' }}" data-user-machine-group-id="{{ user.machine_group_id or '' }}" data-user-department-id="{{ user.department_id or '' }}">
                 <td>
                   <input class="form-control form-control-sm js-user-field" data-user-field="work_id" name="work_id" value="{{ user.employee_id or '' }}" placeholder="Work ID">
                 </td>
@@ -316,6 +324,13 @@
                 </td>
                 <td>
                   <input class="form-control form-control-sm js-user-field" data-user-field="phone_number" name="phone_number" value="{{ user.phone_number or '' }}" placeholder="Phone number">
+                </td>
+                <td>
+                  <select class="form-select form-select-sm js-user-field" data-user-field="role" name="role" required>
+                    {% for role in user_roles %}
+                      <option value="{{ role }}" {% if user.role == role %}selected{% endif %}>{{ role }}</option>
+                    {% endfor %}
+                  </select>
                 </td>
                 <td>
                   <select class="form-select form-select-sm js-user-field" data-user-field="machine_group_id" name="machine_group_id" required>
@@ -390,6 +405,7 @@
   const escalationRuleTableBody = document.getElementById("escalationRuleTableBody");
   const userTableBody = document.getElementById("userTableBody");
   const userCreateForm = document.getElementById("userCreateForm");
+  const userRoleSelect = document.getElementById("userRoleSelect");
   const userMachineGroupSelect = document.getElementById("userMachineGroupSelect");
   const userDepartmentSelect = document.getElementById("userDepartmentSelect");
   const machineGroupFilterChip = document.getElementById("machineGroupFilterChip");
@@ -406,7 +422,7 @@
   const adminDeleteModalConfirm = document.getElementById("adminDeleteModalConfirm");
   const adminDeleteModal = adminDeleteModalElement && window.bootstrap ? new bootstrap.Modal(adminDeleteModalElement) : null;
   let pendingDeleteForm = null;
-  if (!filter || !issueTableBody || !departmentTableBody || !issueForm || !machineGroupTableBody || !machineTableBody || !machineGroupSelect || !escalationRuleTableBody || !userTableBody || !userCreateForm || !userMachineGroupSelect || !userDepartmentSelect) return;
+  if (!filter || !issueTableBody || !departmentTableBody || !issueForm || !machineGroupTableBody || !machineTableBody || !machineGroupSelect || !escalationRuleTableBody || !userTableBody || !userCreateForm || !userRoleSelect || !userMachineGroupSelect || !userDepartmentSelect) return;
   function notifyAndonRefresh() {
     window.AndonRefreshBus?.notify();
   }
@@ -728,11 +744,16 @@
 
   function userRowHtml(user) {
     return `
-      <tr id="user-row-${user.id}" data-user-id="${user.id}" data-user-machine-group-id="${user.machine_group_id || ""}" data-user-department-id="${user.department_id || ""}">
+      <tr id="user-row-${user.id}" data-user-id="${user.id}" data-user-role="${escapeHtml(user.role || "")}" data-user-machine-group-id="${user.machine_group_id || ""}" data-user-department-id="${user.department_id || ""}">
         <td><input class="form-control form-control-sm js-user-field" data-user-field="work_id" name="work_id" value="${escapeHtml(user.work_id || "")}" placeholder="Work ID"></td>
         <td><input class="form-control form-control-sm js-user-field" data-user-field="display_name" name="display_name" value="${escapeHtml(user.display_name)}" placeholder="Display name" required></td>
         <td><input class="form-control form-control-sm js-user-field" data-user-field="email" name="email" type="email" value="${escapeHtml(user.email || "")}" placeholder="name@company.com"></td>
         <td><input class="form-control form-control-sm js-user-field" data-user-field="phone_number" name="phone_number" value="${escapeHtml(user.phone_number || "")}" placeholder="Phone number"></td>
+        <td>
+          <select class="form-select form-select-sm js-user-field" data-user-field="role" name="role" required>
+            ${buildUserSelectOptions(userRoleSelect, user.role)}
+          </select>
+        </td>
         <td>
           <select class="form-select form-select-sm js-user-field" data-user-field="machine_group_id" name="machine_group_id" required>
             ${buildUserSelectOptions(userMachineGroupSelect, user.machine_group_id)}
@@ -838,6 +859,7 @@
     row.querySelector('[name="display_name"]').value = user.display_name || "";
     row.querySelector('[name="email"]').value = user.email || "";
     row.querySelector('[name="phone_number"]').value = user.phone_number || "";
+    row.querySelector('[name="role"]').value = user.role || "";
     row.querySelector('[name="machine_group_id"]').value = user.machine_group_id || "";
     row.querySelector('[name="department_id"]').value = user.department_id || "";
     row.querySelector(".user-status").textContent = user.is_active ? "Active" : "Inactive";
@@ -871,6 +893,7 @@
     payload.append("display_name", row.querySelector('[name="display_name"]')?.value || "");
     payload.append("email", row.querySelector('[name="email"]')?.value || "");
     payload.append("phone_number", row.querySelector('[name="phone_number"]')?.value || "");
+    payload.append("role", row.querySelector('[name="role"]')?.value || "");
     payload.append("machine_group_id", row.querySelector('[name="machine_group_id"]')?.value || "");
     payload.append("department_id", row.querySelector('[name="department_id"]')?.value || "");
     const response = await fetch(`/andon/admin/user/${userId}/update`, {
@@ -1070,11 +1093,14 @@
         }
         notifyAndonRefresh();
       } else if (form.dataset.kind === "machine-create" && payload.machine) {
+        const selectedGroup = machineGroupSelect.value;
         appendMachineRow(payload.machine);
         if (payload.machine.machine_group) {
           bumpMachineGroupCount(payload.machine.machine_group, 1);
         }
         form.reset();
+        machineGroupSelect.value = selectedGroup;
+        applyMachineGroupFilter();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "escalation-update" && payload.rule) {
         updateEscalationRow(payload.rule);
@@ -1115,6 +1141,7 @@
       } else if (form.dataset.kind === "user-create" && payload.user) {
         appendUserRow(payload.user);
         form.reset();
+        userRoleSelect.value = "Operator";
         notifyAndonRefresh();
       } else if (form.dataset.kind === "user-toggle" && payload.user) {
         updateUserRow(payload.user);

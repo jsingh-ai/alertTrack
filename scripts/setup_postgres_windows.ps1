@@ -41,7 +41,7 @@ function Get-DotEnvValue {
         return $null
     }
 
-    foreach ($line in Get-Content $Path) {
+    foreach ($line in Get-Content -Encoding utf8 $Path) {
         if ($line -match "^\s*$([regex]::Escape($Key))\s*=\s*(.*)\s*$") {
             return $Matches[1].Trim().Trim('"').Trim("'")
         }
@@ -55,7 +55,7 @@ function Set-DotEnvValue {
     $lineValue = "$Key=`"$(Escape-DotEnvValue $Value)`""
 
     if (Test-Path $Path) {
-        $lines = Get-Content $Path
+        $lines = Get-Content -Encoding utf8 $Path
     } else {
         $lines = @()
     }
@@ -74,7 +74,7 @@ function Set-DotEnvValue {
         $newLines += $lineValue
     }
 
-    Set-Content -Path $Path -Value $newLines
+    Set-Content -Encoding utf8 -Path $Path -Value $newLines
 }
 
 Assert-SafeIdentifier -Value $DatabaseName -Name "DatabaseName"
@@ -107,6 +107,7 @@ $encodedPassword = [uri]::EscapeDataString($AppPassword)
 $env:DATABASE_URL = "postgresql+psycopg://${AppUser}:${encodedPassword}@${PostgresHost}:${PostgresPort}/${DatabaseName}"
 $env:HOST = "0.0.0.0"
 $env:PORT = "5001"
+$env:FLASK_CONFIG = "production"
 $env:SOCKETIO_ENABLED = "true"
 
 $envPath = Join-Path (Get-Location) ".env"
@@ -118,6 +119,7 @@ if (-not $existingSecret -or $existingSecret -eq "change-this-secret" -or $exist
 $env:SECRET_KEY = $existingSecret
 Set-DotEnvValue -Path $envPath -Key "DATABASE_URL" -Value $env:DATABASE_URL
 Set-DotEnvValue -Path $envPath -Key "SECRET_KEY" -Value $env:SECRET_KEY
+Set-DotEnvValue -Path $envPath -Key "FLASK_CONFIG" -Value $env:FLASK_CONFIG
 Set-DotEnvValue -Path $envPath -Key "SOCKETIO_ENABLED" -Value $env:SOCKETIO_ENABLED
 Set-DotEnvValue -Path $envPath -Key "HOST" -Value $env:HOST
 Set-DotEnvValue -Path $envPath -Key "PORT" -Value $env:PORT
