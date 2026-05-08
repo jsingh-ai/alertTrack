@@ -1,0 +1,1205 @@
+{% extends "andon/base.html" %}
+{% block content %}
+<div class="container-fluid">
+  {% set page_title = "Admin Setup" %}
+  {% set page_subtitle = "Maintain companies, departments, machine groups, users, and escalation rules." %}
+  {% include "andon/_page_header.html" %}
+  <div class="card andon-panel mb-4">
+    <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+      <div>
+        <p class="eyebrow mb-1">Tenant</p>
+        <h2 class="h4 mb-0">Company</h2>
+        <p class="text-secondary small mb-0">Pick the company you want to manage.</p>
+      </div>
+      {% if companies %}
+      <div class="d-flex flex-wrap gap-2">
+        {% for company in companies %}
+        <form method="post" action="{{ url_for('pages.select_company') }}">
+          <input type="hidden" name="company_slug" value="{{ company.slug }}">
+          <button
+            class="btn btn-sm {% if current_company and company.id == current_company.id %}btn-primary{% else %}btn-outline-light{% endif %}"
+            type="submit"
+          >
+            {{ company.name }}
+          </button>
+        </form>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="admin-section-shell mb-4">
+    <div class="d-flex flex-wrap gap-2 mb-3">
+      <button class="btn btn-light btn-sm admin-section-toggle is-active" type="button" data-admin-section-target="machine-groups">Machine Groups</button>
+      <button class="btn btn-light btn-sm admin-section-toggle" type="button" data-admin-section-target="departments">Departments</button>
+      <button class="btn btn-light btn-sm admin-section-toggle" type="button" data-admin-section-target="users">Users</button>
+      <button class="btn btn-light btn-sm admin-section-toggle" type="button" data-admin-section-target="escalation">Escalation Rules</button>
+    </div>
+  </div>
+
+  <div class="admin-section" data-admin-section="machine-groups">
+    <div class="card andon-panel mb-4">
+      <div class="card-body">
+        <div class="admin-section-header mb-3">
+          <p class="eyebrow mb-1">Configuration</p>
+          <h2 class="h4 mb-0">Machine Groups</h2>
+        </div>
+        <form class="row g-2 mb-3 js-ajax-form" method="post" action="{{ url_for('admin.create_machine_group') }}" data-kind="machine-group-create">
+          <div class="col-md-10"><input class="form-control" name="name" placeholder="Machine group name" required></div>
+          <div class="col-md-2"><button class="btn btn-primary w-100">Add</button></div>
+        </form>
+        <div class="table-responsive mb-4">
+          <table class="table table-sm table-dark table-striped align-middle">
+            <thead><tr><th>Group</th><th>Machines</th><th>Status</th><th></th></tr></thead>
+            <tbody id="machineGroupTableBody">
+              {% for group in machine_groups %}
+              <tr id="machine-group-row-{{ group.id }}" data-machine-group-id="{{ group.id }}" data-machine-group-name="{{ group.name }}">
+                <td>
+                  <div class="admin-filter-link fw-semibold mb-1" data-machine-group-filter="{{ group.name }}" role="button" tabindex="0" title="Click to filter machines">{{ group.name }}</div>
+                </td>
+                <td class="machine-group-count">{{ group.machine_count }}</td>
+                <td class="machine-group-status">{{ "Active" if group.is_active else "Inactive" }}</td>
+                <td class="text-end d-flex justify-content-end gap-2">
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.toggle_machine_group', group_id=group.id) }}" data-kind="machine-group-toggle">
+                    <button class="btn btn-sm btn-outline-light">Toggle</button>
+                  </form>
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.delete_machine_group', group_id=group.id) }}" data-kind="machine-group-delete">
+                    <button class="btn btn-sm btn-outline-danger">Remove</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="admin-filter-chip-shell mt-2 mb-3">
+          <div class="admin-filter-chip d-none" id="machineGroupFilterChip">
+            <span class="admin-filter-chip__label">Machine Group</span>
+            <span class="admin-filter-chip__value" id="machineGroupFilterChipValue">All</span>
+            <button class="admin-filter-chip__clear" type="button" id="clearMachineGroupFilter" aria-label="Clear machine group filter">×</button>
+          </div>
+        </div>
+        <h2 class="h4 mb-3">Machines</h2>
+        <form class="row g-2 mb-3 js-ajax-form" method="post" action="{{ url_for('admin.create_machine') }}" data-kind="machine-create">
+          <div class="col-md-5">
+            <label class="form-label">Group</label>
+            <select class="form-select" name="machine_group" id="machineGroupSelect" required>
+              <option value="">All</option>
+              {% for group in machine_groups %}
+                <option value="{{ group.name }}">{{ group.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-5">
+            <label class="form-label">Machine Name</label>
+            <input class="form-control" name="name" placeholder="Machine name" required>
+          </div>
+          <div class="col-md-2 d-flex align-items-end"><button class="btn btn-primary w-100">Add</button></div>
+        </form>
+        <div class="table-responsive">
+          <table class="table table-sm table-dark table-striped align-middle">
+            <thead><tr><th>Group</th><th>Name</th><th>Status</th><th></th></tr></thead>
+            <tbody id="machineTableBody">
+              {% for machine in machines %}
+              <tr id="machine-row-{{ machine.id }}" data-machine-id="{{ machine.id }}" data-machine-group="{{ machine.machine_type or '' }}">
+                <td class="machine-group">{{ machine.machine_type or "-" }}</td>
+                <td class="machine-name">{{ machine.name }}</td>
+                <td class="machine-status">{{ "Active" if machine.is_active else "Inactive" }}</td>
+                <td class="text-end d-flex justify-content-end gap-2">
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.toggle_machine', machine_id=machine.id) }}" data-kind="machine-toggle">
+                    <button class="btn btn-sm btn-outline-light">Toggle</button>
+                  </form>
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.delete_machine', machine_id=machine.id) }}" data-kind="machine-delete">
+                    <button class="btn btn-sm btn-outline-danger">Remove</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="admin-filter-chip-shell mt-2">
+          <div class="admin-filter-chip d-none" id="machineGroupFilterChip">
+            <span class="admin-filter-chip__label">Machine Group</span>
+            <span class="admin-filter-chip__value" id="machineGroupFilterChipValue">All</span>
+            <button class="admin-filter-chip__clear" type="button" id="clearMachineGroupFilter" aria-label="Clear machine group filter">×</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="admin-section d-none" data-admin-section="departments">
+    <div class="card andon-panel mb-4">
+      <div class="card-body">
+        <div class="admin-section-header mb-3">
+          <p class="eyebrow mb-1">Configuration</p>
+          <h2 class="h4 mb-0">Departments</h2>
+          <p class="text-secondary small mb-0">Departments act like the main groups. Issues belong to a department the same way machines belong to a machine group.</p>
+        </div>
+        <form class="row g-2 mb-3 js-ajax-form" method="post" action="{{ url_for('admin.create_department') }}" data-kind="department-create">
+          <div class="col-md-10"><input class="form-control" name="name" placeholder="Department name" required></div>
+          <div class="col-md-2"><button class="btn btn-primary w-100">Add</button></div>
+        </form>
+        <div class="table-responsive">
+          <table class="table table-sm table-dark table-striped align-middle">
+            <thead><tr><th>Name</th><th>Status</th><th></th></tr></thead>
+            <tbody id="departmentTableBody">
+              {% for department in departments %}
+              <tr id="department-row-{{ department.id }}" data-department-id="{{ department.id }}">
+                <td>
+                  <div class="admin-filter-link fw-semibold mb-1" data-department-filter="{{ department.id }}" role="button" tabindex="0" title="Click to filter issues">{{ department.name }}</div>
+                </td>
+                <td class="department-status">{{ "Active" if department.is_active else "Inactive" }}</td>
+                <td class="text-end d-flex justify-content-end gap-2">
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.toggle_department', department_id=department.id) }}" data-kind="department-toggle">
+                    <button class="btn btn-sm btn-outline-light">Toggle</button>
+                  </form>
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.delete_department', department_id=department.id) }}" data-kind="department-delete">
+                    <button class="btn btn-sm btn-outline-danger">Remove</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="admin-filter-chip-shell mt-2 mb-3">
+          <div class="admin-filter-chip d-none" id="departmentFilterChip">
+            <span class="admin-filter-chip__label">Department</span>
+            <span class="admin-filter-chip__value" id="departmentFilterChipValue">All</span>
+            <button class="admin-filter-chip__clear" type="button" id="clearDepartmentFilter" aria-label="Clear department filter">×</button>
+          </div>
+        </div>
+        <div class="admin-section-header mt-4 mb-3">
+          <p class="eyebrow mb-1">Department Children</p>
+          <h3 class="h5 mb-0">Issues</h3>
+          <p class="text-secondary small mb-0">Filter the issue list by department, or add a new issue to a department below.</p>
+        </div>
+        <form class="row g-2 mb-3 js-ajax-form" method="post" action="{{ url_for('admin.create_problem') }}" id="issueCreateForm" data-kind="issue-create">
+          <div class="col-md-4">
+            <label class="form-label">Department</label>
+            <select class="form-select" name="department_id" id="issueDepartmentSelect" required>
+              <option value="all">All</option>
+              {% for department in departments %}
+                <option value="{{ department.id }}">{{ department.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Issue Name</label>
+            <input class="form-control" name="name" placeholder="Issue name" required>
+          </div>
+          <div class="col-md-2 d-flex align-items-end">
+            <button class="btn btn-primary w-100">Add</button>
+          </div>
+        </form>
+        <div class="table-responsive">
+          <table class="table table-sm table-dark table-striped align-middle">
+            <thead><tr><th>Department</th><th>Issue</th><th>Status</th><th></th></tr></thead>
+            <tbody id="issueTableBody">
+              {% for group in issue_groups %}
+                {% for problem in group.problems %}
+              <tr id="issue-row-{{ problem.id }}" data-department-id="{{ group.department.id }}">
+                <td class="issue-department">{{ group.department.name }}</td>
+                <td>{{ problem.name }}</td>
+                <td class="issue-status">{{ "Active" if problem.is_active else "Inactive" }}</td>
+                <td class="text-end d-flex justify-content-end gap-2">
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.toggle_problem', problem_id=problem.id) }}" data-kind="issue-toggle">
+                    <button class="btn btn-sm btn-outline-light">Toggle</button>
+                  </form>
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.delete_problem', problem_id=problem.id) }}" data-kind="issue-delete">
+                    <button class="btn btn-sm btn-outline-danger">Remove</button>
+                  </form>
+                </td>
+              </tr>
+                {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="admin-section d-none" data-admin-section="escalation">
+    <div class="card andon-panel mb-4">
+      <div class="card-body">
+        <div class="admin-section-header mb-3">
+          <p class="eyebrow mb-1">Configuration</p>
+          <h2 class="h4 mb-0">Escalation Rules</h2>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-dark table-striped align-middle">
+            <thead><tr><th>Phase</th><th>Delay</th><th>Status</th><th></th></tr></thead>
+            <tbody id="escalationRuleTableBody">
+              {% for rule in escalation_rules %}
+              <tr id="escalation-row-{{ rule.level }}" data-escalation-level="{{ rule.level }}">
+                <td>{{ escalation_phase_labels[rule.level]["name"] if rule.level in escalation_phase_labels else rule.level }}</td>
+                <td>
+                  <form class="js-ajax-form d-flex gap-2 align-items-center" method="post" action="{{ url_for('admin.update_escalation_rule', rule_id=rule.id) }}" data-kind="escalation-update">
+                    <input class="form-control form-control-sm" name="delay_seconds" type="number" value="{{ rule.delay_seconds }}" min="1">
+                    <button class="btn btn-sm btn-outline-light" type="submit">Save</button>
+                  </form>
+                </td>
+                <td class="escalation-status">{{ "Active" if rule.is_active else "Inactive" }}</td>
+                <td class="text-end d-flex justify-content-end gap-2">
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.toggle_escalation_rule', rule_id=rule.id) }}" data-kind="escalation-toggle">
+                    <button class="btn btn-sm btn-outline-light">Toggle</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="admin-section d-none" data-admin-section="users">
+    <div class="card andon-panel mb-4">
+      <div class="card-body">
+        <div class="admin-section-header mb-3">
+          <p class="eyebrow mb-1">Configuration</p>
+          <h2 class="h4 mb-0">Users</h2>
+          <p class="text-secondary small mb-0">Users are linked to a machine group and a department. The dropdowns use the live records already in the database.</p>
+        </div>
+        <form class="row g-2 mb-3 js-ajax-form" method="post" action="{{ url_for('admin.create_user') }}" id="userCreateForm" data-kind="user-create">
+          <div class="col-md-3">
+            <label class="form-label">Work ID</label>
+            <input class="form-control" name="work_id" placeholder="Work ID">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Name</label>
+            <input class="form-control" name="display_name" placeholder="Display name" required>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Email</label>
+            <input class="form-control" name="email" type="email" placeholder="name@company.com">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Phone</label>
+            <input class="form-control" name="phone_number" placeholder="Phone number">
+          </div>
+          <div class="col-md-1">
+            <label class="form-label">Group</label>
+            <select class="form-select" name="machine_group_id" id="userMachineGroupSelect" required>
+              <option value="">Select</option>
+              {% for group in machine_groups %}
+                <option value="{{ group.id }}">{{ group.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-1">
+            <label class="form-label">Dept</label>
+            <select class="form-select" name="department_id" id="userDepartmentSelect" required>
+              <option value="">Select</option>
+              {% for department in departments %}
+                <option value="{{ department.id }}">{{ department.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-1 d-flex align-items-end">
+            <button class="btn btn-primary w-100">Add</button>
+          </div>
+        </form>
+        <div class="table-responsive">
+          <table class="table table-sm table-dark table-striped align-middle">
+            <thead><tr><th>Work ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Group</th><th>Department</th><th>Status</th><th></th></tr></thead>
+            <tbody id="userTableBody">
+              {% for user in users %}
+              <tr id="user-row-{{ user.id }}" data-user-id="{{ user.id }}" data-user-machine-group-id="{{ user.machine_group_id or '' }}" data-user-department-id="{{ user.department_id or '' }}">
+                <td>
+                  <input class="form-control form-control-sm js-user-field" data-user-field="work_id" name="work_id" value="{{ user.employee_id or '' }}" placeholder="Work ID">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm js-user-field" data-user-field="display_name" name="display_name" value="{{ user.display_name }}" placeholder="Display name" required>
+                </td>
+                <td>
+                  <input class="form-control form-control-sm js-user-field" data-user-field="email" name="email" type="email" value="{{ user.email or '' }}" placeholder="name@company.com">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm js-user-field" data-user-field="phone_number" name="phone_number" value="{{ user.phone_number or '' }}" placeholder="Phone number">
+                </td>
+                <td>
+                  <select class="form-select form-select-sm js-user-field" data-user-field="machine_group_id" name="machine_group_id" required>
+                    <option value="">Select</option>
+                    {% for group in machine_groups %}
+                      <option value="{{ group.id }}" {% if user.machine_group_id == group.id %}selected{% endif %}>{{ group.name }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+                <td>
+                  <select class="form-select form-select-sm js-user-field" data-user-field="department_id" name="department_id" required>
+                    <option value="">Select</option>
+                    {% for department in departments %}
+                      <option value="{{ department.id }}" {% if user.department_id == department.id %}selected{% endif %}>{{ department.name }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+                <td class="user-status">{{ "Active" if user.is_active else "Inactive" }}</td>
+                <td class="text-end d-flex justify-content-end gap-2">
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.toggle_user', user_id=user.id) }}" data-kind="user-toggle">
+                    <button class="btn btn-sm btn-outline-light">Toggle</button>
+                  </form>
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.delete_user', user_id=user.id) }}" data-kind="user-delete">
+                    <button class="btn btn-sm btn-outline-danger">Remove</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade admin-delete-modal" id="adminDeleteModal" tabindex="-1" aria-labelledby="adminDeleteModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-0 shadow-lg">
+      <div class="modal-header admin-delete-modal__header">
+        <div>
+          <p class="eyebrow mb-1">Confirm Delete</p>
+          <h5 class="modal-title mb-0" id="adminDeleteModalLabel">Remove item</h5>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="admin-delete-modal__badge mb-3">
+          <i class="bi bi-exclamation-triangle-fill"></i>
+        </div>
+        <p class="mb-2 text-secondary small">You are about to delete:</p>
+        <div class="admin-delete-modal__target" id="adminDeleteModalTarget">Item</div>
+        <p class="mt-3 mb-0" id="adminDeleteModalMessage"></p>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger" id="adminDeleteModalConfirm">Remove</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  const sectionButtons = document.querySelectorAll("[data-admin-section-target]");
+  const sections = document.querySelectorAll("[data-admin-section]");
+  const filter = document.getElementById("issueDepartmentSelect");
+  const issueTableBody = document.getElementById("issueTableBody");
+  const departmentTableBody = document.getElementById("departmentTableBody");
+  const machineGroupTableBody = document.getElementById("machineGroupTableBody");
+  const machineTableBody = document.getElementById("machineTableBody");
+  const machineGroupSelect = document.getElementById("machineGroupSelect");
+  const escalationRuleTableBody = document.getElementById("escalationRuleTableBody");
+  const userTableBody = document.getElementById("userTableBody");
+  const userCreateForm = document.getElementById("userCreateForm");
+  const userMachineGroupSelect = document.getElementById("userMachineGroupSelect");
+  const userDepartmentSelect = document.getElementById("userDepartmentSelect");
+  const machineGroupFilterChip = document.getElementById("machineGroupFilterChip");
+  const machineGroupFilterChipValue = document.getElementById("machineGroupFilterChipValue");
+  const clearMachineGroupFilter = document.getElementById("clearMachineGroupFilter");
+  const departmentFilterChip = document.getElementById("departmentFilterChip");
+  const departmentFilterChipValue = document.getElementById("departmentFilterChipValue");
+  const clearDepartmentFilter = document.getElementById("clearDepartmentFilter");
+  const issueForm = document.getElementById("issueCreateForm");
+  const adminDeleteModalElement = document.getElementById("adminDeleteModal");
+  const adminDeleteModalTitle = document.getElementById("adminDeleteModalLabel");
+  const adminDeleteModalTarget = document.getElementById("adminDeleteModalTarget");
+  const adminDeleteModalMessage = document.getElementById("adminDeleteModalMessage");
+  const adminDeleteModalConfirm = document.getElementById("adminDeleteModalConfirm");
+  const adminDeleteModal = adminDeleteModalElement && window.bootstrap ? new bootstrap.Modal(adminDeleteModalElement) : null;
+  let pendingDeleteForm = null;
+  if (!filter || !issueTableBody || !departmentTableBody || !issueForm || !machineGroupTableBody || !machineTableBody || !machineGroupSelect || !escalationRuleTableBody || !userTableBody || !userCreateForm || !userMachineGroupSelect || !userDepartmentSelect) return;
+  function notifyAndonRefresh() {
+    window.AndonRefreshBus?.notify();
+  }
+
+  function showAdminSection(sectionName) {
+    sections.forEach((section) => {
+      section.classList.toggle("d-none", section.dataset.adminSection !== sectionName);
+    });
+    sectionButtons.forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.adminSectionTarget === sectionName);
+    });
+    try {
+      window.localStorage.setItem("andon-admin-section", sectionName);
+    } catch (_error) {
+      // ignore storage failures in kiosk mode
+    }
+  }
+
+  function restoreAdminSection() {
+    let sectionName = "machine-groups";
+    try {
+      sectionName = window.localStorage.getItem("andon-admin-section") || sectionName;
+    } catch (_error) {
+      // ignore storage failures in kiosk mode
+    }
+    if (!sections || !sections.length) return;
+    if (!Array.from(sections).some((section) => section.dataset.adminSection === sectionName)) {
+      sectionName = "machine-groups";
+    }
+    showAdminSection(sectionName);
+  }
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function getDeletePrompt(form) {
+    const row = form.closest("tr");
+    const kind = form.dataset.kind || "";
+    const fallbackName = row?.querySelector("input[name='display_name'], .machine-name, .admin-filter-link, td")?.textContent?.trim() || "this item";
+    if (kind === "machine-group-delete") {
+      const name = row?.dataset.machineGroupName || fallbackName;
+      return {
+        title: "Remove Machine Group",
+        target: name,
+        message: `Removing ${name} will delete every machine in that group and any alerts tied to them.`,
+      };
+    }
+    if (kind === "machine-delete") {
+      const name = row?.querySelector(".machine-name")?.textContent?.trim() || fallbackName;
+      return {
+        title: "Remove Machine",
+        target: name,
+        message: `Removing ${name} will delete the machine and any linked alerts.`,
+      };
+    }
+    if (kind === "department-delete") {
+      const name = row?.querySelector("[data-department-filter]")?.textContent?.trim() || fallbackName;
+      return {
+        title: "Remove Department",
+        target: name,
+        message: `Removing ${name} will delete its issues and related setup.`,
+      };
+    }
+    if (kind === "issue-delete") {
+      const name = row?.querySelector("td:nth-child(2)")?.textContent?.trim() || fallbackName;
+      return {
+        title: "Remove Issue",
+        target: name,
+        message: `Removing ${name} will delete related alerts.`,
+      };
+    }
+    if (kind === "user-delete") {
+      const name = row?.querySelector('[name="display_name"]')?.value?.trim() || fallbackName;
+      return {
+        title: "Remove User",
+        target: name,
+        message: `Removing ${name} will remove the user record from this tenant.`,
+      };
+    }
+    return {
+      title: "Confirm Remove",
+      target: fallbackName,
+      message: "This action cannot be undone.",
+    };
+  }
+
+  function openDeleteModal(form) {
+    if (!adminDeleteModal || !adminDeleteModalTitle || !adminDeleteModalTarget || !adminDeleteModalMessage || !adminDeleteModalConfirm) {
+      return false;
+    }
+    const prompt = getDeletePrompt(form);
+    pendingDeleteForm = form;
+    adminDeleteModalTitle.textContent = prompt.title;
+    adminDeleteModalTarget.textContent = prompt.target;
+    adminDeleteModalMessage.textContent = prompt.message;
+    adminDeleteModal.show();
+    return true;
+  }
+
+  adminDeleteModalConfirm?.addEventListener("click", () => {
+    if (!pendingDeleteForm) return;
+    const form = pendingDeleteForm;
+    pendingDeleteForm = null;
+    if (adminDeleteModal) {
+      adminDeleteModal.hide();
+    }
+    form.dataset.skipDeleteConfirm = "true";
+    form.requestSubmit();
+  });
+
+  adminDeleteModalElement?.addEventListener("hidden.bs.modal", () => {
+    pendingDeleteForm = null;
+  });
+
+  function applyFilter() {
+    const selected = filter.value;
+    issueTableBody.querySelectorAll("tr[data-department-id]").forEach((row) => {
+      row.style.display = selected === "all" || row.dataset.departmentId === selected ? "" : "none";
+    });
+    updateDepartmentFilterChip();
+  }
+
+  function applyMachineGroupFilter() {
+    const selectedGroup = machineGroupSelect.value;
+    machineTableBody.querySelectorAll("tr[data-machine-group]").forEach((row) => {
+      const rowGroup = row.dataset.machineGroup || "";
+      row.style.display = !selectedGroup || rowGroup === selectedGroup ? "" : "none";
+    });
+    updateMachineGroupFilterChip();
+  }
+
+  function filterIssuesByDepartment(departmentId) {
+    filter.value = departmentId || "all";
+    applyFilter();
+    if (departmentId && departmentTableBody) {
+      const departmentRow = departmentTableBody.querySelector(`tr[data-department-id="${CSS.escape(String(departmentId))}"]`);
+      departmentRow?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }
+
+  function filterMachinesByGroup(groupName) {
+    machineGroupSelect.value = groupName || "";
+    applyMachineGroupFilter();
+    if (groupName && machineGroupTableBody) {
+      const groupRow = machineGroupTableBody.querySelector(`tr[data-machine-group-name="${CSS.escape(String(groupName))}"]`);
+      groupRow?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }
+
+  function updateDepartmentFilterChip() {
+    if (!departmentFilterChip || !departmentFilterChipValue) return;
+    const selectedId = filter.value || "all";
+    const selectedLabel = selectedId === "all"
+      ? "All"
+      : (Array.from(filter.options).find((option) => option.value === selectedId)?.textContent?.trim() || "Selected");
+    departmentFilterChipValue.textContent = selectedLabel;
+    departmentFilterChip.classList.toggle("d-none", selectedId === "all");
+  }
+
+  function updateMachineGroupFilterChip() {
+    if (!machineGroupFilterChip || !machineGroupFilterChipValue) return;
+    const selectedGroup = machineGroupSelect.value || "";
+    const selectedLabel = selectedGroup || "All";
+    machineGroupFilterChipValue.textContent = selectedLabel;
+    machineGroupFilterChip.classList.toggle("d-none", !selectedGroup);
+  }
+
+  function appendUserMachineGroupOption(group) {
+    document.querySelectorAll('select[name="machine_group_id"]').forEach((select) => {
+      if (Array.from(select.options).some((option) => option.value === String(group.id))) {
+        return;
+      }
+      const option = document.createElement("option");
+      option.value = String(group.id);
+      option.textContent = group.name;
+      select.appendChild(option);
+    });
+  }
+
+  function removeUserMachineGroupOption(groupId) {
+    document.querySelectorAll('select[name="machine_group_id"]').forEach((select) => {
+      const option = select.querySelector(`option[value="${groupId}"]`);
+      if (option) {
+        option.remove();
+      }
+    });
+  }
+
+  function appendUserDepartmentOption(department) {
+    document.querySelectorAll('select[name="department_id"]').forEach((select) => {
+      if (Array.from(select.options).some((option) => option.value === String(department.id))) {
+        return;
+      }
+      const option = document.createElement("option");
+      option.value = String(department.id);
+      option.textContent = department.name;
+      select.appendChild(option);
+    });
+  }
+
+  function removeUserDepartmentOption(departmentId) {
+    document.querySelectorAll('select[name="department_id"]').forEach((select) => {
+      const option = select.querySelector(`option[value="${departmentId}"]`);
+      if (option) {
+        option.remove();
+      }
+    });
+  }
+
+  function buildUserSelectOptions(selectElement, selectedValue) {
+    return Array.from(selectElement.options)
+      .map((option) => {
+        if (!option.value) {
+          return '<option value="">Select</option>';
+        }
+        const selected = String(option.value) === String(selectedValue || "") ? " selected" : "";
+        return `<option value="${escapeHtml(option.value)}"${selected}>${escapeHtml(option.textContent.trim())}</option>`;
+      })
+      .join("");
+  }
+
+  function syncIssueDepartmentOptions() {
+    const existing = new Set(Array.from(filter.options).map((option) => option.value));
+    departmentTableBody.querySelectorAll("tr[data-department-id]").forEach((row) => {
+      const id = row.dataset.departmentId;
+      const name = row.querySelector("[data-department-filter]")?.textContent?.trim() || row.children[0].textContent.trim();
+      if (!existing.has(id)) {
+        const option = document.createElement("option");
+        option.value = id;
+        option.textContent = name;
+        filter.appendChild(option);
+        existing.add(id);
+      }
+    });
+  }
+
+  function setDepartmentFilterValue(value) {
+    filter.value = value;
+    applyFilter();
+  }
+
+  function issueRowHtml(problem) {
+    return `
+      <tr id="issue-row-${problem.id}" data-department-id="${problem.department_id}">
+        <td class="issue-department">
+          <div class="admin-filter-link fw-semibold" data-department-filter="${problem.department_id}" role="button" tabindex="0" title="Click to filter issues">${escapeHtml(problem.department_name)}</div>
+        </td>
+        <td>${escapeHtml(problem.name)}</td>
+        <td class="issue-status">${problem.is_active ? "Active" : "Inactive"}</td>
+        <td class="text-end d-flex justify-content-end gap-2">
+          <form class="js-ajax-form" method="post" action="/andon/admin/problem/${problem.id}/toggle" data-kind="issue-toggle">
+            <button class="btn btn-sm btn-outline-light">Toggle</button>
+          </form>
+          <form class="js-ajax-form" method="post" action="/andon/admin/problem/${problem.id}/delete" data-kind="issue-delete">
+            <button class="btn btn-sm btn-outline-danger">Remove</button>
+          </form>
+        </td>
+      </tr>`;
+  }
+
+  function departmentRowHtml(department) {
+    return `
+      <tr id="department-row-${department.id}" data-department-id="${department.id}">
+        <td>
+          <div class="admin-filter-link fw-semibold mb-1" data-department-filter="${department.id}" role="button" tabindex="0" title="Click to filter issues">${escapeHtml(department.name)}</div>
+        </td>
+        <td class="department-status">${department.is_active ? "Active" : "Inactive"}</td>
+        <td class="text-end d-flex justify-content-end gap-2">
+          <form class="js-ajax-form" method="post" action="/andon/admin/department/${department.id}/toggle" data-kind="department-toggle">
+            <button class="btn btn-sm btn-outline-light">Toggle</button>
+          </form>
+          <form class="js-ajax-form" method="post" action="/andon/admin/department/${department.id}/delete" data-kind="department-delete">
+            <button class="btn btn-sm btn-outline-danger">Remove</button>
+          </form>
+        </td>
+      </tr>`;
+  }
+
+  function machineGroupRowHtml(group) {
+    return `
+      <tr id="machine-group-row-${group.id}" data-machine-group-id="${group.id}" data-machine-group-name="${escapeHtml(group.name)}">
+        <td>
+          <div class="admin-filter-link fw-semibold mb-1" data-machine-group-filter="${escapeHtml(group.name)}" role="button" tabindex="0" title="Click to filter machines">${escapeHtml(group.name)}</div>
+        </td>
+        <td class="machine-group-count">${Number(group.machine_count || 0)}</td>
+        <td class="machine-group-status">${group.is_active ? "Active" : "Inactive"}</td>
+        <td class="text-end d-flex justify-content-end gap-2">
+          <form class="js-ajax-form" method="post" action="/andon/admin/machine-group/${group.id}/toggle" data-kind="machine-group-toggle">
+            <button class="btn btn-sm btn-outline-light">Toggle</button>
+          </form>
+          <form class="js-ajax-form" method="post" action="/andon/admin/machine-group/${group.id}/delete" data-kind="machine-group-delete">
+            <button class="btn btn-sm btn-outline-danger">Remove</button>
+          </form>
+        </td>
+      </tr>`;
+  }
+
+  function machineRowHtml(machine) {
+    return `
+      <tr id="machine-row-${machine.id}" data-machine-id="${machine.id}" data-machine-group="${escapeHtml(machine.machine_group || machine.machine_type || "")}">
+        <td class="machine-group">${escapeHtml(machine.machine_group || machine.machine_type || "-")}</td>
+        <td class="machine-name">${escapeHtml(machine.name)}</td>
+        <td class="machine-status">${machine.is_active ? "Active" : "Inactive"}</td>
+        <td class="text-end d-flex justify-content-end gap-2">
+          <form class="js-ajax-form" method="post" action="/andon/admin/machine/${machine.id}/toggle" data-kind="machine-toggle">
+            <button class="btn btn-sm btn-outline-light">Toggle</button>
+          </form>
+          <form class="js-ajax-form" method="post" action="/andon/admin/machine/${machine.id}/delete" data-kind="machine-delete">
+            <button class="btn btn-sm btn-outline-danger">Remove</button>
+          </form>
+        </td>
+      </tr>`;
+  }
+
+  function userRowHtml(user) {
+    return `
+      <tr id="user-row-${user.id}" data-user-id="${user.id}" data-user-machine-group-id="${user.machine_group_id || ""}" data-user-department-id="${user.department_id || ""}">
+        <td><input class="form-control form-control-sm js-user-field" data-user-field="work_id" name="work_id" value="${escapeHtml(user.work_id || "")}" placeholder="Work ID"></td>
+        <td><input class="form-control form-control-sm js-user-field" data-user-field="display_name" name="display_name" value="${escapeHtml(user.display_name)}" placeholder="Display name" required></td>
+        <td><input class="form-control form-control-sm js-user-field" data-user-field="email" name="email" type="email" value="${escapeHtml(user.email || "")}" placeholder="name@company.com"></td>
+        <td><input class="form-control form-control-sm js-user-field" data-user-field="phone_number" name="phone_number" value="${escapeHtml(user.phone_number || "")}" placeholder="Phone number"></td>
+        <td>
+          <select class="form-select form-select-sm js-user-field" data-user-field="machine_group_id" name="machine_group_id" required>
+            ${buildUserSelectOptions(userMachineGroupSelect, user.machine_group_id)}
+          </select>
+        </td>
+        <td>
+          <select class="form-select form-select-sm js-user-field" data-user-field="department_id" name="department_id" required>
+            ${buildUserSelectOptions(userDepartmentSelect, user.department_id)}
+          </select>
+        </td>
+        <td class="user-status">${user.is_active ? "Active" : "Inactive"}</td>
+        <td class="text-end d-flex justify-content-end gap-2">
+          <form class="js-ajax-form" method="post" action="/andon/admin/user/${user.id}/toggle" data-kind="user-toggle">
+            <button class="btn btn-sm btn-outline-light">Toggle</button>
+          </form>
+          <form class="js-ajax-form" method="post" action="/andon/admin/user/${user.id}/delete" data-kind="user-delete">
+            <button class="btn btn-sm btn-outline-danger">Remove</button>
+          </form>
+        </td>
+      </tr>`;
+  }
+
+  function appendDepartmentOption(department) {
+    if (Array.from(filter.options).some((option) => option.value === String(department.id))) {
+      return;
+    }
+    const option = document.createElement("option");
+    option.value = String(department.id);
+    option.textContent = department.name;
+    filter.appendChild(option);
+  }
+
+  function removeDepartmentOption(departmentId) {
+    const option = filter.querySelector(`option[value="${departmentId}"]`);
+    if (option) {
+      option.remove();
+    }
+  }
+
+  function appendMachineGroupOption(group) {
+    if (Array.from(machineGroupSelect.options).some((option) => option.value === group.name)) {
+      return;
+    }
+    const option = document.createElement("option");
+    option.value = group.name;
+    option.textContent = group.name;
+    machineGroupSelect.appendChild(option);
+  }
+
+  function removeMachineGroupOption(groupName) {
+    const option = machineGroupSelect.querySelector(`option[value="${CSS.escape(groupName)}"]`);
+    if (option) {
+      option.remove();
+    }
+  }
+
+  function bumpMachineGroupCount(groupName, delta) {
+    const row = Array.from(machineGroupTableBody.querySelectorAll("tr[data-machine-group-name]"))
+      .find((item) => item.dataset.machineGroupName === groupName);
+    if (!row) return;
+    const countCell = row.querySelector(".machine-group-count");
+    const current = Number(countCell.textContent || 0);
+    countCell.textContent = String(Math.max(0, current + delta));
+  }
+
+  function removeMachineGroupRow(groupId) {
+    document.getElementById(`machine-group-row-${groupId}`)?.remove();
+  }
+
+  function removeMachinesForGroup(groupName) {
+    machineTableBody.querySelectorAll(`tr[data-machine-group="${CSS.escape(groupName)}"]`).forEach((row) => row.remove());
+  }
+
+  function removeMachinesByIds(machineIds) {
+    (machineIds || []).forEach((machineId) => {
+      document.getElementById(`machine-row-${machineId}`)?.remove();
+    });
+  }
+
+  function appendMachineRow(machine) {
+    machineTableBody.insertAdjacentHTML("beforeend", machineRowHtml(machine));
+  }
+
+  function updateMachineRow(machine) {
+    const row = document.getElementById(`machine-row-${machine.id}`);
+    if (!row) return;
+    row.dataset.machineGroup = machine.machine_group || machine.machine_type || "";
+    row.querySelector(".machine-name").textContent = machine.name;
+    row.querySelector(".machine-group").textContent = machine.machine_group || machine.machine_type || "-";
+    row.querySelector(".machine-status").textContent = machine.is_active ? "Active" : "Inactive";
+  }
+
+  function appendUserRow(user) {
+    userTableBody.insertAdjacentHTML("beforeend", userRowHtml(user));
+  }
+
+  function updateUserRow(user) {
+    const row = document.getElementById(`user-row-${user.id}`);
+    if (!row) return;
+    row.dataset.userMachineGroupId = user.machine_group_id || "";
+    row.dataset.userDepartmentId = user.department_id || "";
+    row.querySelector('[name="work_id"]').value = user.work_id || "";
+    row.querySelector('[name="display_name"]').value = user.display_name || "";
+    row.querySelector('[name="email"]').value = user.email || "";
+    row.querySelector('[name="phone_number"]').value = user.phone_number || "";
+    row.querySelector('[name="machine_group_id"]').value = user.machine_group_id || "";
+    row.querySelector('[name="department_id"]').value = user.department_id || "";
+    row.querySelector(".user-status").textContent = user.is_active ? "Active" : "Inactive";
+  }
+
+  function clearUserDepartmentById(departmentId) {
+    userTableBody.querySelectorAll(`tr[data-user-department-id="${departmentId}"]`).forEach((row) => {
+      row.dataset.userDepartmentId = "";
+      const select = row.querySelector('[name="department_id"]');
+      if (select) {
+        select.value = "";
+      }
+    });
+  }
+
+  function clearUserMachineGroupById(groupId) {
+    userTableBody.querySelectorAll(`tr[data-user-machine-group-id="${groupId}"]`).forEach((row) => {
+      row.dataset.userMachineGroupId = "";
+      const select = row.querySelector('[name="machine_group_id"]');
+      if (select) {
+        select.value = "";
+      }
+    });
+  }
+
+  async function submitUserUpdate(row) {
+    const userId = row.dataset.userId;
+    if (!userId) return;
+    const payload = new FormData();
+    payload.append("work_id", row.querySelector('[name="work_id"]')?.value || "");
+    payload.append("display_name", row.querySelector('[name="display_name"]')?.value || "");
+    payload.append("email", row.querySelector('[name="email"]')?.value || "");
+    payload.append("phone_number", row.querySelector('[name="phone_number"]')?.value || "");
+    payload.append("machine_group_id", row.querySelector('[name="machine_group_id"]')?.value || "");
+    payload.append("department_id", row.querySelector('[name="department_id"]')?.value || "");
+    const response = await fetch(`/andon/admin/user/${userId}/update`, {
+      method: "POST",
+      body: payload,
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "application/json",
+      },
+      credentials: "same-origin",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.message || "Request failed");
+    }
+    if (data.user) {
+      updateUserRow(data.user);
+    }
+  }
+
+  function removeMachineRow(machineId) {
+    document.getElementById(`machine-row-${machineId}`)?.remove();
+  }
+
+  function updateEscalationRow(rule) {
+    const row = document.getElementById(`escalation-row-${rule.level}`);
+    if (!row) return;
+    const input = row.querySelector('input[name="delay_seconds"]');
+    if (input) {
+      input.value = String(rule.delay_seconds ?? "");
+    }
+    row.querySelector(".escalation-status").textContent = rule.is_active ? "Active" : "Inactive";
+  }
+
+  function updateMachinesForGroup(groupName, isActive) {
+    machineTableBody.querySelectorAll(`tr[data-machine-group="${CSS.escape(groupName)}"]`).forEach((row) => {
+      row.querySelector(".machine-status").textContent = isActive ? "Active" : "Inactive";
+    });
+  }
+
+  function appendIssueRow(problem) {
+    issueTableBody.insertAdjacentHTML("beforeend", issueRowHtml(problem));
+    applyFilter();
+  }
+
+  function updateIssueRow(problem) {
+    const row = document.getElementById(`issue-row-${problem.id}`);
+    if (!row) return;
+    row.dataset.departmentId = String(problem.department_id ?? "");
+    row.querySelector(".issue-department").textContent = problem.department_name || "";
+    row.querySelector(".issue-status").textContent = problem.is_active ? "Active" : "Inactive";
+    applyFilter();
+  }
+
+  function removeIssueRowsForDepartment(departmentId) {
+    issueTableBody.querySelectorAll(`tr[data-department-id="${departmentId}"]`).forEach((row) => row.remove());
+  }
+
+  async function submitAjaxForm(form) {
+    const response = await fetch(form.action, {
+      method: form.method || "POST",
+      body: new FormData(form),
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "application/json",
+      },
+      credentials: "same-origin",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.message || "Request failed");
+    }
+    return payload;
+  }
+
+  document.addEventListener("submit", async (event) => {
+    const form = event.target.closest("form.js-ajax-form");
+    if (!form) return;
+    if (form.dataset.kind?.endsWith("-delete") && form.dataset.skipDeleteConfirm !== "true") {
+      event.preventDefault();
+      openDeleteModal(form);
+      return;
+    }
+    if (form.dataset.skipDeleteConfirm === "true") {
+      delete form.dataset.skipDeleteConfirm;
+    }
+    event.preventDefault();
+    try {
+      const payload = await submitAjaxForm(form);
+      if (form.dataset.kind === "department-create" && payload.department) {
+        departmentTableBody.insertAdjacentHTML("beforeend", departmentRowHtml(payload.department));
+        appendDepartmentOption(payload.department);
+        appendUserDepartmentOption(payload.department);
+        form.reset();
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "department-toggle" && payload.department) {
+        const row = document.getElementById(`department-row-${payload.department.id}`);
+        if (row) {
+          row.querySelector(".department-status").textContent = payload.department.is_active ? "Active" : "Inactive";
+        }
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "department-update" && payload.department) {
+        const row = document.getElementById(`department-row-${payload.department.id}`);
+        if (row) {
+          row.dataset.departmentId = String(payload.department.id);
+          row.querySelector(".admin-filter-link")?.setAttribute("data-department-filter", String(payload.department.id));
+          row.querySelector(".admin-filter-link").textContent = payload.department.name;
+          row.querySelector(".department-status").textContent = payload.department.is_active ? "Active" : "Inactive";
+        }
+        issueTableBody.querySelectorAll(`tr[data-department-id="${payload.department.id}"] .admin-filter-link`).forEach((cell) => {
+          cell.textContent = payload.department.name;
+        });
+        document.querySelectorAll(`#issueDepartmentSelect option[value="${payload.department.id}"]`).forEach((option) => {
+          option.textContent = payload.department.name;
+        });
+        document.querySelectorAll('select[name="department_id"] option[value]').forEach((option) => {
+          if (String(option.value) === String(payload.department.id)) {
+            option.textContent = payload.department.name;
+          }
+        });
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "department-delete") {
+        const row = form.closest("tr");
+        const departmentId = row?.dataset.departmentId || payload.department_id;
+        if (departmentId) {
+          document.getElementById(`department-row-${departmentId}`)?.remove();
+          removeIssueRowsForDepartment(String(departmentId));
+          removeDepartmentOption(String(departmentId));
+          removeUserDepartmentOption(String(departmentId));
+          clearUserDepartmentById(String(departmentId));
+          if (filter.value === String(departmentId)) {
+            setDepartmentFilterValue("all");
+          } else {
+            applyFilter();
+          }
+          notifyAndonRefresh();
+        }
+      } else if (form.dataset.kind === "machine-group-create" && payload.machine_group) {
+        machineGroupTableBody.insertAdjacentHTML("beforeend", machineGroupRowHtml(payload.machine_group));
+        appendMachineGroupOption(payload.machine_group);
+        appendUserMachineGroupOption(payload.machine_group);
+        form.reset();
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "machine-group-toggle" && payload.machine_group) {
+        const row = document.getElementById(`machine-group-row-${payload.machine_group.id}`);
+        if (row) {
+          row.querySelector(".machine-group-count").textContent = String(payload.machine_group.machine_count ?? 0);
+          row.querySelector(".machine-group-status").textContent = payload.machine_group.is_active ? "Active" : "Inactive";
+        }
+        updateMachinesForGroup(payload.machine_group.name, payload.machine_group.is_active);
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "machine-group-update" && payload.machine_group) {
+        const row = document.getElementById(`machine-group-row-${payload.machine_group.id}`);
+        if (row) {
+          const oldName = row.dataset.machineGroupName || payload.machine_group.old_name || payload.machine_group.name;
+          row.dataset.machineGroupName = payload.machine_group.name;
+          const link = row.querySelector(".admin-filter-link");
+          if (link) {
+            link.setAttribute("data-machine-group-filter", payload.machine_group.name);
+            link.textContent = payload.machine_group.name;
+          }
+          row.querySelector(".machine-group-count").textContent = String(payload.machine_group.machine_count ?? 0);
+          row.querySelector(".machine-group-status").textContent = payload.machine_group.is_active ? "Active" : "Inactive";
+          machineTableBody.querySelectorAll(`tr[data-machine-group="${CSS.escape(oldName)}"]`).forEach((machineRow) => {
+            machineRow.dataset.machineGroup = payload.machine_group.name;
+            machineRow.querySelector(".machine-group").textContent = payload.machine_group.name;
+          });
+          const machineGroupOption = machineGroupSelect.querySelector(`option[value="${CSS.escape(oldName)}"]`);
+          if (machineGroupOption) {
+            machineGroupOption.value = payload.machine_group.name;
+            machineGroupOption.textContent = payload.machine_group.name;
+          }
+          document.querySelectorAll('select[name="machine_group_id"] option').forEach((option) => {
+            if (String(option.value) === String(payload.machine_group.id)) {
+              option.textContent = payload.machine_group.name;
+            }
+          });
+        }
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "machine-group-delete") {
+        const row = form.closest("tr");
+        const groupId = row?.dataset.machineGroupId || payload.machine_group_id;
+        const groupName = row?.dataset.machineGroupName;
+        if (groupId) {
+          removeMachineGroupRow(groupId);
+        }
+        removeMachinesByIds(payload.affected_machine_ids);
+        removeUserMachineGroupOption(groupId);
+        clearUserMachineGroupById(String(groupId));
+        if (groupName) {
+          removeMachineGroupOption(groupName);
+          removeMachinesForGroup(groupName);
+        }
+        if (machineGroupSelect.value === groupName) {
+          machineGroupSelect.value = "";
+          applyMachineGroupFilter();
+        }
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "machine-create" && payload.machine) {
+        appendMachineRow(payload.machine);
+        if (payload.machine.machine_group) {
+          bumpMachineGroupCount(payload.machine.machine_group, 1);
+        }
+        form.reset();
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "escalation-update" && payload.rule) {
+        updateEscalationRow(payload.rule);
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "escalation-toggle" && payload.rule) {
+        updateEscalationRow(payload.rule);
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "machine-toggle" && payload.machine) {
+        updateMachineRow(payload.machine);
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "machine-delete") {
+        const row = form.closest("tr");
+        const machineId = row?.dataset.machineId || payload.machine_id;
+        const machineGroup = row?.dataset.machineGroup || payload.machine_group;
+        if (machineId) {
+          removeMachineRow(machineId);
+        }
+        if (machineGroup) {
+          bumpMachineGroupCount(machineGroup, -1);
+        }
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "issue-create" && payload.problem) {
+        appendIssueRow(payload.problem);
+        const nameInput = form.querySelector('input[name="name"]');
+        if (nameInput) {
+          nameInput.value = "";
+          nameInput.focus();
+        }
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "issue-toggle" && payload.problem) {
+        updateIssueRow(payload.problem);
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "issue-delete") {
+        const row = form.closest("tr");
+        row?.remove();
+        applyFilter();
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "user-create" && payload.user) {
+        appendUserRow(payload.user);
+        form.reset();
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "user-toggle" && payload.user) {
+        updateUserRow(payload.user);
+        notifyAndonRefresh();
+      } else if (form.dataset.kind === "user-delete") {
+        const row = form.closest("tr");
+        const userId = row?.dataset.userId || payload.user_id;
+        if (userId) {
+          document.getElementById(`user-row-${userId}`)?.remove();
+        }
+        notifyAndonRefresh();
+      }
+    } catch (error) {
+      alert(error.message || "Request failed");
+    }
+  });
+
+  departmentTableBody.addEventListener("click", (event) => {
+    const cell = event.target.closest("[data-department-filter]");
+    if (!cell) return;
+    filterIssuesByDepartment(cell.dataset.departmentFilter);
+  });
+
+  issueTableBody.addEventListener("click", (event) => {
+    const cell = event.target.closest("[data-department-filter]");
+    if (!cell) return;
+    filterIssuesByDepartment(cell.dataset.departmentFilter);
+  });
+
+  machineGroupTableBody.addEventListener("click", (event) => {
+    const cell = event.target.closest("[data-machine-group-filter]");
+    if (!cell) return;
+    filterMachinesByGroup(cell.dataset.machineGroupFilter);
+  });
+
+  userTableBody.addEventListener("change", async (event) => {
+    const field = event.target.closest(".js-user-field");
+    if (!field) return;
+    const row = field.closest("tr[data-user-id]");
+    if (!row) return;
+    try {
+      await submitUserUpdate(row);
+      notifyAndonRefresh();
+    } catch (error) {
+      alert(error.message || "Request failed");
+    }
+  });
+
+  filter.addEventListener("change", applyFilter);
+  machineGroupSelect.addEventListener("change", applyMachineGroupFilter);
+  clearDepartmentFilter?.addEventListener("click", () => {
+    filter.value = "all";
+    applyFilter();
+  });
+  clearMachineGroupFilter?.addEventListener("click", () => {
+    machineGroupSelect.value = "";
+    applyMachineGroupFilter();
+  });
+  sectionButtons.forEach((button) => {
+    button.addEventListener("click", () => showAdminSection(button.dataset.adminSectionTarget));
+  });
+  syncIssueDepartmentOptions();
+  Array.from(departmentTableBody.querySelectorAll("tr[data-department-id]")).forEach((row) => {
+    const id = row.dataset.departmentId;
+    const name = row.querySelector("[data-department-filter]")?.textContent?.trim() || "";
+    if (id && name) {
+      appendUserDepartmentOption({ id, name });
+    }
+  });
+  Array.from(machineGroupTableBody.querySelectorAll("tr[data-machine-group-id]")).forEach((row) => {
+    const id = row.dataset.machineGroupId;
+    const name = row.querySelector("[data-machine-group-filter]")?.textContent?.trim() || "";
+    if (id && name) {
+      appendUserMachineGroupOption({ id, name });
+    }
+  });
+  restoreAdminSection();
+  applyFilter();
+  applyMachineGroupFilter();
+})();
+</script>
+{% endblock %}

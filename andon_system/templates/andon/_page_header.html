@@ -1,0 +1,16 @@
+<div class="andon-page-header">
+  <div class="andon-page-header__eyebrow">ProcessGuard AI - Five Star Management</div>
+  <div class="andon-page-header__top">
+    <div class="andon-page-header__title-wrap">
+      <h1 class="andon-page-header__title">{{ page_title }}</h1>
+      {% if page_subtitle %}
+        <p class="andon-page-header__subtitle">{{ page_subtitle }}</p>
+      {% endif %}
+    </div>
+    {% if page_action_html %}
+      <div class="andon-page-header__action">
+        {{ page_action_html | safe }}
+      </div>
+    {% endif %}
+  </div>
+</div>

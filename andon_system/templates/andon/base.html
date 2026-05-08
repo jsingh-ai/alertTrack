@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ app_name }}</title>
+  <script>
+    (function () {
+      const themeKey = "processguard-theme";
+      const sidebarKey = "processguard-sidebar";
+      const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const theme = localStorage.getItem(themeKey) || (prefersDark ? "dark" : "light");
+      const sidebar = localStorage.getItem(sidebarKey) || (window.innerWidth >= 992 ? "expanded" : "collapsed");
+      document.documentElement.dataset.theme = theme;
+      document.documentElement.dataset.sidebar = sidebar;
+      document.documentElement.dataset.sidebarOpen = window.innerWidth >= 992 ? "true" : "false";
+    })();
+  </script>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="{{ url_for('static', filename='andon/css/andon.css') }}" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
+</head>
+<body class="andon-shell {% block body_class %}{% endblock %}">
+  <div class="app-shell">
+    <aside class="app-sidebar" id="appSidebar" aria-label="Primary">
+      <div class="app-sidebar__inner">
+        <div class="app-sidebar__brand-row">
+          <a class="app-sidebar__brand" href="{{ url_for('pages.landing_page') }}">
+            <span class="app-sidebar__mark">PG</span>
+            <span class="app-sidebar__brand-copy">
+              <span class="app-sidebar__brand-name">{{ app_brand }}</span>
+              <span class="app-sidebar__brand-subtitle">{{ app_subtitle }}</span>
+            </span>
+          </a>
+          <button class="app-sidebar__toggle d-none d-lg-inline-flex" type="button" id="sidebarCollapseBtn" aria-label="Collapse sidebar">
+            <i class="bi bi-chevron-left" id="sidebarCollapseIcon"></i>
+          </button>
+        </div>
+
+        <button class="btn btn-outline-light btn-sm app-sidebar__mobile-close d-lg-none" type="button" id="sidebarMobileClose">
+          Close menu
+        </button>
+
+        <nav class="app-nav">
+          {% set nav_items = [
+            ("pages.landing_page", "Overview", "bi-house-door"),
+            ("pages.operator_page", "Operator", "bi-bell"),
+            ("pages.board_page", "Board", "bi-display"),
+            ("pages.reports_page", "Reports", "bi-graph-up"),
+            ("pages.admin_page", "Admin", "bi-gear"),
+          ] %}
+          {% for endpoint, label, icon in nav_items %}
+            <a
+              class="app-nav__link {% if request.endpoint == endpoint %}is-active{% endif %}"
+              href="{{ url_for(endpoint) }}"
+              data-nav-link
+            >
+              <i class="bi {{ icon }}"></i>
+              <span class="app-nav__label">{{ label }}</span>
+            </a>
+          {% endfor %}
+        </nav>
+
+        <div class="app-sidebar__footer">
+          <div class="app-sidebar__meta">
+            <div class="app-sidebar__meta-label">Live System</div>
+            <div class="app-sidebar__meta-value">{{ current_company.name if current_company else "No company selected" }}</div>
+          </div>
+          <button class="btn btn-light app-theme-toggle" type="button" id="themeToggleBtn">
+            <i class="bi bi-moon-stars" id="themeToggleIcon"></i>
+            <span class="app-theme-toggle__label">Theme</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="app-content">
+      <header class="app-mobile-bar d-lg-none">
+        <button class="btn btn-outline-light app-mobile-bar__btn" type="button" id="sidebarMobileOpen">
+          <i class="bi bi-list"></i>
+          <span>Menu</span>
+        </button>
+        <div class="app-mobile-bar__brand">
+          <div class="app-mobile-bar__name">{{ app_brand }}</div>
+          <div class="app-mobile-bar__sub">{{ app_subtitle }}</div>
+        </div>
+        <button class="btn btn-light app-mobile-bar__btn" type="button" id="themeToggleBtnMobile">
+          <i class="bi bi-moon-stars" id="themeToggleIconMobile"></i>
+        </button>
+      </header>
+
+      <main class="app-main container-fluid">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="container mb-3">
+              {% for category, message in messages %}
+                <div class="alert alert-{{ category }} mb-2">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+
+    <div class="app-sidebar-overlay" id="appSidebarOverlay"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    (function () {
+      const themeKey = "processguard-theme";
+      const sidebarKey = "processguard-sidebar";
+      const themeToggleBtn = document.getElementById("themeToggleBtn");
+      const themeToggleBtnMobile = document.getElementById("themeToggleBtnMobile");
+      const themeToggleIcon = document.getElementById("themeToggleIcon");
+      const themeToggleIconMobile = document.getElementById("themeToggleIconMobile");
+      const sidebarCollapseBtn = document.getElementById("sidebarCollapseBtn");
+      const sidebarCollapseIcon = document.getElementById("sidebarCollapseIcon");
+      const sidebarMobileOpen = document.getElementById("sidebarMobileOpen");
+      const sidebarMobileClose = document.getElementById("sidebarMobileClose");
+      const appSidebarOverlay = document.getElementById("appSidebarOverlay");
+
+      function getTheme() {
+        return document.documentElement.dataset.theme || "dark";
+      }
+
+      function setTheme(theme) {
+        document.documentElement.dataset.theme = theme;
+        localStorage.setItem(themeKey, theme);
+        const isDark = theme === "dark";
+        [themeToggleIcon, themeToggleIconMobile].forEach((icon) => {
+          if (!icon) return;
+          icon.className = `bi ${isDark ? "bi-sun" : "bi-moon-stars"}`;
+        });
+      }
+
+      function getSidebarMode() {
+        return document.documentElement.dataset.sidebar || "expanded";
+      }
+
+      function setSidebarMode(mode) {
+        document.documentElement.dataset.sidebar = mode;
+        localStorage.setItem(sidebarKey, mode);
+        if (sidebarCollapseIcon) {
+          sidebarCollapseIcon.className = `bi ${mode === "collapsed" ? "bi-chevron-right" : "bi-chevron-left"}`;
+        }
+      }
+
+      function openMobileSidebar() {
+        document.documentElement.dataset.sidebarOpen = "true";
+      }
+
+      function closeMobileSidebar() {
+        document.documentElement.dataset.sidebarOpen = "false";
+      }
+
+      function toggleTheme() {
+        setTheme(getTheme() === "dark" ? "light" : "dark");
+      }
+
+      themeToggleBtn?.addEventListener("click", toggleTheme);
+      themeToggleBtnMobile?.addEventListener("click", toggleTheme);
+      sidebarCollapseBtn?.addEventListener("click", () => {
+        setSidebarMode(getSidebarMode() === "collapsed" ? "expanded" : "collapsed");
+      });
+      sidebarMobileOpen?.addEventListener("click", openMobileSidebar);
+      sidebarMobileClose?.addEventListener("click", closeMobileSidebar);
+      appSidebarOverlay?.addEventListener("click", closeMobileSidebar);
+
+      setTheme(getTheme());
+      setSidebarMode(getSidebarMode());
+
+      if (window.matchMedia) {
+        const mq = window.matchMedia("(max-width: 991.98px)");
+        mq.addEventListener?.("change", (event) => {
+          if (!event.matches) {
+            closeMobileSidebar();
+          }
+        });
+      }
+
+      const channelName = "andon-refresh";
+      const supportsBroadcastChannel = "BroadcastChannel" in window;
+      const channel = supportsBroadcastChannel ? new BroadcastChannel(channelName) : null;
+
+      function emitRefresh() {
+        window.dispatchEvent(new CustomEvent(channelName));
+      }
+
+      function notify() {
+        if (channel) {
+          channel.postMessage({ timestamp: Date.now() });
+        } else {
+          localStorage.setItem(channelName, String(Date.now()));
+        }
+        emitRefresh();
+      }
+
+      if (channel) {
+        channel.onmessage = emitRefresh;
+      }
+
+      window.addEventListener("storage", (event) => {
+        if (event.key === channelName) {
+          emitRefresh();
+        }
+      });
+
+      window.AndonRefreshBus = {
+        notify,
+        onRefresh(handler) {
+          window.addEventListener(channelName, handler);
+        },
+      };
+    })();
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

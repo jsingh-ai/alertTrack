@@ -1,0 +1,35 @@
+{% extends "andon/base.html" %}
+{% block content %}
+<div class="container-fluid">
+  <div class="row g-4">
+    <div class="col-lg-3">
+      <div class="card andon-panel">
+        <div class="card-body">
+          <h2 class="h5 mb-3">Responder Identity</h2>
+          <select class="form-select" id="responderUser">
+            <option value="">Select responder</option>
+            {% for user in users %}
+              <option value="{{ user.id }}">{{ user.display_name }} - {{ user.role }}</option>
+            {% endfor %}
+          </select>
+          <input type="text" class="form-control mt-2" id="responderNameText" placeholder="Or type name">
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-9">
+      <div class="card andon-panel">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h4 mb-0">Responder Queue</h2>
+            <span class="badge text-bg-secondary" id="responderAlertCount">0</span>
+          </div>
+          <div id="responderQueue" class="vstack gap-3"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='andon/js/responder.js') }}" defer></script>
+{% endblock %}

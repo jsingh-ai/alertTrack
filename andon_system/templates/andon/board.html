@@ -1,0 +1,92 @@
+{% extends "andon/base.html" %}
+{% block body_class %}board-screen-shell{% endblock %}
+{% block content %}
+<div class="container-fluid board-page-shell">
+  {% set page_title = "Live Alert Board" %}
+  {% set page_subtitle = "Grouped by machine group and department. Updates when alerts change." %}
+  {% set page_action_html %}
+    <button class="btn btn-light btn-sm operator-page-header__badge board-view-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#boardViewPanel" aria-expanded="false" aria-controls="boardViewPanel">
+      <i class="bi bi-bell-fill"></i>
+      <span>Filter View</span>
+    </button>
+  {% endset %}
+  {% include "andon/_page_header.html" %}
+  <div class="board-layout-shell">
+    <div class="board-view-shell">
+      <div class="collapse" id="boardViewPanel">
+        <div class="card board-control andon-panel">
+          <div class="card-body">
+            <div class="board-control__header">
+              <div>
+                <div class="section-heading mb-0">Display Filter</div>
+              </div>
+              <div id="boardLockStatus" class="board-control__status">Unlocked</div>
+            </div>
+            <div class="board-control__grid">
+              <div class="board-control__field">
+                <label class="form-label small text-uppercase text-secondary mb-0" for="boardMachineGroup">Machine Group</label>
+                <select class="form-select" id="boardMachineGroup">
+                  <option value="">All Groups</option>
+                </select>
+              </div>
+              <div class="board-control__field">
+                <label class="form-label small text-uppercase text-secondary mb-0" for="boardDepartment">Department</label>
+                <select class="form-select" id="boardDepartment">
+                  <option value="">All Departments</option>
+                </select>
+              </div>
+              <div class="board-control__field board-control__field--action">
+                <button class="btn btn-warning w-100" id="boardLockView" type="button">Lock View</button>
+              </div>
+              <div class="board-control__field board-control__field--clear">
+                <button class="btn btn-outline-light w-100" id="boardClearView" type="button">Clear View</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="boardGrid" class="board-grid-shell"></div>
+  </div>
+</div>
+
+<div class="modal fade" id="boardAlertModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable machine-modal__dialog machine-modal__dialog--response">
+    <div class="modal-content machine-modal machine-modal--response">
+      <div class="modal-header machine-modal__header">
+        <div class="machine-modal__title-group">
+          <p class="eyebrow mb-1">Responder Modal</p>
+          <h2 class="modal-title h3 mb-0" id="boardAlertModalTitle">Alert</h2>
+        </div>
+        <button class="btn-close machine-modal__close" data-bs-dismiss="modal" type="button" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert-issue-summary" id="boardAlertIssueSummary"></div>
+        <input type="hidden" id="boardAlertModalId">
+        <div class="machine-modal__section d-none" id="boardAlertAssigneeSummaryWrap">
+          <div class="section-heading">Working on it</div>
+          <div class="alert-assignee-summary" id="boardAlertAssigneeSummary"></div>
+        </div>
+        <div class="machine-modal__section" id="boardAlertUserButtonsWrap">
+          <div class="section-heading">Who is responding</div>
+          <div class="user-chip-grid" id="boardAlertUserButtons"></div>
+        </div>
+        <div class="machine-modal__section">
+          <div class="section-heading">Note</div>
+          <div class="d-none" id="boardAlertNoteSummaryWrap">
+            <div class="alert-note-summary" id="boardAlertNoteSummary"></div>
+          </div>
+          <textarea class="form-control" id="boardAlertNote" rows="3" placeholder="Add note"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer machine-modal__footer">
+        <button class="btn btn-outline-light machine-modal__footer-btn" data-bs-dismiss="modal" type="button">Close</button>
+        <button class="btn btn-warning machine-modal__footer-btn" id="boardActionBtn" type="button">Acknowledge</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='andon/js/board.js') }}" defer></script>
+{% endblock %}

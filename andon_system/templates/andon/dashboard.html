@@ -1,0 +1,37 @@
+{% extends "andon/base.html" %}
+{% block content %}
+<div class="container-fluid">
+  {% set page_title = "Overview" %}
+  {% include "andon/_page_header.html" %}
+  <div class="hero-panel p-4 p-lg-5 rounded-4 mb-4">
+    <div class="row align-items-end">
+      <div class="col-lg-8">
+        <h2 class="h4 fw-semibold mb-3">Live Alert System</h2>
+        <p class="lead mb-0">Operator calls, live board visibility, and performance reporting in one internal system.</p>
+      </div>
+      <div class="col-lg-4 text-lg-end mt-4 mt-lg-0">
+        <div class="badge rounded-pill bg-light text-dark px-3 py-2">SQLite-ready, MySQL-ready</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    {% for title, subtitle, href, icon in [
+      ("Operator Call Screen", "Create machine alerts quickly from the line.", url_for('pages.operator_page'), "bi-bell"),
+      ("Live Alert Board", "Full-screen active alert board with timers.", url_for('pages.board_page'), "bi-display"),
+      ("Reports", "Downtime and response performance analytics.", url_for('pages.reports_page'), "bi-graph-up"),
+      ("Admin Setup", "Maintain departments, machines, and rules.", url_for('pages.admin_page'), "bi-gear"),
+    ] %}
+    <div class="col-md-6 col-xl-4">
+      <a class="card andon-card h-100 text-decoration-none" href="{{ href }}">
+        <div class="card-body">
+          <div class="icon-pill mb-3"><i class="bi {{ icon }}"></i></div>
+          <h3 class="h5 text-dark">{{ title }}</h3>
+          <p class="text-secondary mb-0">{{ subtitle }}</p>
+        </div>
+      </a>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
