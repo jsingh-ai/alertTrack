@@ -25,7 +25,7 @@
   --operator-working-text: #5b4300;
   --operator-off-bg: linear-gradient(180deg, #fafbfc 0%, #eef1f5 100%);
   --operator-off-text: #5e7187;
-  --machine-modal-close-bg: rgba(193, 18, 31, 0.1);
+  --machine-modal-close-bg: rgba(193, 18, 31, 0.38);
   --machine-modal-close-border: rgba(193, 18, 31, 0.22);
   --machine-modal-close-color: #c1121f;
 }
@@ -2229,13 +2229,13 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .alert-note-bubble.is-left {
   align-self: flex-start;
-  background: linear-gradient(180deg, #edf5ff 0%, #dcebff 100%);
+  background: transparent;
   border-top-left-radius: 0.2rem;
 }
 
 .alert-note-bubble.is-right {
   align-self: flex-end;
-  background: linear-gradient(180deg, #ffffff 0%, #f4f8ff 100%);
+  background: transparent;
   border-top-right-radius: 0.2rem;
 }
 
@@ -3144,6 +3144,49 @@ html[data-sidebar="collapsed"] .app-sidebar__toggle {
     pointer-events: auto;
   }
 
+  html[data-sidebar="collapsed"] .app-sidebar__brand-copy,
+  html[data-sidebar="collapsed"] .app-sidebar__footer {
+    display: flex;
+  }
+
+  html[data-sidebar="collapsed"] .app-nav__label,
+  html[data-sidebar="collapsed"] .app-theme-toggle__label {
+    display: inline;
+  }
+
+  html[data-sidebar="collapsed"] .app-sidebar__meta {
+    display: block;
+  }
+
+  html[data-sidebar="collapsed"] .app-sidebar__brand-row {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-right: 1.2rem;
+  }
+
+  html[data-sidebar="collapsed"] .app-sidebar__brand {
+    justify-content: flex-start;
+    width: auto;
+    order: initial;
+  }
+
+  html[data-sidebar="collapsed"] .app-sidebar__toggle {
+    display: none;
+  }
+
+  html[data-sidebar="collapsed"] .app-nav__link {
+    justify-content: flex-start;
+    padding: 0.58rem 0.8rem;
+    min-height: 2.65rem;
+  }
+
+  html[data-sidebar="collapsed"] .app-theme-toggle {
+    width: auto;
+    justify-content: flex-start;
+  }
+
   .app-mobile-bar {
     display: flex;
   }
@@ -3403,7 +3446,7 @@ html[data-theme="dark"] .machine-modal--response .alert-issue-summary {
 
 html[data-theme="dark"] .machine-modal--response .alert-note-bubble.is-left,
 html[data-theme="dark"] .machine-modal--response .alert-note-bubble.is-right {
-  background: rgba(18, 28, 47, 0.92);
+  background: transparent;
   color: var(--andon-text);
   border-color: rgba(255, 255, 255, 0.08);
 }
@@ -3944,7 +3987,7 @@ body.board-screen-shell .machine-modal--response .alert-issue-summary {
 
 body.board-screen-shell .machine-modal--response .alert-note-bubble.is-left,
 body.board-screen-shell .machine-modal--response .alert-note-bubble.is-right {
-  background: var(--board-alert-note-bg);
+  background: transparent;
   color: var(--board-alert-note-color);
   border-color: var(--board-alert-note-border);
 }

@@ -8,7 +8,7 @@ Internal manufacturing Andon alert system built with Flask, SQLAlchemy, and SQLi
 2. Install dependencies:
 
 ```bash
-pip install Flask Flask-SQLAlchemy Flask-Migrate python-dotenv
+pip install -r requirements.txt
 ```
 
 3. Set the database if needed:
@@ -36,16 +36,46 @@ If you are upgrading an existing SQLite file after schema changes, rerun the sam
 
 ## Run the App
 
+For local development:
+
 ```bash
 flask --app andon_system:create_app run
 ```
+
+For local Socket.IO testing with the production entrypoint:
+
+```bash
+SOCKETIO_ENABLED=true python run_socketio.py
+```
+
+For production deployments, use a WebSocket-capable worker. Normal Gunicorn sync workers are not enough for WebSockets.
+
+Recommended production environment variables:
+
+```bash
+export DATABASE_URL=mysql+pymysql://user:password@host/dbname
+export REDIS_URL=redis://host:6379/0
+export REDIS_REQUIRED=true
+export SOCKETIO_ENABLED=true
+export SOCKETIO_MESSAGE_QUEUE=$REDIS_URL
+export SECRET_KEY=use-a-long-random-secret
+```
+
+Recommended production command:
+
+```bash
+gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:8000 wsgi:app
+```
+
+`REDIS_REQUIRED=true` is recommended in production. If `REDIS_REQUIRED` is left off, the app can fall back to in-memory cache behavior in development when Redis is unavailable. Redis is used for cache and the Socket.IO message queue only; it is not the source of truth for alerts, users, machines, reports, or machine status.
+
+For multiple app instances or workers, Redis is required for Socket.IO message fan-out. Put Nginx or your reverse proxy in front with WebSocket upgrade headers for `/socket.io/`, including `Upgrade`, `Connection`, `Host`, `X-Forwarded-For`, and `X-Forwarded-Proto`.
 
 ## Pages
 
 - `/andon` dashboard landing page
 - `/andon/operator` machine button board with modal alert creation
 - `/andon/board` live TV board
-- `/andon/responder` responder queue
 - `/andon/reports` reporting dashboard
 - `/andon/admin` admin setup
 
@@ -64,5 +94,4 @@ The system exposes JSON endpoints under `/api/andon` for machines, departments, 
 ## Future Hardware Integration
 
 - Operator screen can be wired to touchscreen kiosks or stack-light buttons.
-- Responder actions can be extended to scan badges or call handheld devices.
 - Escalation notifications currently use a placeholder service and can later be connected to SMS, email, radios, or PLC/OEE systems.

@@ -4,8 +4,6 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from flask import current_app
-
 from ..extensions import db
 from ..company_context import get_current_company_id
 from ..models.alert import (
@@ -28,10 +26,15 @@ from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.user import User
 from ..models.department import Department
+from .cache_service import invalidate_cache
+from .realtime_service import emit_alert_created, emit_alert_updated
 
 
 class AlertServiceError(ValueError):
-    pass
+    def __init__(self, message, status_code=400, data=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.data = data or {}
 
 
 def utc_now():
@@ -82,6 +85,7 @@ def create_alert(payload: dict):
     machine_query = Machine.query.filter(Machine.id == payload.get("machine_id"))
     if company_id:
         machine_query = machine_query.filter(Machine.company_id == company_id)
+    machine_query = machine_query.with_for_update()
     machine = machine_query.one_or_none()
     department_id = payload.get("department_id")
     issue_category = None
@@ -105,6 +109,16 @@ def create_alert(payload: dict):
         raise AlertServiceError("Valid machine_id is required")
     if company_id and machine.company_id != company_id:
         raise AlertServiceError("Machine does not belong to the selected company")
+    # A true hard guarantee still belongs in the database schema later.
+    # This application-level check blocks the normal path now and keeps the
+    # request safe across SQLite and MySQL without a migration.
+    existing_alert = _get_active_alert_for_machine(machine.id, company_id)
+    if existing_alert:
+        raise AlertServiceError(
+            "An active alert already exists for this machine",
+            status_code=409,
+            data={"existing_alert": existing_alert.to_dict()},
+        )
     if not department_id and not issue_category:
         raise AlertServiceError("department_id is required")
     if not issue_category:
@@ -164,6 +178,8 @@ def create_alert(payload: dict):
         metadata={"note": payload.get("note")},
     )
     db.session.commit()
+    _invalidate_live_caches(alert.company_id)
+    emit_alert_created(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status)
     return alert
 
 
@@ -195,6 +211,8 @@ def acknowledge_alert(alert_id: int, payload: dict):
         metadata={"responder_name_text": alert.responder_name_text},
     )
     db.session.commit()
+    _invalidate_live_caches(alert.company_id)
+    emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="acknowledged")
     return alert
 
 
@@ -224,6 +242,8 @@ def mark_arrived(alert_id: int, payload: dict):
         metadata={"responder_name_text": alert.responder_name_text},
     )
     db.session.commit()
+    _invalidate_live_caches(alert.company_id)
+    emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="arrived")
     return alert
 
 
@@ -263,6 +283,8 @@ def resolve_alert(alert_id: int, payload: dict):
         },
     )
     db.session.commit()
+    _invalidate_live_caches(alert.company_id)
+    emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="resolved")
     return alert
 
 
@@ -292,6 +314,8 @@ def cancel_alert(alert_id: int, payload: dict):
         metadata={"reason": payload.get("reason")},
     )
     db.session.commit()
+    _invalidate_live_caches(alert.company_id)
+    emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="cancelled")
     return alert
 
 
@@ -308,6 +332,8 @@ def add_note(alert_id: int, payload: dict):
     if payload.get("note"):
         _append_alert_note(alert, payload.get("note"))
     db.session.commit()
+    _invalidate_live_caches(alert.company_id)
+    emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="note_added")
     return alert
 
 
@@ -371,3 +397,20 @@ def check_alerts_for_escalation():
     from .escalation_service import check_escalations
 
     return check_escalations()
+
+
+def _invalidate_live_caches(company_id):
+    invalidate_cache("board_state", company_id)
+    invalidate_cache("report_summary", company_id)
+    invalidate_cache("report_machine_details", company_id)
+    invalidate_cache("report_problem_details", company_id)
+
+
+def _get_active_alert_for_machine(machine_id, company_id):
+    query = AndonAlert.query.filter(
+        AndonAlert.machine_id == machine_id,
+        AndonAlert.status.notin_([ALERT_STATUS_RESOLVED, ALERT_STATUS_CANCELLED]),
+    )
+    if company_id:
+        query = query.filter(AndonAlert.company_id == company_id)
+    return query.order_by(AndonAlert.created_at.desc()).first()

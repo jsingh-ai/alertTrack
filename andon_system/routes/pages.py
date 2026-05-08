@@ -42,19 +42,21 @@ def board_page():
 @pages_bp.route("/andon/reports")
 def reports_page():
     company = get_current_company()
-    machines = Machine.query.filter_by(company_id=company.id).order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all() if company else []
-    machine_groups = []
-    seen_groups = set()
-    for machine in machines:
-        if not machine.machine_type or machine.machine_type in seen_groups:
-            continue
-        seen_groups.add(machine.machine_type)
-        machine_groups.append(machine.machine_type)
+    machine_groups = [
+        row.machine_type
+        for row in (
+            Machine.query.with_entities(Machine.machine_type)
+            .filter(Machine.company_id == company.id, Machine.machine_type.isnot(None), Machine.machine_type != "")
+            .distinct()
+            .order_by(Machine.machine_type.asc())
+            .all()
+            if company
+            else []
+        )
+    ]
     return render_template(
         "andon/reports.html",
         current_company=company,
-        departments=Department.query.filter_by(company_id=company.id, is_active=True).order_by(Department.name.asc()).all() if company else [],
-        machines=machines,
         machine_groups=machine_groups,
     )
 

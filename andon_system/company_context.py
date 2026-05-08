@@ -18,28 +18,43 @@ DEFAULT_COMPANIES = [
     SimpleNamespace(id=5, name="Superbag", slug="superbag", is_active=True),
 ]
 
+_COMPANIES_TABLE_EXISTS: bool | None = None
+
 
 def get_companies():
+    if has_request_context():
+        cached = getattr(g, "current_companies", None)
+        if cached is not None:
+            return cached
     if not _companies_table_exists():
-        return DEFAULT_COMPANIES
+        companies = DEFAULT_COMPANIES
+        if has_request_context():
+            g.current_companies = companies
+        return companies
     try:
         companies = Company.query.filter_by(is_active=True).order_by(Company.name.asc()).all()
     except OperationalError:
-        return DEFAULT_COMPANIES
-    return companies or DEFAULT_COMPANIES
+        companies = DEFAULT_COMPANIES
+    companies = companies or DEFAULT_COMPANIES
+    if has_request_context():
+        g.current_companies = companies
+    return companies
 
 
 def get_current_company():
+    if has_request_context():
+        company = getattr(g, "current_company", None)
+        if company is not None:
+            return company
     if not _companies_table_exists():
         if has_request_context():
             slug = session.get("andon_company_slug") or DEFAULT_COMPANY_SLUG
         else:
             slug = DEFAULT_COMPANY_SLUG
-        return next((company for company in DEFAULT_COMPANIES if company.slug == slug), DEFAULT_COMPANIES[2])
-    if has_request_context():
-        company = getattr(g, "current_company", None)
-        if company is not None:
-            return company
+        company = next((company for company in DEFAULT_COMPANIES if company.slug == slug), DEFAULT_COMPANIES[2])
+        if has_request_context():
+            g.current_company = company
+        return company
 
     company = None
     if has_request_context():
@@ -122,7 +137,11 @@ def ensure_default_companies():
 
 
 def _companies_table_exists() -> bool:
+    global _COMPANIES_TABLE_EXISTS
+    if _COMPANIES_TABLE_EXISTS is not None:
+        return _COMPANIES_TABLE_EXISTS
     try:
-        return "companies" in inspect(db.engine).get_table_names()
+        _COMPANIES_TABLE_EXISTS = "companies" in inspect(db.engine).get_table_names()
     except Exception:
-        return False
+        _COMPANIES_TABLE_EXISTS = False
+    return _COMPANIES_TABLE_EXISTS

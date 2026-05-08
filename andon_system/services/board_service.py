@@ -2,14 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm import joinedload
 
 from ..company_context import get_current_company_id
-from ..models.alert import ALERT_STATUSES_ACTIVE, EVENT_CREATED, AndonAlert
+from ..models.alert import ALERT_STATUSES_ACTIVE, EVENT_CREATED, AndonAlert, AndonAlertEvent
 from ..models.department import Department
 from ..models.issue import IssueCategory
 from ..models.machine import Machine
 from ..models.user import User
+from .cache_service import get_cached, set_cached
+
+BOARD_STATE_CACHE_TTL_SECONDS = 5
 
 
 def utc_now():
@@ -18,6 +21,11 @@ def utc_now():
 
 def build_board_state():
     company_id = get_current_company_id()
+    cache_key = ("board_state", company_id)
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
     machine_query = Machine.query.options(joinedload(Machine.department))
     department_query = Department.query
     issue_query = IssueCategory.query.options(joinedload(IssueCategory.department), joinedload(IssueCategory.problems))
@@ -37,7 +45,6 @@ def build_board_state():
         alert_query.options(
             joinedload(AndonAlert.issue_category),
             joinedload(AndonAlert.issue_problem),
-            selectinload(AndonAlert.events),
         )
         .order_by(AndonAlert.created_at.desc())
         .all()
@@ -66,25 +73,15 @@ def build_board_state():
         and (alert.department_id is None or alert.department_id in visible_department_ids)
         and (alert.issue_category_id is None or alert.issue_category_id in visible_category_ids)
     ]
+    created_notes_by_alert_id = _created_notes_by_alert_id(active_alerts, company_id)
 
     alert_by_machine = {}
     for alert in active_alerts:
         alert_by_machine.setdefault(alert.machine_id, alert)
 
-    return {
+    result = {
         "machines": [
-            {
-                "id": machine.id,
-                "name": machine.name,
-                "machine_code": machine.machine_code,
-                "machine_type": machine.machine_type,
-                "area": machine.area,
-                "line": machine.line,
-                "department_id": machine.department_id,
-                "department_name": machine.department.name if machine.department else None,
-                "is_active": machine.is_active,
-                "active_alert": _serialize_active_alert(alert_by_machine.get(machine.id)),
-            }
+            _serialize_machine(machine, alert_by_machine, created_notes_by_alert_id)
             for machine in visible_machines
         ],
         "departments": [
@@ -130,9 +127,11 @@ def build_board_state():
             "departments": _unique_values(machine.department.name for machine in visible_machines if machine.department),
         },
     }
+    set_cached(cache_key, result, BOARD_STATE_CACHE_TTL_SECONDS)
+    return result
 
 
-def _serialize_active_alert(alert):
+def _serialize_active_alert(alert, created_note=None):
     if not alert:
         return None
     now = _ensure_aware(utc_now())
@@ -150,7 +149,7 @@ def _serialize_active_alert(alert):
         "responder_user_id": alert.responder_user_id,
         "responder_name_text": alert.responder_name_text,
         "note": alert.note,
-        "created_note": _get_created_note(alert),
+        "created_note": created_note,
         "category_name": alert.issue_category.name if alert.issue_category else None,
         "problem_name": alert.issue_problem.name if alert.issue_problem else None,
         "status": alert.status,
@@ -160,6 +159,23 @@ def _serialize_active_alert(alert):
         "acknowledged_seconds": alert.acknowledged_seconds,
         "ack_to_clear_seconds": alert.ack_to_clear_seconds,
         "color": alert.issue_category.color if alert.issue_category and alert.issue_category.color else "#ef476f",
+    }
+
+
+def _serialize_machine(machine, alert_by_machine, created_notes_by_alert_id):
+    active_alert = alert_by_machine.get(machine.id)
+    created_note = created_notes_by_alert_id.get(active_alert.id) if active_alert else None
+    return {
+        "id": machine.id,
+        "name": machine.name,
+        "machine_code": machine.machine_code,
+        "machine_type": machine.machine_type,
+        "area": machine.area,
+        "line": machine.line,
+        "department_id": machine.department_id,
+        "department_name": machine.department.name if machine.department else None,
+        "is_active": machine.is_active,
+        "active_alert": _serialize_active_alert(active_alert, created_note),
     }
 
 
@@ -175,10 +191,20 @@ def _unique_values(values):
     return [value for value in dict.fromkeys(value for value in values if value)]
 
 
-def _get_created_note(alert):
-    for event in sorted(alert.events or [], key=lambda item: item.event_at or alert.created_at):
-        if event.event_type == EVENT_CREATED:
-            metadata = event.metadata_json or {}
-            note = str(metadata.get("note") or "").strip()
-            return note or None
-    return None
+def _created_notes_by_alert_id(alerts, company_id):
+    alert_ids = [alert.id for alert in alerts if alert.id]
+    if not alert_ids:
+        return {}
+    query = AndonAlertEvent.query.filter(
+        AndonAlertEvent.alert_id.in_(alert_ids),
+        AndonAlertEvent.event_type == EVENT_CREATED,
+    )
+    if company_id:
+        query = query.filter(AndonAlertEvent.company_id == company_id)
+    created_notes = {}
+    for event in query.order_by(AndonAlertEvent.event_at.asc()).all():
+        metadata = event.metadata_json or {}
+        note = str(metadata.get("note") or "").strip()
+        if note and event.alert_id not in created_notes:
+            created_notes[event.alert_id] = note
+    return created_notes

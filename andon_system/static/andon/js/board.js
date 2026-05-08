@@ -34,7 +34,28 @@ const state = {
   selectedResponderUserId: null,
 };
 
-setInterval(updateBoardTimers, 1000);
+let boardTimerIntervalId = null;
+let boardRefreshTimeoutId = null;
+let boardFallbackPollIntervalId = null;
+
+function startBoardTimerLoop() {
+  if (boardTimerIntervalId || document.hidden) return;
+  boardTimerIntervalId = setInterval(updateBoardTimers, 1000);
+}
+
+function stopBoardTimerLoop() {
+  if (!boardTimerIntervalId) return;
+  clearInterval(boardTimerIntervalId);
+  boardTimerIntervalId = null;
+}
+
+function handleBoardVisibilityChange() {
+  if (document.hidden) {
+    stopBoardTimerLoop();
+    return;
+  }
+  startBoardTimerLoop();
+}
 
 function statusClass(status) {
   return `status-${String(status || "").toLowerCase()}`;
@@ -282,7 +303,7 @@ function updateBoardTimers() {
   document.querySelectorAll(".alert-timer[data-elapsed-seconds]").forEach((timer) => {
     const card = timer.closest(".board-alert-card");
     const statusText = card?.querySelector(".status-pill")?.textContent?.trim();
-    if (statusText === "Working on it") return;
+    if (statusText === "RESOLVED" || statusText === "CANCELLED") return;
     const nextSeconds = Number(timer.dataset.elapsedSeconds || "0") + 1;
     timer.dataset.elapsedSeconds = String(nextSeconds);
     timer.textContent = formatElapsedSeconds(nextSeconds);
@@ -297,6 +318,27 @@ async function refreshBoard() {
   state.alerts = buildAlertsFromMachines(state.boardState.machines || []);
   populateFilterOptions();
   renderBoard();
+}
+
+function scheduleBoardRefresh() {
+  if (boardRefreshTimeoutId) {
+    clearTimeout(boardRefreshTimeoutId);
+  }
+  boardRefreshTimeoutId = setTimeout(() => {
+    boardRefreshTimeoutId = null;
+    refreshBoard();
+  }, 150);
+}
+
+function setBoardFallbackPolling(enabled) {
+  if (!enabled && boardFallbackPollIntervalId) {
+    clearInterval(boardFallbackPollIntervalId);
+    boardFallbackPollIntervalId = null;
+    return;
+  }
+  if (enabled && !boardFallbackPollIntervalId) {
+    boardFallbackPollIntervalId = setInterval(scheduleBoardRefresh, 15000);
+  }
 }
 
 function syncViewFromControls() {
@@ -437,7 +479,16 @@ function escapeHtml(value) {
 
 loadSavedView();
 refreshBoard();
-window.AndonRefreshBus?.onRefresh(refreshBoard);
+startBoardTimerLoop();
+document.addEventListener("visibilitychange", handleBoardVisibilityChange);
+window.AndonRefreshBus?.onRefresh(scheduleBoardRefresh);
+window.AndonRealtime?.onEvent((event) => {
+  if (["board_refresh", "alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
+    scheduleBoardRefresh();
+  }
+});
+window.AndonRealtime?.onStatus((status) => setBoardFallbackPolling(!status.connected));
+setBoardFallbackPolling(!window.AndonRealtime?.connected);
 
 function onDocumentClick(event) {
   if (!boardViewPanel || !boardViewToggle) return;

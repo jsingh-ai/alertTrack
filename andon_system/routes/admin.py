@@ -13,6 +13,8 @@ from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
 from ..models.user import User
+from ..services.cache_service import invalidate_cache
+from ..services.realtime_service import emit_admin_metadata_updated
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/andon/admin")
 
@@ -64,6 +66,16 @@ def _company_query(model):
     return query
 
 
+def _invalidate_company_caches(company_id):
+    if company_id is None:
+        return
+    invalidate_cache("board_state", company_id)
+    invalidate_cache("report_summary", company_id)
+    invalidate_cache("report_machine_details", company_id)
+    invalidate_cache("report_problem_details", company_id)
+    emit_admin_metadata_updated(company_id)
+
+
 def _machine_code_from_name(name: str, company_id: int | None) -> str:
     base = "".join(ch if ch.isalnum() else "-" for ch in name.upper()).strip("-")
     base = base or "MACHINE"
@@ -91,6 +103,7 @@ def create_department():
     department = Department(company_id=company_id, name=name, is_active=True)
     db.session.add(department)
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Department created",
@@ -112,6 +125,7 @@ def toggle_department(department_id):
         return _error_or_404("Department not found")
     department.is_active = not department.is_active
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Department updated",
@@ -150,6 +164,7 @@ def update_department(department_id):
     for category in IssueCategory.query.filter_by(company_id=company_id, department_id=department.id).all():
         category.name = name
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Department updated",
@@ -198,6 +213,7 @@ def delete_department(department_id):
 
     db.session.delete(department)
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response("Department and linked issues removed", department_id=department_id, affected_user_ids=affected_user_ids)
     flash("Department and linked issues removed", "success")
@@ -238,6 +254,7 @@ def create_machine():
     )
     db.session.add(machine)
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Machine created",
@@ -264,6 +281,7 @@ def toggle_machine(machine_id):
         return _error_or_404("Machine not found")
     machine.is_active = not machine.is_active
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Machine updated",
@@ -292,6 +310,7 @@ def delete_machine(machine_id):
         db.session.delete(alert)
     db.session.delete(machine)
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response("Machine removed", machine_id=machine_id, machine_group=group_name)
     flash("Machine removed", "success")
@@ -318,6 +337,7 @@ def create_machine_group():
     group = MachineGroup(company_id=company_id, name=name, is_active=True)
     db.session.add(group)
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Machine group created",
@@ -343,6 +363,7 @@ def toggle_machine_group(group_id):
     for machine in Machine.query.filter(Machine.company_id == company_id, Machine.machine_type == group.name).all():
         machine.is_active = target_state
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Machine group updated",
@@ -382,6 +403,7 @@ def update_machine_group(group_id):
     for machine in Machine.query.filter(Machine.company_id == company_id, Machine.machine_type == old_name).all():
         machine.machine_type = name
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Machine group updated",
@@ -414,6 +436,7 @@ def delete_machine_group(group_id):
         user.machine_group_id = None
     db.session.delete(group)
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Machine group removed",
@@ -443,6 +466,7 @@ def toggle_machine_type(machine_type):
         machine.is_active = target_value
 
     db.session.commit()
+    _invalidate_company_caches(company_id)
     flash(f"{machine_type} group updated", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -497,6 +521,7 @@ def create_user():
     )
     db.session.add(user)
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "User created",
@@ -566,6 +591,7 @@ def update_user(user_id):
     user.machine_group_id = machine_group.id
     user.department_id = department.id
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "User updated",
@@ -594,6 +620,7 @@ def toggle_user(user_id):
         return _error_or_404("User not found")
     user.is_active = not user.is_active
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "User updated",
@@ -637,6 +664,7 @@ def delete_user(user_id):
     )
     db.session.delete(user)
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response("User removed", user_id=user_id)
     flash("User removed", "success")
@@ -688,6 +716,7 @@ def create_problem():
     )
     db.session.add(problem)
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Issue problem created",
@@ -711,6 +740,7 @@ def toggle_problem(problem_id):
         return _error_or_404("Issue problem not found")
     problem.is_active = not problem.is_active
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Issue problem updated",
@@ -737,6 +767,7 @@ def delete_problem(problem_id):
         db.session.delete(alert)
     db.session.delete(problem)
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response("Issue removed", problem_id=problem_id, department_id=department_id)
     flash("Issue removed", "success")
@@ -760,6 +791,7 @@ def create_escalation_rule():
     )
     db.session.add(rule)
     db.session.commit()
+    _invalidate_company_caches(company_id)
     flash("Escalation rule created", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -772,6 +804,7 @@ def update_escalation_rule(rule_id):
         return _error_or_404("Escalation rule not found")
     rule.delay_seconds = int(request.form.get("delay_seconds") or rule.delay_seconds or 0)
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Escalation rule updated",
@@ -794,6 +827,7 @@ def toggle_escalation_rule(rule_id):
         return _error_or_404("Escalation rule not found")
     rule.is_active = not rule.is_active
     db.session.commit()
+    _invalidate_company_caches(company_id)
     if _is_ajax_request():
         return _json_response(
             "Escalation rule updated",

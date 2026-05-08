@@ -32,10 +32,13 @@ from ..services.reporting_service import (
     build_by_machine,
     build_by_problem,
     build_calls_per_hour,
+    build_machine_details,
     build_report_summary,
-    build_responders,
+    build_problem_details,
 )
 from ..services.escalation_service import check_escalations
+from ..services.cache_service import invalidate_cache
+from ..services.realtime_service import emit_machine_updated
 
 api_bp = Blueprint("api", __name__, url_prefix="/api/andon")
 
@@ -101,7 +104,7 @@ def api_create_alert():
         alert = create_alert(_payload())
         return jsonify({"success": True, "data": alert.to_dict()}), 201
     except AlertServiceError as exc:
-        return _error(str(exc), 400)
+        return _error(str(exc), getattr(exc, "status_code", 400), getattr(exc, "data", None))
 
 
 @api_bp.post("/alerts/<int:alert_id>/toggle-machine-active")
@@ -109,6 +112,11 @@ def api_toggle_machine_from_alert(alert_id):
     alert = get_alert(alert_id)
     alert.machine.is_active = not alert.machine.is_active
     db.session.commit()
+    invalidate_cache("board_state", alert.company_id)
+    invalidate_cache("report_summary", alert.company_id)
+    invalidate_cache("report_machine_details", alert.company_id)
+    invalidate_cache("report_problem_details", alert.company_id)
+    emit_machine_updated(alert.company_id, machine_id=alert.machine.id, action="toggle_from_alert")
     return jsonify({"success": True, "data": {"machine_id": alert.machine.id, "is_active": alert.machine.is_active}})
 
 
@@ -178,6 +186,16 @@ def api_report_summary():
     return jsonify({"success": True, "data": build_report_summary(_filters())})
 
 
+@api_bp.get("/reports/machine-details")
+def api_report_machine_details():
+    return jsonify({"success": True, "data": build_machine_details(_filters())})
+
+
+@api_bp.get("/reports/problem-details")
+def api_report_problem_details():
+    return jsonify({"success": True, "data": build_problem_details(_filters())})
+
+
 @api_bp.get("/reports/by-machine")
 def api_report_by_machine():
     return jsonify({"success": True, "data": build_by_machine(_filters())})
@@ -196,11 +214,6 @@ def api_report_by_problem():
 @api_bp.get("/reports/calls-per-hour")
 def api_report_calls_per_hour():
     return jsonify({"success": True, "data": build_calls_per_hour(_filters())})
-
-
-@api_bp.get("/reports/responders")
-def api_report_responders():
-    return jsonify({"success": True, "data": build_responders(_filters())})
 
 
 @api_bp.post("/escalations/check")
@@ -222,6 +235,8 @@ def api_toggle_machine_active(machine_id):
     else:
         machine.is_active = bool(desired)
     db.session.commit()
+    invalidate_cache(company_id=company_id)
+    emit_machine_updated(company_id, machine_id=machine.id, action="toggle_active")
     return jsonify({"success": True, "data": machine.to_dict()})
 
 
@@ -241,6 +256,8 @@ def api_toggle_machine_type_active(machine_type):
     for machine in machines:
         machine.is_active = target_value
     db.session.commit()
+    invalidate_cache(company_id=company_id)
+    emit_machine_updated(company_id, action="toggle_machine_type")
     return jsonify({"success": True, "data": {"machine_type": machine_type, "is_active": target_value, "count": len(machines)}})
 
 
@@ -264,8 +281,12 @@ def _filters():
         "machine_id": request.args.get("machine_id", type=int),
         "machine_group": request.args.get("machine_group"),
         "issue_category_id": request.args.get("issue_category_id", type=int),
+        "issue_problem_id": request.args.get("issue_problem_id", type=int),
     }
 
 
-def _error(message, code):
-    return jsonify({"success": False, "error": {"message": message}}), code
+def _error(message, code, extra=None):
+    error = {"message": message}
+    if extra:
+        error.update(extra)
+    return jsonify({"success": False, "error": error}), code

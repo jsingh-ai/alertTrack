@@ -15,6 +15,9 @@ let machineChart;
 let departmentChart;
 let hourChart;
 let currentSummary = null;
+let reportRefreshTimeoutId = null;
+let reportLoadRequestId = 0;
+let reportsStaleWhileHidden = false;
 
 function toQuery() {
   const params = new URLSearchParams();
@@ -142,9 +145,14 @@ function setSelectedMachineGroup(machineGroup) {
 }
 
 async function loadReports() {
+  const requestId = ++reportLoadRequestId;
   const query = toQuery();
   const response = await fetch(`/api/andon/reports/summary?${query}`);
   const data = await response.json();
+  if (requestId !== reportLoadRequestId) return;
+  if (!data.success) {
+    throw new Error(data.error?.message || "Unable to load reports");
+  }
   const summary = data.data;
   currentSummary = summary;
   const kpis = summary.kpis;
@@ -163,14 +171,35 @@ async function loadReports() {
   renderTables(summary);
 }
 
+function scheduleReportsRefresh() {
+  if (document.hidden) {
+    reportsStaleWhileHidden = true;
+    return;
+  }
+  if (reportRefreshTimeoutId) {
+    clearTimeout(reportRefreshTimeoutId);
+  }
+  reportRefreshTimeoutId = setTimeout(() => {
+    reportRefreshTimeoutId = null;
+    loadReports();
+  }, 250);
+}
+
 function renderMachineChart(rows) {
   const ctx = document.getElementById("machineChart");
-  if (machineChart) machineChart.destroy();
+  const labels = rows.map((row) => row.name);
+  const values = rows.map((row) => row.count);
+  if (machineChart) {
+    machineChart.data.labels = labels;
+    machineChart.data.datasets[0].data = values;
+    machineChart.update();
+    return;
+  }
   machineChart = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: rows.map((row) => row.name),
-      datasets: [{ label: "Alerts", data: rows.map((row) => row.count), backgroundColor: "#2ec4b6" }],
+      labels,
+      datasets: [{ label: "Alerts", data: values, backgroundColor: "#2ec4b6" }],
     },
     options: { responsive: true, plugins: { legend: { display: false } } },
   });
@@ -178,12 +207,19 @@ function renderMachineChart(rows) {
 
 function renderDepartmentChart(rows) {
   const ctx = document.getElementById("departmentChart");
-  if (departmentChart) departmentChart.destroy();
+  const labels = rows.map((row) => row.name);
+  const values = rows.map((row) => row.count);
+  if (departmentChart) {
+    departmentChart.data.labels = labels;
+    departmentChart.data.datasets[0].data = values;
+    departmentChart.update();
+    return;
+  }
   departmentChart = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: rows.map((row) => row.name),
-      datasets: [{ label: "Alerts", data: rows.map((row) => row.count), backgroundColor: "#ffb703" }],
+      labels,
+      datasets: [{ label: "Alerts", data: values, backgroundColor: "#ffb703" }],
     },
     options: { responsive: true, plugins: { legend: { display: false } } },
   });
@@ -277,57 +313,35 @@ function renderTables(summary) {
 
 function renderHourChart(rows) {
   const ctx = document.getElementById("hourChart");
-  if (hourChart) hourChart.destroy();
+  const labels = rows.map((row) => `${row.hour}:00`);
+  const values = rows.map((row) => row.count);
+  if (hourChart) {
+    hourChart.data.labels = labels;
+    hourChart.data.datasets[0].data = values;
+    hourChart.update();
+    return;
+  }
   hourChart = new Chart(ctx, {
     type: "line",
     data: {
-      labels: rows.map((row) => `${row.hour}:00`),
-      datasets: [{ label: "Calls", data: rows.map((row) => row.count), borderColor: "#2ec4b6", tension: 0.28 }],
+      labels,
+      datasets: [{ label: "Calls", data: values, borderColor: "#2ec4b6", tension: 0.28 }],
     },
     options: { responsive: true, plugins: { legend: { display: false } } },
   });
 }
 
-refreshReports.addEventListener("click", loadReports);
-reportMachineGroupButtons?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-machine-group]");
-  if (!button) return;
-  const machineGroup = button.dataset.machineGroup || "";
-  setSelectedMachineGroup(machineGroup);
-  loadReports();
-});
-machineTable?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-report-machine-id]");
-  if (!button || !currentSummary) return;
-  const machineId = button.dataset.reportMachineId;
-  const index = Number(button.dataset.reportMachineIndex);
-  const rows = currentSummary.top_machines || [];
-  const row = machineId ? rows.find((item) => String(item.id) === String(machineId)) : rows[index];
-  if (!row) return;
-  openDetailModal("Machine Detail", row, "machine");
-});
-problemTable?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-report-problem-id]");
-  if (!button || !currentSummary) return;
-  const problemId = button.dataset.reportProblemId;
-  const index = Number(button.dataset.reportProblemIndex);
-  const rows = currentSummary.top_problems || [];
-  const row = problemId ? rows.find((item) => String(item.id) === String(problemId)) : rows[index];
-  if (!row) return;
-  openDetailModal("Problem Detail", row, "problem");
-});
-const defaultEndDate = defaultReportEndValue();
-if (reportStart && !reportStart.value) reportStart.value = defaultReportStartValue();
-if (reportEnd && !reportEnd.value) reportEnd.value = defaultEndDate;
-if (reportMachineGroupButtons) {
-  setSelectedMachineGroup("");
+function buildDetailUrl(kind, row) {
+  const params = new URLSearchParams(toQuery());
+  if (kind === "machine") {
+    params.set("machine_id", row.id);
+    return `/api/andon/reports/machine-details?${params.toString()}`;
+  }
+  params.set("issue_problem_id", row.id);
+  return `/api/andon/reports/problem-details?${params.toString()}`;
 }
-loadReports();
 
-function openDetailModal(title, row, kind) {
-  if (!reportDetailModal || !reportDetailModalTitle || !reportDetailModalBody) return;
-  reportDetailModalTitle.textContent = title;
-  const details = Array.isArray(row.details) ? row.details : [];
+function renderDetailModalBody(row, kind, details) {
   const detailCount = details.length;
   const summaryChips = kind === "machine"
     ? [
@@ -387,13 +401,77 @@ function openDetailModal(title, row, kind) {
         .join("")
     : '<div class="text-secondary small">No alert details available.</div>';
 
-  reportDetailModalBody.innerHTML = `
+  return `
     <div class="report-detail-intro">
       <div class="report-detail-intro__label">${escapeHtml(kind === "machine" ? "Machine drilldown" : "Problem drilldown")}</div>
       <div class="report-detail-intro__value">${escapeHtml(detailCount)} alert${detailCount === 1 ? "" : "s"} in this detail set</div>
     </div>
     <div class="report-detail-summary">${summaryHtml}</div>
-    <div class="report-detail-list">${detailsHtml}</div>
-  `;
+    <div class="report-detail-list">${detailsHtml}</div>`;
+}
+
+refreshReports.addEventListener("click", loadReports);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && reportsStaleWhileHidden) {
+    reportsStaleWhileHidden = false;
+    scheduleReportsRefresh();
+  }
+});
+window.AndonRealtime?.onEvent((event) => {
+  if (["reports_invalidated", "admin_metadata_updated"].includes(event.type)) {
+    scheduleReportsRefresh();
+  }
+});
+reportMachineGroupButtons?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-machine-group]");
+  if (!button) return;
+  const machineGroup = button.dataset.machineGroup || "";
+  setSelectedMachineGroup(machineGroup);
+  loadReports();
+});
+machineTable?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-report-machine-id]");
+  if (!button || !currentSummary) return;
+  const machineId = button.dataset.reportMachineId;
+  const index = Number(button.dataset.reportMachineIndex);
+  const rows = currentSummary.top_machines || [];
+  const row = machineId ? rows.find((item) => String(item.id) === String(machineId)) : rows[index];
+  if (!row) return;
+  openDetailModal("Machine Detail", row, "machine");
+});
+problemTable?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-report-problem-id]");
+  if (!button || !currentSummary) return;
+  const problemId = button.dataset.reportProblemId;
+  const index = Number(button.dataset.reportProblemIndex);
+  const rows = currentSummary.top_problems || [];
+  const row = problemId ? rows.find((item) => String(item.id) === String(problemId)) : rows[index];
+  if (!row) return;
+  openDetailModal("Problem Detail", row, "problem");
+});
+const defaultEndDate = defaultReportEndValue();
+if (reportStart && !reportStart.value) reportStart.value = defaultReportStartValue();
+if (reportEnd && !reportEnd.value) reportEnd.value = defaultEndDate;
+if (reportMachineGroupButtons) {
+  setSelectedMachineGroup("");
+}
+loadReports();
+
+function openDetailModal(title, row, kind) {
+  if (!reportDetailModal || !reportDetailModalTitle || !reportDetailModalBody) return;
+  reportDetailModalTitle.textContent = title;
+  reportDetailModalBody.innerHTML = '<div class="text-secondary small">Loading details...</div>';
   reportDetailModal.show();
+  fetch(buildDetailUrl(kind, row))
+    .then((response) => response.json())
+    .then((data) => {
+      if (!data.success) {
+        throw new Error(data.error?.message || "Unable to load details");
+      }
+      const details = Array.isArray(data.data) ? data.data : [];
+      reportDetailModalBody.innerHTML = renderDetailModalBody(row, kind, details);
+    })
+    .catch((error) => {
+      reportDetailModalBody.innerHTML = `<div class="text-danger small">${escapeHtml(error.message || "Unable to load details")}</div>`;
+    });
 }

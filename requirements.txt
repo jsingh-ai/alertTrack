@@ -1,5 +1,9 @@
 Flask
 Flask-SQLAlchemy
 Flask-Migrate
+Flask-SocketIO
 python-dotenv
 pymysql
+redis
+eventlet
+gunicorn

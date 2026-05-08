@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import joinedload
@@ -9,6 +9,10 @@ from sqlalchemy.orm import joinedload
 from ..company_context import get_current_company_id
 from ..models.alert import ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_CANCELLED, ALERT_STATUS_OPEN, ALERT_STATUS_RESOLVED, AndonAlert
 from ..models.machine import Machine
+from .cache_service import get_cached, set_cached
+
+REPORT_SUMMARY_CACHE_TTL_SECONDS = 15
+REPORT_DETAILS_CACHE_TTL_SECONDS = 30
 
 
 def format_local_datetime(value, tz_name="America/Chicago"):
@@ -21,23 +25,23 @@ def format_local_datetime(value, tz_name="America/Chicago"):
 
 
 def build_report_summary(filters: dict):
+    company_id = get_current_company_id()
+    cache_key = ("report_summary", company_id, _cache_filters(filters))
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
     alerts = _filtered_alerts(filters)
-    return {
+    result = {
         "kpis": _build_kpis(alerts),
         "by_machine_group": _group_count_field(alerts, lambda alert: alert.machine.machine_type if alert.machine and alert.machine.machine_type else "Unassigned"),
         "by_department": _group_count(alerts, "department"),
         "by_machine": _group_count(alerts, "machine"),
-        "by_issue_category": _group_count(alerts, "issue_category"),
-        "by_problem": _group_count(alerts, "issue_problem"),
         "top_machines": _top_machines(alerts),
         "top_problems": _top_problems(alerts),
-        "fastest_responders": _fastest_responders(alerts),
-        "slowest_machines": _slowest_machines(alerts),
         "calls_per_hour": _calls_per_hour(alerts),
-        "alerts_by_day": _alerts_by_day(alerts),
-        "pareto_machines": _pareto(alerts, "machine"),
-        "pareto_problems": _pareto(alerts, "issue_problem"),
     }
+    set_cached(cache_key, result, REPORT_SUMMARY_CACHE_TTL_SECONDS)
+    return result
 
 
 def build_by_machine(filters: dict):
@@ -60,25 +64,28 @@ def build_calls_per_hour(filters: dict):
     return _calls_per_hour(alerts)
 
 
-def build_responders(filters: dict):
-    alerts = _filtered_alerts(filters)
-    return _fastest_responders(alerts)
-
-
 def build_machine_details(filters: dict):
+    company_id = get_current_company_id()
+    cache_key = ("report_machine_details", company_id, _cache_filters(filters))
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
     alerts = _filtered_alerts(filters)
-    machine_id = filters.get("machine_id")
-    if machine_id:
-        alerts = [alert for alert in alerts if alert.machine_id == machine_id]
-    return [_machine_detail(alert) for alert in alerts]
+    result = [_machine_detail(alert) for alert in alerts]
+    set_cached(cache_key, result, REPORT_DETAILS_CACHE_TTL_SECONDS)
+    return result
 
 
 def build_problem_details(filters: dict):
+    company_id = get_current_company_id()
+    cache_key = ("report_problem_details", company_id, _cache_filters(filters))
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
     alerts = _filtered_alerts(filters)
-    problem_id = filters.get("issue_problem_id")
-    if problem_id:
-        alerts = [alert for alert in alerts if alert.issue_problem_id == problem_id]
-    return [_machine_detail(alert) for alert in alerts]
+    result = [_machine_detail(alert) for alert in alerts]
+    set_cached(cache_key, result, REPORT_DETAILS_CACHE_TTL_SECONDS)
+    return result
 
 
 def _filtered_alerts(filters):
@@ -97,6 +104,7 @@ def _filtered_alerts(filters):
     department_id = filters.get("department_id")
     machine_id = filters.get("machine_id")
     category_id = filters.get("issue_category_id")
+    problem_id = filters.get("issue_problem_id")
 
     if start:
         query = query.filter(AndonAlert.created_at >= start)
@@ -111,6 +119,8 @@ def _filtered_alerts(filters):
         query = query.filter(AndonAlert.machine.has(Machine.machine_type == machine_group))
     if category_id:
         query = query.filter(AndonAlert.issue_category_id == category_id)
+    if problem_id:
+        query = query.filter(AndonAlert.issue_problem_id == problem_id)
 
     return query.order_by(AndonAlert.created_at.asc()).all()
 
@@ -127,6 +137,11 @@ def _parse_dt(value):
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _cache_filters(filters):
+    relevant_keys = ["start", "end", "department_id", "machine_id", "machine_group", "issue_category_id", "issue_problem_id"]
+    return tuple((key, str(filters.get(key)) if filters.get(key) is not None else None) for key in relevant_keys)
 
 
 def _build_kpis(alerts):
@@ -167,10 +182,6 @@ def _group_count_field(alerts, value_getter):
 
 
 def _top_machines(alerts):
-    def _detail_sort_key(item):
-        created_at = item.created_at or datetime.min.replace(tzinfo=timezone.utc)
-        return created_at
-
     buckets = defaultdict(list)
     for alert in alerts:
         label = alert.machine.name if alert.machine else "Unassigned"
@@ -191,17 +202,12 @@ def _top_machines(alerts):
                 "average_total_seconds": _avg([_closed_seconds(alert) for alert in values]),
                 "top_problem": top_problem["name"] if top_problem else None,
                 "top_problem_count": top_problem["count"] if top_problem else None,
-                "details": [_machine_detail(alert) for alert in sorted(values, key=_detail_sort_key, reverse=True)],
             }
         )
     return sorted(rows, key=lambda row: row["count"], reverse=True)
 
 
 def _top_problems(alerts):
-    def _detail_sort_key(item):
-        created_at = item.created_at or datetime.min.replace(tzinfo=timezone.utc)
-        return created_at
-
     buckets = defaultdict(list)
     for alert in alerts:
         label = alert.issue_problem.name if alert.issue_problem else "Unassigned"
@@ -223,7 +229,6 @@ def _top_problems(alerts):
                 "average_acknowledge_seconds": _avg([alert.wait_to_ack_seconds for alert in values]),
                 "average_ack_to_clear_seconds": _avg([alert.ack_to_clear_seconds for alert in values]),
                 "average_total_seconds": _avg([_closed_seconds(alert) for alert in values]),
-                "details": [_machine_detail(alert) for alert in sorted(values, key=_detail_sort_key, reverse=True)],
             }
         )
     return sorted(rows, key=lambda row: row["count"], reverse=True)

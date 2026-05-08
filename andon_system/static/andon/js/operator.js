@@ -57,6 +57,50 @@ const state = {
   },
 };
 
+let elapsedTimerIntervalId = null;
+let operatorRefreshTimeoutId = null;
+let operatorFallbackPollIntervalId = null;
+
+function normalizeActiveAlert(alert, machine) {
+  return {
+    id: alert.id,
+    department_id: alert.department_id ?? machine?.department_id ?? null,
+    department_name: alert.department_name ?? alert.department?.name ?? machine?.department_name ?? null,
+    responder_user_id: alert.responder_user_id ?? null,
+    responder_name_text: alert.responder_name_text ?? null,
+    note: alert.note ?? null,
+    created_note: alert.created_note ?? null,
+    category_name: alert.category_name ?? alert.issue_category?.name ?? "",
+    problem_name: alert.problem_name ?? alert.issue_problem?.name ?? "",
+    status: alert.status,
+    priority: alert.priority,
+    created_at: alert.created_at ?? null,
+    elapsed_seconds: alert.elapsed_seconds ?? 0,
+    acknowledged_seconds: alert.acknowledged_seconds ?? null,
+    ack_to_clear_seconds: alert.ack_to_clear_seconds ?? null,
+    color: alert.color ?? alert.issue_category?.color ?? "#ef476f",
+  };
+}
+
+function startElapsedTimers() {
+  if (elapsedTimerIntervalId || document.hidden) return;
+  elapsedTimerIntervalId = setInterval(updateElapsedTimers, 1000);
+}
+
+function stopElapsedTimers() {
+  if (!elapsedTimerIntervalId) return;
+  clearInterval(elapsedTimerIntervalId);
+  elapsedTimerIntervalId = null;
+}
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    stopElapsedTimers();
+    return;
+  }
+  startElapsedTimers();
+}
+
 async function boot() {
   restoreViewState();
   await loadBoardState();
@@ -64,8 +108,16 @@ async function boot() {
   wireEvents();
   renderViewControls();
   renderBoard();
-  setInterval(updateElapsedTimers, 1000);
-  window.AndonRefreshBus?.onRefresh(refreshBoardState);
+  startElapsedTimers();
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.AndonRefreshBus?.onRefresh(scheduleOperatorRefresh);
+  window.AndonRealtime?.onEvent((event) => {
+    if (["board_refresh", "alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
+      scheduleOperatorRefresh();
+    }
+  });
+  window.AndonRealtime?.onStatus((status) => setOperatorFallbackPolling(!status.connected));
+  setOperatorFallbackPolling(!window.AndonRealtime?.connected);
 }
 
 async function loadBoardState() {
@@ -101,8 +153,11 @@ function onBoardClick(event) {
 }
 
 async function openMachineModal(machineId) {
-  await loadBoardState();
-  const machine = state.board.machines.find((row) => row.id === machineId);
+  let machine = state.board.machines.find((row) => row.id === machineId);
+  if (!machine && !state.board.machines.length) {
+    await loadBoardState();
+    machine = state.board.machines.find((row) => row.id === machineId);
+  }
   if (!machine) return;
   if (machine.active_alert) {
     openActiveAlertModal(machine.active_alert, machine);
@@ -334,24 +389,26 @@ async function createAlertFromModal() {
     body: JSON.stringify(payload),
   });
   const data = await response.json();
+  if (response.status === 409 && data?.error?.existing_alert) {
+    const targetMachine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine.id)) || state.selectedMachine;
+    const activeAlert = normalizeActiveAlert(data.error.existing_alert, targetMachine);
+    if (targetMachine) {
+      targetMachine.active_alert = activeAlert;
+    }
+    machineModal.hide();
+    renderBoard();
+    openActiveAlertModal(activeAlert, targetMachine);
+    window.AndonRefreshBus?.notify();
+    return;
+  }
   if (!data.success) {
     alert(data.error.message);
     return;
   }
-  const createdAlert = data.data;
-  const machine = state.board.machines.find((row) => row.id === state.selectedMachine.id);
+  const createdAlert = normalizeActiveAlert(data.data, state.selectedMachine);
+  const machine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine.id));
   if (machine) {
-    machine.active_alert = {
-      id: createdAlert.id,
-      category_name: createdAlert.department?.name || state.selectedDepartment.name,
-      problem_name: createdAlert.issue_problem?.name || state.selectedProblem.name || "",
-      status: createdAlert.status,
-      priority: createdAlert.priority,
-      created_at: createdAlert.created_at,
-      elapsed_seconds: 0,
-      color: createdAlert.department?.color || "#ef476f",
-      note: createdAlert.note || operatorNote.value || null,
-    };
+    machine.active_alert = createdAlert;
   }
   machineModal.hide();
   renderBoard();
@@ -468,6 +525,27 @@ async function refreshBoardState() {
       const group = state.issueGroups.find((entry) => Number(entry.department_id) === Number(state.selectedDepartment.id));
       renderProblemOptions(group ? group.problems : []);
     }
+  }
+}
+
+function scheduleOperatorRefresh() {
+  if (operatorRefreshTimeoutId) {
+    clearTimeout(operatorRefreshTimeoutId);
+  }
+  operatorRefreshTimeoutId = setTimeout(() => {
+    operatorRefreshTimeoutId = null;
+    refreshBoardState();
+  }, 150);
+}
+
+function setOperatorFallbackPolling(enabled) {
+  if (!enabled && operatorFallbackPollIntervalId) {
+    clearInterval(operatorFallbackPollIntervalId);
+    operatorFallbackPollIntervalId = null;
+    return;
+  }
+  if (enabled && !operatorFallbackPollIntervalId) {
+    operatorFallbackPollIntervalId = setInterval(scheduleOperatorRefresh, 15000);
   }
 }
 

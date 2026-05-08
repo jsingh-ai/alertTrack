@@ -5,7 +5,7 @@ from flask import Flask, g
 from .company_context import get_companies, get_current_company, set_current_company_slug
 from .config import config_by_name
 from .db_maintenance import ensure_andon_schema
-from .extensions import db, migrate
+from .extensions import db, migrate, socketio
 from .routes import register_blueprints
 
 
@@ -23,6 +23,16 @@ def create_app(config_name: str | None = None) -> Flask:
     db.init_app(app)
     if migrate is not None:
         migrate.init_app(app, db)
+    if socketio is not None and app.config.get("SOCKETIO_ENABLED"):
+        socketio.init_app(
+            app,
+            async_mode=app.config.get("SOCKETIO_ASYNC_MODE"),
+            message_queue=app.config.get("SOCKETIO_MESSAGE_QUEUE"),
+            cors_allowed_origins=None,
+        )
+        from .socket_events import register_socket_events  # noqa: WPS433
+
+        register_socket_events(socketio)
 
     register_blueprints(app)
 
@@ -54,6 +64,7 @@ def create_app(config_name: str | None = None) -> Flask:
             "app_subtitle": "Live Alert System",
             "current_company": current_company,
             "companies": get_companies(),
+            "socketio_enabled": socketio is not None and app.config.get("SOCKETIO_ENABLED"),
             "model_refs": {
                 "Department": Department,
                 "Company": Company,
@@ -73,8 +84,9 @@ def create_app(config_name: str | None = None) -> Flask:
         g.current_company = get_current_company()
 
     with app.app_context():
-        db.create_all()
-        ensure_andon_schema()
+        if app.config.get("ANDON_AUTO_SCHEMA_MAINTENANCE"):
+            db.create_all()
+            ensure_andon_schema()
         app.logger.debug("Andon app initialized")
 
     return app
