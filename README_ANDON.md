@@ -23,6 +23,12 @@ For MySQL later, switch to:
 export DATABASE_URL=mysql+pymysql://user:password@host/dbname
 ```
 
+For PostgreSQL, switch to:
+
+```bash
+export DATABASE_URL=postgresql+psycopg://andon_user:password@localhost:5432/andon_db
+```
+
 ## Initialize Database
 
 ```bash
@@ -33,6 +39,26 @@ python scripts/seed_andon_data.py
 The SQLite database lives at `instance/andon.db`.
 
 If you are upgrading an existing SQLite file after schema changes, rerun the same two commands. The app also includes a small SQLite schema helper that adds `machines.machine_type` when needed.
+
+### Windows PostgreSQL Setup
+
+After installing PostgreSQL on Windows and installing `requirements.txt`, run this from PowerShell in the repo folder:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+.\scripts\setup_postgres_windows.ps1 -DatabaseName andon_db -AppUser andon_user -AppPassword "change_this_password"
+```
+
+The script creates the PostgreSQL role/database if needed, sets `DATABASE_URL` for that PowerShell session, creates the tables, and seeds the default data.
+
+For future PowerShell sessions, set the same connection string before running the app:
+
+```powershell
+$env:DATABASE_URL = "postgresql+psycopg://andon_user:change_this_password@localhost:5432/andon_db"
+$env:SECRET_KEY = "change-this-secret"
+$env:SOCKETIO_ENABLED = "true"
+python run_socketio.py
+```
 
 ## Run the App
 
@@ -53,7 +79,7 @@ For production deployments, use a WebSocket-capable worker. Normal Gunicorn sync
 Recommended production environment variables:
 
 ```bash
-export DATABASE_URL=mysql+pymysql://user:password@host/dbname
+export DATABASE_URL=postgresql+psycopg://andon_user:password@host:5432/andon_db
 export REDIS_URL=redis://host:6379/0
 export REDIS_REQUIRED=true
 export SOCKETIO_ENABLED=true

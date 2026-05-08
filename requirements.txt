@@ -4,6 +4,7 @@ Flask-Migrate
 Flask-SocketIO
 python-dotenv
 pymysql
+psycopg[binary]
 redis
 eventlet
 gunicorn
