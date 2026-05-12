@@ -1,8 +1,10 @@
 from flask import Blueprint, redirect, render_template, request, url_for
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from ..company_context import get_current_company, set_current_company_slug
-from ..models.department import Department
 from ..models.escalation import EscalationRule
+from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
@@ -10,6 +12,37 @@ from ..models.user import USER_ROLES, User
 from ..services.escalation_service import FIXED_ESCALATION_PHASES, ensure_fixed_escalation_rules
 
 pages_bp = Blueprint("pages", __name__)
+MANAGEMENT_TIMEZONE = ZoneInfo("America/Chicago")
+
+
+def _management_shift_window(now: datetime | None = None):
+    if now is None:
+        current = datetime.now(MANAGEMENT_TIMEZONE)
+    elif now.tzinfo is None:
+        current = now.replace(tzinfo=MANAGEMENT_TIMEZONE)
+    else:
+        current = now.astimezone(MANAGEMENT_TIMEZONE)
+    if current.hour >= 6 and current.hour < 18:
+        start = current.replace(hour=6, minute=0, second=0, microsecond=0)
+        end = current.replace(hour=18, minute=0, second=0, microsecond=0)
+        label = "Day shift"
+    elif current.hour >= 18:
+        start = current.replace(hour=18, minute=0, second=0, microsecond=0)
+        end = (current + timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=0)
+        label = "Night shift"
+    else:
+        start = (current - timedelta(days=1)).replace(hour=18, minute=0, second=0, microsecond=0)
+        end = current.replace(hour=6, minute=0, second=0, microsecond=0)
+        label = "Night shift"
+
+    def _display_time(value: datetime) -> str:
+        return value.strftime("%I:%M %p").lstrip("0")
+
+    return {
+        "start": start.strftime("%Y-%m-%dT%H:%M"),
+        "end": end.strftime("%Y-%m-%dT%H:%M"),
+        "label": f"{label} ({_display_time(start)} - {_display_time(end)})",
+    }
 
 
 @pages_bp.route("/andon")
@@ -30,7 +63,19 @@ def operator_page():
     return render_template(
         "andon/operator.html",
         current_company=company,
-        departments=Department.query.filter_by(company_id=company.id, is_active=True).order_by(Department.name.asc()).all() if company else [],
+    )
+
+
+@pages_bp.route("/andon/management")
+def management_page():
+    company = get_current_company()
+    shift_window = _management_shift_window()
+    return render_template(
+        "andon/management.html",
+        current_company=company,
+        management_shift_start=shift_window["start"],
+        management_shift_end=shift_window["end"],
+        management_shift_label=shift_window["label"],
     )
 
 

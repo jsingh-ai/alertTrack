@@ -14,7 +14,7 @@ from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.user import User
-from ..services.board_service import build_board_state
+from ..services.board_service import build_board_state, build_operator_metadata, build_operator_snapshot
 from ..extensions import db
 from ..services.alert_service import (
     AlertServiceError,
@@ -96,6 +96,16 @@ def users():
 @api_bp.get("/board-state")
 def board_state():
     return jsonify({"success": True, "data": build_board_state()})
+
+
+@api_bp.get("/operator-snapshot")
+def operator_snapshot():
+    return jsonify({"success": True, "data": build_operator_snapshot()})
+
+
+@api_bp.get("/operator-metadata")
+def operator_metadata():
+    return jsonify({"success": True, "data": build_operator_metadata()})
 
 
 @api_bp.post("/alerts")

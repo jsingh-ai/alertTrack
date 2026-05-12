@@ -3,7 +3,7 @@
 {% block content %}
 <div class="container-fluid button-board-shell">
   {% set page_title = "Operator Station" %}
-  {% set page_subtitle = "Grouped by machine group and machine. Tap a machine to create or review alerts." %}
+  {% set page_subtitle = "" %}
   {% set page_action_html %}
     <button class="btn btn-light btn-sm operator-page-header__badge" type="button" data-bs-toggle="collapse" data-bs-target="#operatorViewPanel" aria-expanded="false" aria-controls="operatorViewPanel">
       <i class="bi bi-house-door-fill"></i>
@@ -46,81 +46,8 @@
       </div>
     </div>
     <div class="operator-board-shell mt-0">
-      <div class="operator-board-shell__header mb-0">
-        <div>
-          <div class="section-heading mb-0">Machine Board</div>
-        </div>
-      </div>
       <div id="machineBoard" class="vstack gap-1"></div>
-    </div>
-  </div>
-</div>
-
-<div class="modal fade" id="machineModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable machine-modal__dialog">
-    <div class="modal-content machine-modal machine-modal--create">
-      <div class="modal-header">
-        <h2 class="modal-title h4" id="machineModalTitle">Machine</h2>
-        <button class="btn-close machine-modal__close" data-bs-dismiss="modal" type="button" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="modalMachineId">
-        <div class="machine-modal__create-stack">
-          <div class="machine-modal__create-section">
-            <label class="form-label">Issue Groups</label>
-            <div class="small text-secondary mb-2">Select the department group that matches the alert.</div>
-            <div class="machine-category-grid" id="departmentButtons"></div>
-          </div>
-          <div class="machine-modal__create-section" id="problemSection" hidden>
-            <label class="form-label">Problem</label>
-            <div class="small text-secondary mb-2">Pick one issue from the list below.</div>
-            <div id="problemList" class="problem-list"></div>
-          </div>
-          <div class="machine-modal__create-section">
-            <label class="form-label">Note</label>
-            <textarea class="form-control" id="operatorNote" rows="3" placeholder="Optional note"></textarea>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-danger btn-lg" id="sendMessageBtn" type="button">Send Message</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="modal fade" id="operatorAlertModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable machine-modal__dialog machine-modal__dialog--response">
-    <div class="modal-content machine-modal machine-modal--response">
-      <div class="modal-header machine-modal__header">
-        <div class="machine-modal__title-group">
-          <p class="eyebrow mb-1">Responder Modal</p>
-          <h2 class="modal-title h3 mb-0" id="operatorAlertModalTitle">Alert</h2>
-        </div>
-        <button class="btn-close machine-modal__close" data-bs-dismiss="modal" type="button" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div class="alert-issue-summary" id="operatorAlertIssueSummary"></div>
-        <input type="hidden" id="operatorAlertModalId">
-        <div class="machine-modal__section d-none" id="operatorAlertAssigneeSummaryWrap">
-          <div class="section-heading">Working on it</div>
-          <div class="alert-assignee-summary" id="operatorAlertAssigneeSummary"></div>
-        </div>
-        <div class="machine-modal__section" id="operatorAlertUserButtonsWrap">
-          <div class="section-heading">Who is responding</div>
-          <div class="user-chip-grid" id="operatorAlertUserButtons"></div>
-        </div>
-        <div class="machine-modal__section">
-          <div class="section-heading">Note</div>
-          <div class="d-none" id="operatorAlertNoteSummaryWrap">
-            <div class="alert-note-summary" id="operatorAlertNoteSummary"></div>
-          </div>
-          <textarea class="form-control" id="operatorAlertNote" rows="3" placeholder="Add note"></textarea>
-        </div>
-      </div>
-      <div class="modal-footer machine-modal__footer">
-        <button class="btn btn-warning btn-lg machine-modal__footer-btn" id="operatorAlertActionBtn" type="button">Acknowledge</button>
-      </div>
+      <div id="operatorStatusDock" class="operator-status-dock" aria-live="polite"></div>
     </div>
   </div>
 </div>

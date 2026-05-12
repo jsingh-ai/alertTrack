@@ -1,25 +1,12 @@
 const boardGrid = document.getElementById("boardGrid");
-const boardViewToggle = document.querySelector(".board-view-toggle");
-const boardViewPanel = document.getElementById("boardViewPanel");
 const boardMachineGroup = document.getElementById("boardMachineGroup");
 const boardDepartment = document.getElementById("boardDepartment");
 const boardLockView = document.getElementById("boardLockView");
 const boardClearView = document.getElementById("boardClearView");
 const boardLockStatus = document.getElementById("boardLockStatus");
-const boardAlertModal = new bootstrap.Modal(document.getElementById("boardAlertModal"));
-const boardAlertModalTitle = document.getElementById("boardAlertModalTitle");
-const boardAlertIssueSummary = document.getElementById("boardAlertIssueSummary");
-const boardAlertModalId = document.getElementById("boardAlertModalId");
-const boardAlertAssigneeSummaryWrap = document.getElementById("boardAlertAssigneeSummaryWrap");
-const boardAlertAssigneeSummary = document.getElementById("boardAlertAssigneeSummary");
-const boardAlertNoteSummaryWrap = document.getElementById("boardAlertNoteSummaryWrap");
-const boardAlertNoteSummary = document.getElementById("boardAlertNoteSummary");
-const boardAlertUserButtonsWrap = document.getElementById("boardAlertUserButtonsWrap");
-const boardAlertUserButtons = document.getElementById("boardAlertUserButtons");
-const boardAlertNote = document.getElementById("boardAlertNote");
-const boardActionBtn = document.getElementById("boardActionBtn");
 
 const storageKey = "andon-board-view";
+const lockedMachineGroup = "Press";
 
 const state = {
   alerts: [],
@@ -30,8 +17,7 @@ const state = {
     department: "",
   },
   locked: false,
-  selectedAlert: null,
-  selectedResponderUserId: null,
+  inlineDrafts: {},
 };
 
 let boardTimerIntervalId = null;
@@ -81,13 +67,13 @@ function formatElapsedSeconds(totalSeconds) {
 function loadSavedView() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) || "{}");
-    state.filters.machineGroup = saved.machineGroup || "";
+    state.filters.machineGroup = saved.machineGroup || lockedMachineGroup;
     state.filters.department = saved.department || "";
-    state.locked = Boolean(saved.locked);
+    state.locked = typeof saved.locked === "boolean" ? saved.locked : true;
   } catch {
-    state.filters.machineGroup = "";
+    state.filters.machineGroup = lockedMachineGroup;
     state.filters.department = "";
-    state.locked = false;
+    state.locked = true;
   }
 }
 
@@ -147,76 +133,65 @@ function getRelevantUsers(machine, department) {
   });
 }
 
-function renderUserButtons(users, selectedUserId) {
-  if (!boardAlertUserButtons) return;
-  const validSelected = users.some((user) => Number(user.id) === Number(selectedUserId)) ? selectedUserId : null;
-  state.selectedResponderUserId = validSelected;
-  if (!users.length) {
-    boardAlertUserButtons.innerHTML = '<div class="problem-empty">No users found for this machine and department.</div>';
-    return;
+function getInlineDraft(alertId) {
+  const key = String(alertId);
+  if (!state.inlineDrafts[key]) {
+    state.inlineDrafts[key] = {
+      responderUserId: null,
+      note: "",
+    };
   }
-  boardAlertUserButtons.innerHTML = users
+  return state.inlineDrafts[key];
+}
+
+function setInlineDraft(alertId, patch) {
+  const draft = getInlineDraft(alertId);
+  state.inlineDrafts[String(alertId)] = {
+    ...draft,
+    ...patch,
+  };
+}
+
+function findAlertById(alertId) {
+  return state.alerts.find((item) => Number(item.id) === Number(alertId));
+}
+
+function getInlineResponderUserId(alertId) {
+  const draft = getInlineDraft(alertId);
+  if (Number.isFinite(Number(draft.responderUserId))) {
+    return Number(draft.responderUserId);
+  }
+  const alert = findAlertById(alertId);
+  return Number(alert?.responder_user_id || 0) || null;
+}
+
+function syncInlineCardState(alertId) {
+  const card = boardGrid.querySelector(`[data-alert-id="${alertId}"]`);
+  if (!card) return;
+  const selectedUserId = getInlineResponderUserId(alertId);
+  card.querySelectorAll("[data-board-inline-user-id]").forEach((button) => {
+    button.classList.toggle("is-selected", Number(button.dataset.boardInlineUserId) === Number(selectedUserId));
+  });
+  const ackButton = card.querySelector("[data-board-acknowledge]");
+  if (ackButton) {
+    ackButton.disabled = !selectedUserId;
+  }
+}
+
+function renderInlineUserButtons(users, selectedUserId, alertId) {
+  const validSelected = users.some((user) => Number(user.id) === Number(selectedUserId)) ? selectedUserId : null;
+  if (!users.length) {
+    return '<div class="problem-empty">No users found for this machine and department.</div>';
+  }
+  return users
     .map(
       (user) => `
-        <button type="button" class="user-chip ${Number(selectedUserId) === Number(user.id) ? "is-selected" : ""}" data-board-user-id="${user.id}">
+        <button type="button" class="user-chip board-alert-card__user-chip ${Number(validSelected) === Number(user.id) ? "is-selected" : ""}" data-board-inline-user-id="${user.id}" data-board-alert-id="${alertId}">
           <span class="user-chip__name">${escapeHtml(user.display_name)}</span>
           <span class="user-chip__meta">${escapeHtml(user.work_id || "")}</span>
         </button>`,
     )
     .join("");
-}
-
-function renderAlertNoteThread(container, alert) {
-  if (!container) return false;
-  const createdNote = String(alert?.created_note || "").trim();
-  const currentNote = String(alert?.note || "").trim();
-  const responderName = String(alert?.responder_name_text || "").trim();
-  const bubbles = [];
-  if (createdNote) {
-    bubbles.push({
-      side: "left",
-      label: "Request",
-      text: createdNote,
-    });
-  }
-  if (currentNote && currentNote !== createdNote) {
-    bubbles.push({
-      side: "right",
-      label: responderName || "Response",
-      text: currentNote,
-    });
-  }
-  if (!bubbles.length && currentNote) {
-    bubbles.push({
-      side: "left",
-      label: "Note",
-      text: currentNote,
-    });
-  }
-  if (!bubbles.length) {
-    container.innerHTML = "";
-    return false;
-  }
-  container.innerHTML = bubbles
-    .map(
-      (bubble) => `
-        <div class="alert-note-bubble ${bubble.side === "right" ? "is-right" : "is-left"}">
-          <div class="alert-note-bubble__label">${escapeHtml(bubble.label)}</div>
-          <div class="alert-note-bubble__text">${escapeHtml(bubble.text)}</div>
-        </div>`,
-    )
-    .join("");
-  return true;
-}
-
-function renderIssueSummary(categoryName, problemName) {
-  const category = String(categoryName || "").trim();
-  const problem = String(problemName || "").trim();
-  const summary = [category, problem].filter(Boolean).join(" - ");
-  if (!summary) return "";
-  return `
-    <div class="alert-issue-summary__label">Issue Summary</div>
-    <div class="alert-issue-summary__value">${escapeHtml(summary)}</div>`;
 }
 
 function matchesFilter(alert) {
@@ -230,22 +205,116 @@ function matchesFilter(alert) {
 }
 
 function cardTemplate(alert) {
-  const issue = [alert.department?.name || "", alert.issue_problem?.name || ""].filter(Boolean).join(" - ");
+  const issue = String(alert.issue_problem?.name || "").trim();
+  const operatorMessage = String(alert.created_note || alert.note || "").trim();
+  const respondingMessage = alert.status === "ACKNOWLEDGED" ? String(alert.note || "").trim() : "";
   const elapsedSeconds = Math.max(0, Math.floor(alert.elapsed_seconds || 0));
+  const isOpen = alert.status === "OPEN";
+  const isAcknowledged = alert.status === "ACKNOWLEDGED";
+  const draft = getInlineDraft(alert.id);
+  const selectedResponderUserId = getInlineResponderUserId(alert.id);
+  const users = isOpen ? getRelevantUsers(alert.machine, { id: alert.department?.id, name: alert.department?.name }) : [];
+  const canAcknowledge = Boolean(selectedResponderUserId);
+  const canClose = Boolean(alert.responder_user_id || alert.responder_name_text);
   return `
-    <button type="button" class="board-card h-100 board-alert-card ${statusClass(alert.status)}" data-alert-id="${alert.id}">
+    <article class="board-card h-100 board-alert-card ${statusClass(alert.status)} ${isOpen ? "board-alert-card--inline-open" : ""}" data-alert-id="${alert.id}">
       <div class="board-alert-card__top">
         <h3 class="board-alert-card__title">${escapeHtml(alert.machine?.name || "")}</h3>
         <span class="status-pill ${statusClass(alert.status)}">${statusLabel(alert.status)}</span>
       </div>
-      <div class="board-alert-card__issue">${escapeHtml(issue)}</div>
-      ${alert.responder_name_text ? `<div class="board-alert-card__user">${escapeHtml(alert.responder_name_text)}</div>` : ""}
-      ${alert.note ? `<div class="board-alert-card__note">${escapeHtml(alert.note)}</div>` : ""}
-      <div class="alert-timer board-alert-card__timer" data-elapsed-seconds="${elapsedSeconds}">${formatElapsedSeconds(elapsedSeconds)}</div>
-    </button>`;
+      <div class="board-alert-card__issue ${isAcknowledged ? "board-alert-card__issue--acknowledged" : ""}">
+        <div class="board-alert-card__issue-value">${escapeHtml(issue || "Unassigned")}</div>
+      </div>
+      ${isAcknowledged && alert.responder_name_text ? `
+        <div class="board-alert-card__responder">
+          <div class="board-alert-card__note-label">Who is responding</div>
+          <div class="board-alert-card__responder-value">${escapeHtml(alert.responder_name_text)}</div>
+        </div>` : ""}
+      ${isOpen && operatorMessage ? `
+        <div class="board-alert-card__note">
+          <div class="board-alert-card__note-label">Operator Message</div>
+          <div class="board-alert-card__note-value">${escapeHtml(operatorMessage)}</div>
+        </div>` : ""}
+      ${isAcknowledged ? `
+        <div class="board-alert-card__timer-box">
+          <div class="board-alert-card__timer-label">Elapsed timer</div>
+          <div class="alert-timer board-alert-card__timer" data-elapsed-seconds="${elapsedSeconds}">${formatElapsedSeconds(elapsedSeconds)}</div>
+        </div>
+      ` : ""}
+      ${!isAcknowledged ? `
+        <div class="board-alert-card__timer-box">
+          <div class="board-alert-card__timer-label">Elapsed timer</div>
+          <div class="alert-timer board-alert-card__timer" data-elapsed-seconds="${elapsedSeconds}">${formatElapsedSeconds(elapsedSeconds)}</div>
+        </div>
+      ` : ""}
+      ${isAcknowledged ? `
+        <div class="board-alert-card__working-actions">
+          <div class="board-alert-card__action-title">Discussion Chat</div>
+          ${operatorMessage ? `
+            <div class="board-alert-card__note">
+              <div class="board-alert-card__note-label">Operator Message</div>
+              <div class="board-alert-card__note-value">${escapeHtml(operatorMessage)}</div>
+            </div>` : ""}
+          ${respondingMessage && respondingMessage !== operatorMessage ? `
+            <div class="board-alert-card__note board-alert-card__note--responding">
+              <div class="board-alert-card__note-label">Responding Message</div>
+              <div class="board-alert-card__note-value">${escapeHtml(respondingMessage)}</div>
+            </div>` : ""}
+          <div class="board-alert-card__action-title">Note</div>
+          <textarea class="form-control board-alert-card__note-input" rows="2" placeholder="Add note" data-board-alert-note="true" data-board-alert-id="${alert.id}">${escapeHtml(draft.note)}</textarea>
+          <button type="button" class="btn btn-primary board-alert-card__close-btn" data-board-close="true" data-alert-id="${alert.id}" ${canClose ? "" : "disabled"}>Close</button>
+        </div>
+      ` : ""}
+      ${isOpen ? `
+        <div class="board-alert-card__actions">
+          <div class="board-alert-card__action-title">WHO IS ACCEPTING</div>
+          <div class="user-chip-grid board-alert-card__chip-grid">
+            ${renderInlineUserButtons(users, selectedResponderUserId, alert.id)}
+          </div>
+          <div class="board-alert-card__action-title">Note</div>
+          <textarea class="form-control board-alert-card__note-input" rows="2" placeholder="Add note" data-board-alert-note="true" data-board-alert-id="${alert.id}">${escapeHtml(draft.note)}</textarea>
+          <button type="button" class="btn btn-primary board-alert-card__ack-btn" data-board-acknowledge="true" data-alert-id="${alert.id}" ${canAcknowledge ? "" : "disabled"}>Acknowledge</button>
+        </div>
+      ` : ""}
+    </article>`;
+}
+
+function renderAlertCardList(alerts) {
+  return alerts.map(cardTemplate).join("");
+}
+
+function renderDepartmentStatusGroup(title, alerts, variant) {
+  if (!alerts.length) return "";
+  return `
+    <section class="board-department-subgroup board-department-subgroup--${variant}">
+      <div class="board-department-subgroup__header">
+        <div class="board-department-subgroup__header-spacer" aria-hidden="true"></div>
+        <h4 class="board-department-subgroup__title">${escapeHtml(title)}</h4>
+        <div class="board-department-subgroup__header-spacer" aria-hidden="true"></div>
+      </div>
+      <div class="board-department-subgroup__grid">
+        ${renderAlertCardList(alerts)}
+      </div>
+    </section>`;
 }
 
 function renderDepartmentGroup(departmentName, alerts) {
+  const isMaintenance = String(departmentName || "").toLowerCase() === "maintenance";
+  if (isMaintenance) {
+    const waitingAlerts = alerts.filter((alert) => alert.status === "OPEN");
+    const workingAlerts = alerts.filter((alert) => alert.status !== "OPEN");
+    return `
+      <section class="board-card board-department-panel board-department-panel--split">
+        <div class="board-department-panel__header">
+          <h3 class="board-department-panel__title">${escapeHtml(departmentName)}</h3>
+          <div class="board-department-panel__count">${alerts.length} alerts</div>
+        </div>
+        <div class="board-department-panel__grid board-department-panel__grid--split">
+          ${renderDepartmentStatusGroup("Waiting for Acknowledge", waitingAlerts, "waiting")}
+          ${renderDepartmentStatusGroup("Working On It", workingAlerts, "working")}
+        </div>
+      </section>`;
+  }
   return `
     <section class="board-card board-department-panel">
       <div class="board-department-panel__header">
@@ -253,7 +322,7 @@ function renderDepartmentGroup(departmentName, alerts) {
         <div class="board-department-panel__count">${alerts.length} alerts</div>
       </div>
       <div class="board-department-panel__grid">
-        ${alerts.map(cardTemplate).join("")}
+        ${renderAlertCardList(alerts)}
       </div>
     </section>`;
 }
@@ -266,7 +335,8 @@ function renderMachineGroup(machineGroupName, departmentGroups) {
   return `
     <section class="board-group board-group-panel">
       <div class="board-group__header">
-        <h2 class="board-group__title">${escapeHtml(machineGroupName)}</h2>
+        <div class="board-group__header-spacer" aria-hidden="true"></div>
+        <h2 class="board-group__title">${escapeHtml(machineGroupName)} Department</h2>
         <div class="board-group__count">${totalAlerts} alert${totalAlerts === 1 ? "" : "s"}</div>
       </div>
       <div class="board-group__body">
@@ -278,7 +348,7 @@ function renderMachineGroup(machineGroupName, departmentGroups) {
 function populateFilterOptions() {
   const groups = [...new Set(state.boardState.machines.map((machine) => machine.machine_type || "Unassigned"))].sort();
   const departments = [...new Set(state.boardState.departments.map((department) => department.name || "Unassigned"))].sort();
-  const currentGroup = state.filters.machineGroup;
+  const currentGroup = state.filters.machineGroup || lockedMachineGroup;
   const currentDepartment = state.filters.department;
 
   boardMachineGroup.innerHTML = '<option value="">All Groups</option>' + groups.map((group) => `<option value="${escapeHtml(group)}">${escapeHtml(group)}</option>`).join("");
@@ -288,7 +358,8 @@ function populateFilterOptions() {
   boardMachineGroup.disabled = state.locked;
   boardDepartment.disabled = state.locked;
   boardLockView.textContent = state.locked ? "Unlock View" : "Lock View";
-  boardLockStatus.textContent = state.locked ? "Locked" : "Unlocked";
+  boardLockView.disabled = false;
+  boardLockStatus.textContent = state.locked ? `${lockedMachineGroup} Locked` : "Unlocked";
 }
 
 function renderBoard() {
@@ -342,131 +413,109 @@ function setBoardFallbackPolling(enabled) {
 }
 
 function syncViewFromControls() {
-  state.filters.machineGroup = boardMachineGroup.value || "";
+  state.filters.machineGroup = state.locked ? lockedMachineGroup : (boardMachineGroup.value || "");
   state.filters.department = boardDepartment.value || "";
   saveView();
   renderBoard();
 }
 
 function clearBoardView() {
-  state.filters.machineGroup = "";
+  state.filters.machineGroup = lockedMachineGroup;
   state.filters.department = "";
-  state.locked = false;
+  state.locked = true;
   saveView();
   populateFilterOptions();
   renderBoard();
 }
 
-function openAlertModal(alertId) {
-  const alert = state.alerts.find((item) => Number(item.id) === Number(alertId));
-  if (!alert) return;
-  state.selectedAlert = alert;
-  state.selectedResponderUserId = alert.responder_user_id || null;
-  boardAlertModalTitle.textContent = alert.machine?.name || "Alert";
-  boardAlertIssueSummary.innerHTML = renderIssueSummary(alert.department?.name || "", alert.issue_problem?.name || "");
-  boardAlertModalId.value = String(alert.id);
-  boardAlertNote.value = "";
-  boardActionBtn.textContent = alert.status === "OPEN" ? "Acknowledge" : "Clear";
-  const isOpen = alert.status === "OPEN";
-  const hasAssignee = Boolean(!isOpen && alert.responder_name_text);
-  const hasConversation = renderAlertNoteThread(boardAlertNoteSummary, alert);
-  if (boardAlertAssigneeSummaryWrap && boardAlertAssigneeSummary) {
-    boardAlertAssigneeSummaryWrap.classList.toggle("d-none", !hasAssignee);
-    boardAlertAssigneeSummary.textContent = alert.responder_name_text || "";
+boardGrid.addEventListener("click", async (event) => {
+  const userButton = event.target.closest("[data-board-inline-user-id]");
+  if (userButton) {
+    const alertId = Number(userButton.dataset.boardAlertId);
+    const userId = Number(userButton.dataset.boardInlineUserId);
+    setInlineDraft(alertId, { responderUserId: Number.isFinite(userId) ? userId : null });
+    syncInlineCardState(alertId);
+    return;
   }
-  if (boardAlertNoteSummaryWrap && boardAlertNoteSummary) {
-    boardAlertNoteSummaryWrap.classList.toggle("d-none", !hasConversation);
-  }
-  if (boardAlertUserButtonsWrap) {
-    boardAlertUserButtonsWrap.classList.toggle("d-none", !isOpen);
-  }
-  renderUserButtons(getRelevantUsers(alert.machine, { id: alert.department?.id, name: alert.department?.name }), state.selectedResponderUserId);
-  boardAlertModal.show();
-}
 
-boardGrid.addEventListener("click", (event) => {
-  const tile = event.target.closest("[data-alert-id]");
-  if (!tile) return;
-  openAlertModal(tile.dataset.alertId);
+  const ackButton = event.target.closest("[data-board-acknowledge]");
+  if (ackButton) {
+    const alertId = Number(ackButton.dataset.alertId);
+    const alertData = findAlertById(alertId);
+    if (!alertData) return;
+    const draft = getInlineDraft(alertId);
+    const responderUserId = getInlineResponderUserId(alertId);
+    if (!responderUserId) {
+      window.alert("Select an operator before acknowledging.");
+      return;
+    }
+    const payload = new FormData();
+    payload.append("responder_user_id", String(responderUserId));
+    payload.append("responder_name_text", "");
+    if (draft.note.trim()) {
+      payload.append("note", draft.note.trim());
+    }
+    ackButton.disabled = true;
+    const response = await fetch(`/api/andon/alerts/${alertId}/acknowledge`, { method: "POST", body: payload });
+    const data = await response.json();
+    if (!data.success) {
+      ackButton.disabled = false;
+      window.alert(data.error.message);
+      return;
+    }
+    delete state.inlineDrafts[String(alertId)];
+    window.AndonRefreshBus?.notify();
+    return;
+  }
+
+  const closeButton = event.target.closest("[data-board-close]");
+  if (closeButton) {
+    const alertId = Number(closeButton.dataset.alertId);
+    const alertData = findAlertById(alertId);
+    if (!alertData) return;
+    const draft = getInlineDraft(alertId);
+    const payload = new FormData();
+    if (alertData.responder_user_id) {
+      payload.append("responder_user_id", String(alertData.responder_user_id));
+    }
+    payload.append("responder_name_text", alertData.responder_name_text || "");
+    if (draft.note.trim()) {
+      payload.append("note", draft.note.trim());
+    }
+    closeButton.disabled = true;
+    const response = await fetch(`/api/andon/alerts/${alertId}/resolve`, { method: "POST", body: payload });
+    const data = await response.json();
+    if (!data.success) {
+      closeButton.disabled = false;
+      window.alert(data.error.message);
+      return;
+    }
+    delete state.inlineDrafts[String(alertId)];
+    window.AndonRefreshBus?.notify();
+  }
 });
 
-document.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-board-user-id]");
-  if (!button) return;
-  state.selectedResponderUserId = Number(button.dataset.boardUserId);
-  renderUserButtons(getRelevantUsers(state.selectedAlert?.machine, { id: state.selectedAlert?.department?.id, name: state.selectedAlert?.department?.name }), state.selectedResponderUserId);
+boardGrid.addEventListener("input", (event) => {
+  const noteField = event.target.closest("[data-board-alert-note]");
+  if (!noteField) return;
+  const alertId = Number(noteField.dataset.boardAlertId);
+  setInlineDraft(alertId, { note: noteField.value });
 });
 
 boardMachineGroup.addEventListener("change", syncViewFromControls);
 boardDepartment.addEventListener("change", syncViewFromControls);
 boardLockView.addEventListener("click", () => {
   state.locked = !state.locked;
+  if (state.locked) {
+    state.filters.machineGroup = lockedMachineGroup;
+  } else if (!state.filters.machineGroup) {
+    state.filters.machineGroup = lockedMachineGroup;
+  }
   saveView();
   populateFilterOptions();
+  renderBoard();
 });
 boardClearView?.addEventListener("click", clearBoardView);
-
-document.addEventListener("click", onDocumentClick);
-
-boardActionBtn.addEventListener("click", async () => {
-  const alertId = boardAlertModalId.value;
-  const activeAlert = state.selectedAlert;
-  if (!alertId) return;
-  const responderUserId = activeAlert?.status === "OPEN"
-    ? state.selectedResponderUserId
-    : activeAlert?.responder_user_id || state.selectedResponderUserId;
-  const payload = new FormData();
-  if (responderUserId) {
-    payload.append("responder_user_id", String(responderUserId));
-  }
-  payload.append("responder_name_text", "");
-  if (boardAlertNote.value.trim()) {
-    payload.append("note", boardAlertNote.value.trim());
-  }
-  let endpoint = `/api/andon/alerts/${alertId}/acknowledge`;
-  if (activeAlert?.status !== "OPEN") {
-    endpoint = `/api/andon/alerts/${alertId}/cancel`;
-    if (boardAlertNote.value) payload.append("reason", boardAlertNote.value);
-  }
-  const response = await fetch(endpoint, { method: "POST", body: payload });
-  const data = await response.json();
-  if (!data.success) {
-    alert(data.error.message);
-    return;
-  }
-  boardAlertModal.hide();
-  state.selectedAlert = null;
-  window.AndonRefreshBus?.notify();
-});
-
-document.getElementById("boardAlertModal").addEventListener("hidden.bs.modal", () => {
-  state.selectedAlert = null;
-  state.selectedResponderUserId = null;
-  boardActionBtn.textContent = "Acknowledge";
-  if (boardAlertIssueSummary) {
-    boardAlertIssueSummary.innerHTML = "";
-  }
-  boardAlertNote.value = "";
-  if (boardAlertAssigneeSummaryWrap) {
-    boardAlertAssigneeSummaryWrap.classList.add("d-none");
-  }
-  if (boardAlertAssigneeSummary) {
-    boardAlertAssigneeSummary.textContent = "";
-  }
-  if (boardAlertNoteSummaryWrap) {
-    boardAlertNoteSummaryWrap.classList.add("d-none");
-  }
-  if (boardAlertNoteSummary) {
-    boardAlertNoteSummary.textContent = "";
-  }
-  if (boardAlertUserButtonsWrap) {
-    boardAlertUserButtonsWrap.classList.remove("d-none");
-  }
-  if (boardAlertUserButtons) {
-    boardAlertUserButtons.innerHTML = "";
-    boardAlertUserButtons.classList.remove("d-none");
-  }
-});
 
 function escapeHtml(value) {
   return String(value || "")
@@ -489,14 +538,3 @@ window.AndonRealtime?.onEvent((event) => {
 });
 window.AndonRealtime?.onStatus((status) => setBoardFallbackPolling(!status.connected));
 setBoardFallbackPolling(!window.AndonRealtime?.connected);
-
-function onDocumentClick(event) {
-  if (!boardViewPanel || !boardViewToggle) return;
-  if (boardViewPanel.classList.contains("show")) {
-    const clickedInsidePanel = boardViewPanel.contains(event.target);
-    const clickedToggle = boardViewToggle.contains(event.target);
-    if (!clickedInsidePanel && !clickedToggle) {
-      bootstrap.Collapse.getOrCreateInstance(boardViewPanel, { toggle: false }).hide();
-    }
-  }
-}

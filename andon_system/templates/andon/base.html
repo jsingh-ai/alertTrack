@@ -43,12 +43,13 @@
         </button>
 
         <nav class="app-nav">
-          {% set nav_items = [
+        {% set nav_items = [
             ("pages.operator_page", "Operator", "bi-house-door"),
             ("pages.board_page", "Board", "bi-display"),
+            ("pages.management_page", "Management", "bi-clipboard-data"),
             ("pages.reports_page", "Reports", "bi-graph-up"),
             ("pages.admin_page", "Admin", "bi-gear"),
-          ] %}
+        ] %}
           {% for endpoint, label, icon in nav_items %}
             <a
               class="app-nav__link {% if request.endpoint == endpoint %}is-active{% endif %}"

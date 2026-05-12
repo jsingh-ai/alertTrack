@@ -251,8 +251,8 @@ def resolve_alert(alert_id: int, payload: dict):
     alert = get_alert(alert_id)
     if alert.status in [ALERT_STATUS_RESOLVED, ALERT_STATUS_CANCELLED]:
         raise AlertServiceError("Alert is already closed")
-    if alert.status != ALERT_STATUS_ARRIVED:
-        raise AlertServiceError("Alert must be marked arrived before resolving")
+    if alert.status not in [ALERT_STATUS_ARRIVED, ALERT_STATUS_ACKNOWLEDGED]:
+        raise AlertServiceError("Alert must be acknowledged before resolving")
 
     responder = _resolve_user(payload.get("responder_user_id"))
     now = utc_now()

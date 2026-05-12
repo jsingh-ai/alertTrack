@@ -1,0 +1,117 @@
+{% extends "andon/base.html" %}
+{% block body_class %}board-screen-shell management-screen-shell{% endblock %}
+{% block content %}
+<div class="container-fluid board-page-shell management-page-shell">
+  {% set page_title = "Management Station" %}
+  {% set page_subtitle = "View machine status by machine group or department. Lock the view or clear back to all departments." %}
+  {% set page_action_html %}
+    <button class="btn btn-light btn-sm operator-page-header__badge board-view-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#managementViewPanel" aria-expanded="false" aria-controls="managementViewPanel">
+      <i class="bi bi-bell-fill"></i>
+      <span>Filter View</span>
+    </button>
+  {% endset %}
+  {% include "andon/_page_header.html" %}
+  <div class="board-layout-shell management-layout-shell">
+    <div class="board-view-shell">
+      <div class="collapse" id="managementViewPanel">
+        <div class="card board-control andon-panel">
+          <div class="card-body">
+            <div class="board-control__header">
+              <div>
+                <div class="section-heading mb-0">Display Filter</div>
+              </div>
+              <div id="managementLockStatus" class="board-control__status">Unlocked</div>
+            </div>
+            <div class="board-control__grid">
+              <div class="board-control__field">
+                <label class="form-label small text-uppercase text-secondary mb-0" for="managementMachineGroup">Machine Group</label>
+                <select class="form-select" id="managementMachineGroup">
+                  <option value="">All Groups</option>
+                </select>
+              </div>
+              <div class="board-control__field">
+                <label class="form-label small text-uppercase text-secondary mb-0" for="managementDepartment">Department</label>
+                <select class="form-select" id="managementDepartment">
+                  <option value="">All Departments</option>
+                </select>
+              </div>
+              <div class="board-control__field board-control__field--action">
+                <button class="btn btn-warning w-100" id="managementLockView" type="button">Lock View</button>
+              </div>
+              <div class="board-control__field board-control__field--clear">
+                <button class="btn btn-outline-light w-100" id="managementClearView" type="button">Clear View</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="managementStatusDock" class="operator-status-dock" aria-live="polite"></div>
+    <div id="managementGrid" class="board-grid-shell management-grid-shell"></div>
+  </div>
+</div>
+
+<div class="modal fade management-detail-modal" id="managementDetailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
+    <div class="modal-content machine-modal management-detail-modal__content">
+      <div class="modal-header machine-modal__header">
+        <div class="machine-modal__title-group">
+          <p class="eyebrow mb-1">Press Summary</p>
+          <h2 class="modal-title h3 mb-0" id="managementDetailModalTitle">Press Summary</h2>
+          <div class="management-detail-modal__subtitle" id="managementDetailModalSubtitle">Current shift</div>
+        </div>
+        <button class="btn-close machine-modal__close" data-bs-dismiss="modal" type="button" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="management-detail-modal__filters">
+          <div class="management-detail-modal__range">
+            <div class="management-detail-modal__field">
+              <label class="form-label small text-uppercase text-secondary mb-0" for="managementDetailStart">Start</label>
+              <input type="datetime-local" class="form-control" id="managementDetailStart" step="1">
+            </div>
+            <div class="management-detail-modal__field">
+              <label class="form-label small text-uppercase text-secondary mb-0" for="managementDetailEnd">End</label>
+              <input type="datetime-local" class="form-control" id="managementDetailEnd" step="1">
+            </div>
+            <div class="management-detail-modal__field management-detail-modal__field--action">
+              <button class="btn btn-primary w-100" id="managementDetailRefresh" type="button">Refresh</button>
+            </div>
+          </div>
+        </div>
+        <div class="management-detail-modal__summary" id="managementDetailSummary"></div>
+        <div class="table-responsive management-detail-modal__table-wrap">
+          <table class="table report-data-table table-sm mb-0 management-detail-modal__table">
+            <thead>
+              <tr>
+                <th>Department</th>
+                <th>Issue</th>
+                <th>Operator</th>
+                <th>Made</th>
+                <th>Finished</th>
+                <th>Ack Time</th>
+                <th>Fix Time</th>
+                <th>Total Time</th>
+              </tr>
+            </thead>
+            <tbody id="managementDetailTableBody">
+              <tr><td colspan="8" class="text-secondary">Select a press to view the shift summary.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.AndonManagementDefaults = {
+    shiftStart: {{ management_shift_start|tojson }},
+    shiftEnd: {{ management_shift_end|tojson }},
+    shiftLabel: {{ management_shift_label|tojson }},
+    timeZone: "America/Chicago",
+  };
+</script>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='andon/js/management.js') }}" defer></script>
+{% endblock %}

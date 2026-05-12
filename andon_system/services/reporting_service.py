@@ -281,6 +281,7 @@ def _machine_detail(alert):
         "id": alert.id,
         "alert_number": alert.alert_number,
         "status": alert.status,
+        "machine_id": alert.machine_id,
         "department_name": alert.department.name if alert.department else "Unassigned",
         "machine_name": alert.machine.name if alert.machine else "Unassigned",
         "machine_group": alert.machine.machine_type if alert.machine and alert.machine.machine_type else "Unassigned",

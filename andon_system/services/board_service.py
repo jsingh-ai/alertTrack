@@ -13,6 +13,7 @@ from ..models.user import User
 from .cache_service import get_cached, set_cached
 
 BOARD_STATE_CACHE_TTL_SECONDS = 5
+OPERATOR_METADATA_CACHE_TTL_SECONDS = 300
 
 
 def utc_now():
@@ -26,70 +27,19 @@ def build_board_state():
     if cached is not None:
         return cached
 
-    machine_query = Machine.query.options(joinedload(Machine.department))
-    department_query = Department.query
-    issue_query = IssueCategory.query.options(joinedload(IssueCategory.department), joinedload(IssueCategory.problems))
-    user_query = User.query.options(joinedload(User.department), joinedload(User.machine_group))
-    alert_query = AndonAlert.query.filter(AndonAlert.status.in_(ALERT_STATUSES_ACTIVE))
-    if company_id:
-        machine_query = machine_query.filter(Machine.company_id == company_id)
-        department_query = department_query.filter(Department.company_id == company_id)
-        issue_query = issue_query.filter(IssueCategory.company_id == company_id)
-        user_query = user_query.filter(User.company_id == company_id)
-        alert_query = alert_query.filter(AndonAlert.company_id == company_id)
-
-    machines = machine_query.order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all()
-    departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all()
-    issue_categories = issue_query.filter_by(is_active=True).order_by(IssueCategory.name.asc()).all()
-    active_alerts = (
-        alert_query.options(
-            joinedload(AndonAlert.issue_category),
-            joinedload(AndonAlert.issue_problem),
-        )
-        .order_by(AndonAlert.created_at.desc())
-        .all()
-    )
-    visible_machines = [machine for machine in machines if machine.is_active and (machine.department is None or machine.department.is_active)]
-    visible_departments = departments
-    visible_issue_categories = [
-        category
-        for category in issue_categories
-        if category.department and category.department.is_active
-    ]
-    visible_users = [
-        user
-        for user in user_query.filter_by(is_active=True).order_by(User.display_name.asc()).all()
-        if (user.department is None or user.department.is_active)
-        and (user.machine_group is None or user.machine_group.is_active)
-    ]
-
-    visible_machine_ids = {machine.id for machine in visible_machines}
-    visible_category_ids = {category.id for category in visible_issue_categories}
-    visible_department_ids = {department.id for department in visible_departments}
-    active_alerts = [
-        alert
-        for alert in active_alerts
-        if alert.machine_id in visible_machine_ids
-        and (alert.department_id is None or alert.department_id in visible_department_ids)
-        and (alert.issue_category_id is None or alert.issue_category_id in visible_category_ids)
-    ]
-    created_notes_by_alert_id = _created_notes_by_alert_id(active_alerts, company_id)
-
-    alert_by_machine = {}
-    for alert in active_alerts:
-        alert_by_machine.setdefault(alert.machine_id, alert)
+    context = _load_board_context(company_id, include_alerts=True)
 
     result = {
         "machines": [
-            _serialize_machine(machine, alert_by_machine, created_notes_by_alert_id)
-            for machine in visible_machines
+            _serialize_machine(machine, context["alert_by_machine"], context["created_notes_by_alert_id"])
+            for machine in context["visible_machines"]
         ],
         "departments": [
             {
                 "id": department.id,
                 "name": department.name,
             }
-            for department in visible_departments
+            for department in context["visible_departments"]
         ],
         "issue_groups": [
             {
@@ -106,7 +56,7 @@ def build_board_state():
                     for problem in sorted(category.problems or [], key=lambda item: item.name.lower())
                 ],
             }
-            for category in visible_issue_categories
+            for category in context["visible_issue_categories"]
         ],
         "users": [
             {
@@ -118,17 +68,150 @@ def build_board_state():
                 "machine_group_id": user.machine_group_id,
                 "machine_group_name": user.machine_group.name if user.machine_group else None,
             }
-            for user in visible_users
+            for user in context["visible_users"]
         ],
         "filters": {
-            "machine_types": _unique_values(machine.machine_type for machine in visible_machines),
-            "areas": _unique_values(machine.area for machine in visible_machines),
-            "lines": _unique_values(machine.line for machine in visible_machines),
-            "departments": _unique_values(machine.department.name for machine in visible_machines if machine.department),
+            "machine_types": _unique_values(machine.machine_type for machine in context["visible_machines"]),
+            "areas": _unique_values(machine.area for machine in context["visible_machines"]),
+            "lines": _unique_values(machine.line for machine in context["visible_machines"]),
+            "departments": _unique_values(machine.department.name for machine in context["visible_machines"] if machine.department),
         },
     }
     set_cached(cache_key, result, BOARD_STATE_CACHE_TTL_SECONDS)
     return result
+
+
+def build_operator_snapshot():
+    company_id = get_current_company_id()
+    cache_key = ("operator_snapshot", company_id)
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    context = _load_board_context(company_id, include_alerts=True)
+    result = {
+        "machines": [
+            _serialize_machine(machine, context["alert_by_machine"], context["created_notes_by_alert_id"])
+            for machine in context["visible_machines"]
+        ],
+    }
+    set_cached(cache_key, result, BOARD_STATE_CACHE_TTL_SECONDS)
+    return result
+
+
+def build_operator_metadata():
+    company_id = get_current_company_id()
+    cache_key = ("operator_metadata", company_id)
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    context = _load_board_context(company_id, include_alerts=False)
+    result = {
+        "departments": [
+            {
+                "id": department.id,
+                "name": department.name,
+            }
+            for department in context["visible_departments"]
+        ],
+        "issue_groups": [
+            {
+                "department_id": category.department_id,
+                "department_name": category.department.name if category.department else None,
+                "category_id": category.id,
+                "category_name": category.name,
+                "problems": [
+                    {
+                        "id": problem.id,
+                        "name": problem.name,
+                        "description": problem.description,
+                    }
+                    for problem in sorted(category.problems or [], key=lambda item: item.name.lower())
+                ],
+            }
+            for category in context["visible_issue_categories"]
+        ],
+        "users": [
+            {
+                "id": user.id,
+                "display_name": user.display_name,
+                "work_id": user.employee_id,
+                "department_id": user.department_id,
+                "department_name": user.department.name if user.department else None,
+                "machine_group_id": user.machine_group_id,
+                "machine_group_name": user.machine_group.name if user.machine_group else None,
+            }
+            for user in context["visible_users"]
+        ],
+    }
+    set_cached(cache_key, result, OPERATOR_METADATA_CACHE_TTL_SECONDS)
+    return result
+
+
+def _load_board_context(company_id, include_alerts: bool):
+    machine_query = Machine.query.options(joinedload(Machine.department))
+    department_query = Department.query
+    issue_query = IssueCategory.query.options(joinedload(IssueCategory.department), joinedload(IssueCategory.problems))
+    user_query = User.query.options(joinedload(User.department), joinedload(User.machine_group))
+    alert_query = AndonAlert.query.filter(AndonAlert.status.in_(ALERT_STATUSES_ACTIVE))
+    if company_id:
+        machine_query = machine_query.filter(Machine.company_id == company_id)
+        department_query = department_query.filter(Department.company_id == company_id)
+        issue_query = issue_query.filter(IssueCategory.company_id == company_id)
+        user_query = user_query.filter(User.company_id == company_id)
+        alert_query = alert_query.filter(AndonAlert.company_id == company_id)
+
+    machines = machine_query.order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all()
+    departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all()
+    issue_categories = issue_query.filter_by(is_active=True).order_by(IssueCategory.name.asc()).all()
+    visible_machines = [machine for machine in machines if machine.is_active and (machine.department is None or machine.department.is_active)]
+    visible_departments = departments
+    visible_issue_categories = [
+        category
+        for category in issue_categories
+        if category.department and category.department.is_active
+    ]
+    visible_users = [
+        user
+        for user in user_query.filter_by(is_active=True).order_by(User.display_name.asc()).all()
+        if (user.department is None or user.department.is_active)
+        and (user.machine_group is None or user.machine_group.is_active)
+    ]
+
+    alert_by_machine = {}
+    created_notes_by_alert_id = {}
+    if include_alerts:
+        active_alerts = (
+            alert_query.options(
+                joinedload(AndonAlert.issue_category),
+                joinedload(AndonAlert.issue_problem),
+            )
+            .order_by(AndonAlert.created_at.desc())
+            .all()
+        )
+        visible_machine_ids = {machine.id for machine in visible_machines}
+        visible_category_ids = {category.id for category in visible_issue_categories}
+        visible_department_ids = {department.id for department in visible_departments}
+        active_alerts = [
+            alert
+            for alert in active_alerts
+            if alert.machine_id in visible_machine_ids
+            and (alert.department_id is None or alert.department_id in visible_department_ids)
+            and (alert.issue_category_id is None or alert.issue_category_id in visible_category_ids)
+        ]
+        created_notes_by_alert_id = _created_notes_by_alert_id(active_alerts, company_id)
+        for alert in active_alerts:
+            alert_by_machine.setdefault(alert.machine_id, alert)
+
+    return {
+        "visible_machines": visible_machines,
+        "visible_departments": visible_departments,
+        "visible_issue_categories": visible_issue_categories,
+        "visible_users": visible_users,
+        "alert_by_machine": alert_by_machine,
+        "created_notes_by_alert_id": created_notes_by_alert_id,
+    }
 
 
 def _serialize_active_alert(alert, created_note=None):

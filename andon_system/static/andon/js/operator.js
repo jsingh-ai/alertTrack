@@ -1,4 +1,5 @@
-const boardUrl = "/api/andon/board-state";
+const boardUrl = "/api/andon/operator-snapshot";
+const operatorMetadataUrl = "/api/andon/operator-metadata";
 const operatorViewStorageKey = "andon-operator-view";
 
 const machineBoard = document.getElementById("machineBoard");
@@ -9,32 +10,13 @@ const operatorMachineSelect = document.getElementById("operatorMachine");
 const operatorLockView = document.getElementById("operatorLockView");
 const operatorClearView = document.getElementById("operatorClearView");
 const operatorViewSummary = document.getElementById("operatorViewSummary");
-const machineModal = new bootstrap.Modal(document.getElementById("machineModal"));
-const machineModalTitle = document.getElementById("machineModalTitle");
-const modalMachineId = document.getElementById("modalMachineId");
-const departmentButtons = document.getElementById("departmentButtons");
-const problemSection = document.getElementById("problemSection");
-const problemList = document.getElementById("problemList");
-const operatorNote = document.getElementById("operatorNote");
-const sendMessageBtn = document.getElementById("sendMessageBtn");
-const operatorAlertModal = new bootstrap.Modal(document.getElementById("operatorAlertModal"));
-const operatorAlertModalTitle = document.getElementById("operatorAlertModalTitle");
-const operatorAlertIssueSummary = document.getElementById("operatorAlertIssueSummary");
-const operatorAlertModalId = document.getElementById("operatorAlertModalId");
-const operatorAlertAssigneeSummaryWrap = document.getElementById("operatorAlertAssigneeSummaryWrap");
-const operatorAlertAssigneeSummary = document.getElementById("operatorAlertAssigneeSummary");
-const operatorAlertNoteSummaryWrap = document.getElementById("operatorAlertNoteSummaryWrap");
-const operatorAlertNoteSummary = document.getElementById("operatorAlertNoteSummary");
-const operatorAlertUserButtonsWrap = document.getElementById("operatorAlertUserButtonsWrap");
-const operatorAlertUserButtons = document.getElementById("operatorAlertUserButtons");
-const operatorAlertNote = document.getElementById("operatorAlertNote");
-const operatorAlertActionBtn = document.getElementById("operatorAlertActionBtn");
+const operatorStatusDock = document.getElementById("operatorStatusDock");
 
 const departmentLabelMap = {
-  Maintenance: "Maintenance Needed",
+  Maintenance: "Maintenance",
   Materials: "Materials Alert",
   Quality: "Quality Check",
-  Supervisor: "Assistance Needed",
+  Supervisor: "Supervisor",
   Safety: "Safety",
   Production: "Production",
 };
@@ -49,7 +31,10 @@ const state = {
   selectedProblem: null,
   selectedAlertUserId: null,
   selectedAlert: null,
+  createNoteDraft: "",
+  alertNoteDraft: "",
   refreshedAt: null,
+  metadataLoaded: false,
   view: {
     machineGroup: "",
     machineId: "",
@@ -60,6 +45,11 @@ const state = {
 let elapsedTimerIntervalId = null;
 let operatorRefreshTimeoutId = null;
 let operatorFallbackPollIntervalId = null;
+let operatorCreateTransitionFrameId = null;
+let operatorRefreshInFlight = false;
+let operatorRefreshQueued = false;
+let liveTimerNodes = [];
+let operatorMetadataLoadPromise = null;
 
 function normalizeActiveAlert(alert, machine) {
   return {
@@ -104,6 +94,11 @@ function handleVisibilityChange() {
 async function boot() {
   restoreViewState();
   await loadBoardState();
+  try {
+    await loadOperatorMetadata();
+  } catch (_error) {
+    console.warn("Failed to preload operator metadata.");
+  }
   normalizeViewState();
   wireEvents();
   renderViewControls();
@@ -113,6 +108,13 @@ async function boot() {
   window.AndonRefreshBus?.onRefresh(scheduleOperatorRefresh);
   window.AndonRealtime?.onEvent((event) => {
     if (["board_refresh", "alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
+      if (event.type === "admin_metadata_updated") {
+        state.metadataLoaded = false;
+        operatorMetadataLoadPromise = null;
+        if (state.selectedMachine || state.selectedAlert) {
+          void loadOperatorMetadata().then(renderBoard).catch(() => {});
+        }
+      }
       scheduleOperatorRefresh();
     }
   });
@@ -124,81 +126,153 @@ async function loadBoardState() {
   const response = await fetch(boardUrl);
   const data = await response.json();
   state.board = data.data || state.board;
-  state.departments = state.board.departments || [];
-  state.issueGroups = state.board.issue_groups || [];
-  state.users = state.board.users || [];
   state.refreshedAt = Date.now();
+}
+
+async function loadOperatorMetadata() {
+  if (state.metadataLoaded) return;
+  if (!operatorMetadataLoadPromise) {
+    operatorMetadataLoadPromise = (async () => {
+      const response = await fetch(operatorMetadataUrl);
+      const data = await response.json();
+      const metadata = data.data || {};
+      state.departments = metadata.departments || [];
+      state.issueGroups = metadata.issue_groups || [];
+      state.users = metadata.users || [];
+      state.metadataLoaded = true;
+    })().finally(() => {
+      operatorMetadataLoadPromise = null;
+    });
+  }
+  await operatorMetadataLoadPromise;
+}
+
+async function ensureOperatorMetadataLoaded() {
+  if (state.metadataLoaded) return;
+  await loadOperatorMetadata();
 }
 
 function wireEvents() {
   machineBoard.addEventListener("click", onBoardClick);
-  departmentButtons.addEventListener("click", onDepartmentButtonClick);
-  problemList.addEventListener("click", onProblemClick);
-  sendMessageBtn.addEventListener("click", createAlertFromModal);
-  operatorAlertActionBtn.addEventListener("click", actOnActiveAlert);
+  machineBoard.addEventListener("input", onBoardInput);
   operatorMachineGroupSelect.addEventListener("change", onMachineGroupChange);
   operatorMachineSelect.addEventListener("change", onMachineChange);
   operatorLockView.addEventListener("click", toggleOperatorViewLock);
   operatorClearView.addEventListener("click", clearOperatorView);
   document.addEventListener("click", onDocumentClick);
-  document.getElementById("machineModal").addEventListener("hidden.bs.modal", resetModal);
-  document.getElementById("operatorAlertModal").addEventListener("hidden.bs.modal", resetAlertModal);
 }
 
 function onBoardClick(event) {
-  const tile = event.target.closest("[data-machine-id]");
-  if (!tile) return;
-  const machineId = Number(tile.dataset.machineId);
-  void openMachineModal(machineId);
+  const toggle = event.target.closest("[data-machine-toggle]");
+  if (toggle) {
+    void toggleMachinePanel(Number(toggle.dataset.machineId));
+    return;
+  }
+
+  const departmentButton = event.target.closest("[data-department-name]");
+  if (departmentButton) {
+    onDepartmentButtonClick(departmentButton);
+    return;
+  }
+
+  const problemButton = event.target.closest("[data-problem-id]");
+  if (problemButton) {
+    onProblemClick(problemButton);
+    return;
+  }
+
+  const userButton = event.target.closest("[data-user-choice]");
+  if (userButton) {
+    onUserChoiceClick(userButton);
+    return;
+  }
+
+  const actionButton = event.target.closest("[data-inline-action]");
+  if (!actionButton) return;
+  const action = actionButton.dataset.inlineAction;
+  if (action === "send-message") {
+    void createAlertFromModal();
+  } else if (action === "act-on-alert") {
+    void actOnActiveAlert();
+  } else if (action === "close-panel") {
+    closeMachinePanel();
+  }
 }
 
-async function openMachineModal(machineId) {
+function onBoardInput(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLTextAreaElement)) return;
+  if (target.dataset.noteKind === "create") {
+    state.createNoteDraft = target.value;
+    return;
+  }
+  if (target.dataset.noteKind === "alert") {
+    state.alertNoteDraft = target.value;
+  }
+}
+
+async function toggleMachinePanel(machineId) {
   let machine = state.board.machines.find((row) => row.id === machineId);
   if (!machine && !state.board.machines.length) {
     await loadBoardState();
     machine = state.board.machines.find((row) => row.id === machineId);
   }
   if (!machine) return;
+  const isOpenMachine = state.selectedMachine && Number(state.selectedMachine.id) === Number(machine.id);
+  if (isOpenMachine) {
+    closeMachinePanel();
+    return;
+  }
   if (machine.active_alert) {
-    openActiveAlertModal(machine.active_alert, machine);
+    await openActiveAlertModal(machine.active_alert, machine);
+    return;
+  }
+  await openCreatePanel(machine);
+}
+
+async function openActiveAlertModal(activeAlert, machine) {
+  try {
+    await ensureOperatorMetadataLoaded();
+  } catch (_error) {
+    window.alert("Unable to load operator metadata.");
+    return;
+  }
+  state.selectedAlert = activeAlert;
+  state.selectedMachine = machine;
+  state.selectedAlertUserId = activeAlert.responder_user_id || null;
+  state.selectedDepartment = null;
+  state.selectedProblem = null;
+  state.createNoteDraft = "";
+  state.alertNoteDraft = "";
+  renderBoard();
+}
+
+async function openCreatePanel(machine) {
+  try {
+    await ensureOperatorMetadataLoaded();
+  } catch (_error) {
+    window.alert("Unable to load operator metadata.");
     return;
   }
   state.selectedMachine = machine;
+  state.selectedAlert = null;
+  state.selectedAlertUserId = null;
   state.selectedDepartment = null;
   state.selectedProblem = null;
-  modalMachineId.value = String(machine.id);
-  machineModalTitle.textContent = machine.name;
-  operatorNote.value = "";
-  problemSection.hidden = true;
-  renderDepartmentButtons();
-  renderProblemOptions([]);
-  machineModal.show();
+  state.createNoteDraft = "";
+  state.alertNoteDraft = "";
+  renderBoard();
 }
 
-function openActiveAlertModal(alert, machine) {
-  state.selectedAlert = alert;
-  state.selectedMachine = machine;
-  state.selectedAlertUserId = alert.responder_user_id || null;
-  operatorAlertModalTitle.textContent = machine.name;
-  operatorAlertIssueSummary.innerHTML = renderIssueSummary(alert.category_name || "", alert.problem_name || "");
-  operatorAlertModalId.value = String(alert.id);
-  operatorAlertNote.value = "";
-  operatorAlertActionBtn.textContent = alert.status === "OPEN" ? "Acknowledge" : "Clear";
-  const isOpen = alert.status === "OPEN";
-  const hasAssignee = Boolean(!isOpen && alert.responder_name_text);
-  const hasConversation = renderAlertNoteThread(operatorAlertNoteSummary, alert);
-  if (operatorAlertAssigneeSummaryWrap && operatorAlertAssigneeSummary) {
-    operatorAlertAssigneeSummaryWrap.classList.toggle("d-none", !hasAssignee);
-    operatorAlertAssigneeSummary.textContent = alert.responder_name_text || "";
-  }
-  if (operatorAlertNoteSummaryWrap && operatorAlertNoteSummary) {
-    operatorAlertNoteSummaryWrap.classList.toggle("d-none", !hasConversation);
-  }
-  if (operatorAlertUserButtonsWrap) {
-    operatorAlertUserButtonsWrap.classList.toggle("d-none", !isOpen);
-  }
-  renderUserButtons(operatorAlertUserButtons, getRelevantUsersForSelection(machine, { id: alert.department_id, name: alert.department_name }), state.selectedAlertUserId, "alert");
-  operatorAlertModal.show();
+function closeMachinePanel() {
+  state.selectedMachine = null;
+  state.selectedAlert = null;
+  state.selectedAlertUserId = null;
+  state.selectedDepartment = null;
+  state.selectedProblem = null;
+  state.createNoteDraft = "";
+  state.alertNoteDraft = "";
+  renderBoard();
 }
 
 function renderDepartmentButtons() {
@@ -224,62 +298,58 @@ function renderDepartmentButtons() {
   syncDepartmentButtonVisibility();
 }
 
-function onDepartmentButtonClick(event) {
-  const button = event.target.closest("[data-department-name]");
+function onDepartmentButtonClick(button) {
   if (!button) return;
+  const tile = button.closest(".operator-machine-tile");
+  const machineId = Number(tile?.dataset.machineId);
+  const machine = state.board.machines.find((row) => Number(row.id) === machineId) || null;
   const departmentName = button.dataset.departmentName;
   const department = state.departments.find((row) => row.name === departmentName);
   if (!department) return;
+  state.selectedMachine = machine || state.selectedMachine;
 
   const isSelected = state.selectedDepartment && Number(state.selectedDepartment.id) === Number(department.id);
   if (isSelected) {
     state.selectedDepartment = null;
     state.selectedProblem = null;
-    problemSection.hidden = true;
-    problemList.innerHTML = "";
-    syncDepartmentButtonState();
-    syncDepartmentButtonVisibility();
-    syncProblemButtonState();
+    renderBoard();
     return;
   }
 
   state.selectedDepartment = department;
   state.selectedProblem = null;
-  const group = state.issueGroups.find((entry) => Number(entry.department_id) === Number(department.id));
-  const problems = group ? group.problems : [];
-  problemSection.hidden = false;
-  renderProblemOptions(problems);
-  syncDepartmentButtonState();
-  syncDepartmentButtonVisibility();
-  syncProblemButtonState();
-  problemSection.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  renderBoard();
 }
 
-function renderProblemOptions(problems) {
-  problemList.innerHTML = problems.length
-    ? problems
-        .map(
-          (problem) => `
-            <button type="button" class="problem-btn" data-problem-id="${problem.id}">
-              <span class="problem-btn__name">${escapeHtml(problem.name)}</span>
-            </button>`,
-        )
-        .join("")
-    : '<div class="problem-empty">No issues found for this department.</div>';
-  syncProblemButtonState();
-}
-
-function onProblemClick(event) {
-  const button = event.target.closest("[data-problem-id]");
+function onProblemClick(button) {
   if (!button) return;
+  const tile = button.closest(".operator-machine-tile");
+  const machineId = Number(tile?.dataset.machineId);
+  const machine = state.board.machines.find((row) => Number(row.id) === machineId) || null;
   const problemId = Number(button.dataset.problemId);
   const department = state.selectedDepartment;
   if (!department) return;
   const group = state.issueGroups.find((entry) => Number(entry.department_id) === Number(department.id));
   const problem = group?.problems?.find((entry) => Number(entry.id) === problemId);
   if (!problem) return;
+  state.selectedMachine = machine || state.selectedMachine;
   state.selectedProblem = problem;
   syncProblemButtonState();
+  syncCreateSubmitState();
+}
+
+function onUserChoiceClick(button) {
+  if (!button) return;
+  const tile = button.closest(".operator-machine-tile");
+  const machineId = Number(tile?.dataset.machineId);
+  const machine = state.board.machines.find((row) => Number(row.id) === machineId) || null;
+  const userId = Number(button.dataset.userId);
+  if (button.dataset.userChoice === "alert") {
+    state.selectedMachine = machine || state.selectedMachine;
+    state.selectedAlert = machine?.active_alert || state.selectedAlert;
+    state.selectedAlertUserId = Number.isFinite(userId) ? userId : null;
+    renderBoard();
+  }
 }
 
 function getRelevantUsersForSelection(machine, department) {
@@ -381,7 +451,7 @@ async function createAlertFromModal() {
     department_id: state.selectedDepartment.id,
     issue_problem_id: Number(state.selectedProblem.id),
     operator_name_text: null,
-    note: operatorNote.value || null,
+    note: state.createNoteDraft.trim() || null,
   };
   const response = await fetch("/api/andon/alerts", {
     method: "POST",
@@ -395,9 +465,7 @@ async function createAlertFromModal() {
     if (targetMachine) {
       targetMachine.active_alert = activeAlert;
     }
-    machineModal.hide();
-    renderBoard();
-    openActiveAlertModal(activeAlert, targetMachine);
+    await openActiveAlertModal(activeAlert, targetMachine);
     window.AndonRefreshBus?.notify();
     return;
   }
@@ -410,14 +478,13 @@ async function createAlertFromModal() {
   if (machine) {
     machine.active_alert = createdAlert;
   }
-  machineModal.hide();
-  renderBoard();
+  closeMachinePanel();
   window.AndonRefreshBus?.notify();
 }
 
 async function actOnActiveAlert() {
-  const alertId = operatorAlertModalId.value;
-  const activeAlert = state.selectedAlert;
+  const activeAlert = state.selectedAlert || state.board.machines.find((machine) => Number(machine.id) === Number(state.selectedMachine?.id))?.active_alert;
+  const alertId = activeAlert?.id;
   if (!alertId || !activeAlert) return;
   const responderUserId = activeAlert.status === "OPEN"
     ? state.selectedAlertUserId
@@ -427,13 +494,13 @@ async function actOnActiveAlert() {
     payload.append("responder_user_id", String(responderUserId));
   }
   payload.append("responder_name_text", "");
-  if (operatorAlertNote.value.trim()) {
-    payload.append("note", operatorAlertNote.value.trim());
+  if (state.alertNoteDraft.trim()) {
+    payload.append("note", state.alertNoteDraft.trim());
   }
   let endpoint = `/api/andon/alerts/${alertId}/acknowledge`;
   if (activeAlert.status !== "OPEN") {
     endpoint = `/api/andon/alerts/${alertId}/cancel`;
-    if (operatorAlertNote.value) payload.append("reason", operatorAlertNote.value);
+    if (state.alertNoteDraft) payload.append("reason", state.alertNoteDraft);
   }
   const response = await fetch(endpoint, { method: "POST", body: payload });
   const data = await response.json();
@@ -441,20 +508,153 @@ async function actOnActiveAlert() {
     alert(data.error.message);
     return;
   }
-  operatorAlertModal.hide();
-  state.selectedAlert = null;
+  closeMachinePanel();
   window.AndonRefreshBus?.notify();
 }
 
 function renderBoard() {
-  const now = Date.now();
   const visibleMachines = getVisibleMachines();
-  machineBoard.innerHTML = visibleMachines.length
-    ? renderGroupedBoard(visibleMachines, now)
-    : renderEmptyBoard();
+  const detailed = isDetailedOperatorView();
+  const boardKey = buildBoardKey(visibleMachines, detailed);
+  machineBoard.dataset.machineCount = String(visibleMachines.length);
+  machineBoard.dataset.viewMode = detailed ? "detailed" : "compact";
+  applyDetailedBoardDensity(visibleMachines.length, detailed);
+  if (!visibleMachines.length) {
+    machineBoard.innerHTML = renderEmptyBoard();
+    machineBoard.dataset.boardKey = boardKey;
+    syncLiveTimerNodes();
+    renderStatusDock(visibleMachines, detailed);
+    primeCreatePanelTransitions();
+    return;
+  }
+
+  const patched = machineBoard.dataset.boardKey === boardKey && patchBoardTiles(visibleMachines, detailed);
+  if (!patched) {
+    machineBoard.innerHTML = renderGroupedBoard(visibleMachines, detailed);
+  }
+  machineBoard.dataset.boardKey = boardKey;
+  syncLiveTimerNodes();
+  renderStatusDock(visibleMachines, detailed);
+  primeCreatePanelTransitions();
 }
 
-function renderGroupedBoard(rows, now) {
+function buildBoardKey(visibleMachines, detailed) {
+  return `${detailed ? "detailed" : "compact"}:${visibleMachines.map((machine) => machine.id).join(",")}`;
+}
+
+function buildMachineTileSignature(machine, detailed) {
+  const active = Boolean(machine.active_alert);
+  const alert = machine.active_alert;
+  const selectedMachineId = state.selectedMachine ? Number(state.selectedMachine.id) : null;
+  const selectedDepartmentId = state.selectedDepartment ? Number(state.selectedDepartment.id) : null;
+  const selectedProblemId = state.selectedProblem ? Number(state.selectedProblem.id) : null;
+  const selectedAlertId = state.selectedAlert ? Number(state.selectedAlert.id) : null;
+  const isSelectedMachine = Number(machine.id) === selectedMachineId;
+  const isSelectedAlert = active && selectedAlertId === Number(alert.id);
+  const metadataState = isSelectedMachine || isSelectedAlert ? (state.metadataLoaded ? "meta" : "nometa") : "";
+  const createDraftState = !active && isSelectedMachine ? state.createNoteDraft : "";
+  const alertDraftState = isSelectedAlert ? state.alertNoteDraft : "";
+  const alertUserState = isSelectedAlert ? String(state.selectedAlertUserId || "") : "";
+  return [
+    detailed ? "d" : "c",
+    active ? "a" : "i",
+    machine.is_active ? "1" : "0",
+    active ? String(alert.status || "") : "",
+    active ? String(alert.id || "") : "",
+    active ? String(Math.max(0, Math.floor(alert.elapsed_seconds || 0))) : "",
+    active ? String(alert.acknowledged_seconds ?? "") : "",
+    active ? String(alert.responder_user_id ?? "") : "",
+    active ? String(alert.responder_name_text || "") : "",
+    isSelectedMachine ? "m" : "",
+    isSelectedMachine && selectedDepartmentId ? `dep:${selectedDepartmentId}` : "",
+    isSelectedMachine && selectedProblemId ? `prob:${selectedProblemId}` : "",
+    isSelectedAlert ? "sel" : "",
+    createDraftState,
+    alertDraftState,
+    alertUserState,
+    metadataState,
+  ].join("|");
+}
+
+function patchBoardTiles(visibleMachines, detailed) {
+  const tiles = machineBoard.querySelectorAll(".operator-machine-tile");
+  if (tiles.length !== visibleMachines.length) return false;
+
+  for (let index = 0; index < visibleMachines.length; index += 1) {
+    const machine = visibleMachines[index];
+    const tile = tiles[index];
+    if (!tile || Number(tile.dataset.machineId) !== Number(machine.id)) {
+      return false;
+    }
+    const nextSignature = buildMachineTileSignature(machine, detailed);
+    if (tile.dataset.renderSignature !== nextSignature) {
+      tile.outerHTML = renderMachineTile(machine, detailed);
+    }
+  }
+
+  return true;
+}
+
+function syncLiveTimerNodes() {
+  liveTimerNodes = Array.from(machineBoard.querySelectorAll('.machine-tile__timer[data-live-timer="true"][data-elapsed-seconds]'));
+}
+
+function primeCreatePanelTransitions() {
+  if (operatorCreateTransitionFrameId) {
+    cancelAnimationFrame(operatorCreateTransitionFrameId);
+  }
+  operatorCreateTransitionFrameId = requestAnimationFrame(() => {
+    operatorCreateTransitionFrameId = null;
+    document
+      .querySelectorAll('.machine-tile__inline-panel--create[data-followup="true"]')
+      .forEach((panel) => panel.classList.add("is-followup-active"));
+    document
+      .querySelectorAll('.operator-machine-tile[data-create-followup="true"]')
+      .forEach((tile) => tile.classList.add("is-followup-active"));
+  });
+}
+
+function applyDetailedBoardDensity(machineCount, detailed) {
+  if (!machineBoard) return;
+  if (!detailed || !machineCount) {
+    machineBoard.style.removeProperty("--operator-detailed-columns");
+    machineBoard.style.removeProperty("--operator-detailed-card-min-height");
+    machineBoard.style.removeProperty("--operator-detailed-request-square-min-height");
+    return;
+  }
+
+  let columns = 1;
+  let cardMinHeight = "min(72vh, 52rem)";
+  let requestSquareMinHeight = "min(18vh, 13rem)";
+
+  if (machineCount === 1) {
+    columns = 1;
+    cardMinHeight = "min(86vh, 64rem)";
+    requestSquareMinHeight = "min(28vh, 18rem)";
+  } else if (machineCount === 2) {
+    columns = 2;
+    cardMinHeight = "min(72vh, 50rem)";
+    requestSquareMinHeight = "min(24vh, 16rem)";
+  } else if (machineCount <= 4) {
+    columns = 2;
+    cardMinHeight = "min(64vh, 44rem)";
+    requestSquareMinHeight = "min(22vh, 14rem)";
+  } else if (machineCount <= 8) {
+    columns = 4;
+    cardMinHeight = "min(48vh, 34rem)";
+    requestSquareMinHeight = "min(18vh, 12rem)";
+  } else {
+    columns = 4;
+    cardMinHeight = "min(42vh, 30rem)";
+    requestSquareMinHeight = "min(16vh, 10rem)";
+  }
+
+  machineBoard.style.setProperty("--operator-detailed-columns", String(columns));
+  machineBoard.style.setProperty("--operator-detailed-card-min-height", cardMinHeight);
+  machineBoard.style.setProperty("--operator-detailed-request-square-min-height", requestSquareMinHeight);
+}
+
+function renderGroupedBoard(rows, detailed) {
   const groups = new Map();
   rows.forEach((machine) => {
     const key = machine.machine_type || "Unassigned";
@@ -464,42 +664,42 @@ function renderGroupedBoard(rows, now) {
     groups.get(key).push(machine);
   });
   return [...groups.entries()]
-    .map(([groupName, machines]) => renderGroupSection(groupName, machines, now))
+    .map(([groupName, machines]) => renderGroupSection(groupName, machines, detailed))
     .join("");
 }
 
-function renderGroupSection(groupName, machines, now) {
+function renderGroupSection(groupName, machines, detailed) {
   return `
-    <section class="machine-group operator-machine-group">
-      <div class="operator-machine-group__header">
-        <h2 class="h4 mb-0 operator-machine-group__title">${escapeHtml(groupName)}</h2>
-        <div class="operator-machine-group__count">${machines.length} machine${machines.length === 1 ? "" : "s"}</div>
-      </div>
-      <div class="operator-machine-group__grid">
-        ${machines.map((machine) => renderMachineTile(machine, now)).join("")}
+    <section class="machine-group operator-machine-group ${detailed ? "operator-machine-group--detailed" : ""}">
+      <div class="operator-machine-group__grid ${detailed ? "operator-machine-group__grid--detailed" : ""}">
+        ${machines.map((machine) => renderMachineTile(machine, detailed)).join("")}
       </div>
     </section>`;
 }
 
-function renderMachineTile(machine, now) {
+function renderMachineTile(machine, detailed) {
   const active = Boolean(machine.active_alert);
   const alert = machine.active_alert;
   const elapsedSeconds = active ? Math.max(0, Math.floor(alert.elapsed_seconds || 0)) : 0;
-  const elapsed = active ? formatElapsedSeconds(elapsedSeconds) : "";
   const alertColor = alert?.color || "#ef476f";
   const tileStyle = active ? `style="--alert-accent:${alertColor}"` : "";
+  const isOpen = active && alert.status === "OPEN";
+  const isCreateFollowup = !active
+    && state.selectedMachine
+    && Number(state.selectedMachine.id) === Number(machine.id)
+    && Boolean(state.selectedDepartment);
+  const topTone = !active ? "healthy" : isOpen ? "open" : "warning";
+  const renderSignature = buildMachineTileSignature(machine, detailed);
   return `
-    <button class="machine-tile operator-machine-tile ${active ? "machine-tile--alert" : "machine-tile--idle"} ${machine.is_active ? "" : "machine-tile--off"} ${active && alert.status !== "OPEN" ? "machine-tile--working" : ""}" data-machine-id="${machine.id}" ${tileStyle}>
-      <div class="machine-tile__name">${escapeHtml(machine.name)}</div>
-      ${active ? `
-        <div class="machine-tile__alert">${escapeHtml(alert.category_name || "")}${alert.category_name && alert.problem_name ? " - " : ""}${escapeHtml(alert.problem_name || "")}</div>
-        ${alert.responder_name_text ? `<div class="machine-tile__user">${escapeHtml(alert.responder_name_text)}</div>` : ""}
-        ${alert.note ? `<div class="machine-tile__note">${escapeHtml(alert.note)}</div>` : ""}
-        <div class="machine-tile__timer" data-elapsed-seconds="${elapsedSeconds}">${elapsed}</div>
-      ` : `
-        <div class="machine-tile__idle-text">Healthy</div>
-      `}
-    </button>`;
+    <article class="machine-tile operator-machine-tile ${active ? "machine-tile--alert" : "machine-tile--idle"} ${machine.is_active ? "" : "machine-tile--off"} ${active && alert.status !== "OPEN" ? "machine-tile--working" : ""} ${isCreateFollowup ? "machine-tile--create-followup" : ""} ${detailed ? "operator-machine-tile--detailed" : ""}" ${tileStyle} data-machine-id="${machine.id}" data-create-followup="${isCreateFollowup ? "true" : "false"}" data-render-signature="${escapeHtml(renderSignature)}">
+      <div class="machine-tile__top machine-tile__top--tone-${topTone} ${detailed ? "machine-tile__top--detailed" : ""}">
+        <div class="machine-tile__identity ${detailed ? "machine-tile__identity--detailed" : ""}">
+          <div class="machine-tile__name">${escapeHtml(machine.name)}</div>
+        </div>
+        <span class="status-pill ${active ? statusClass(alert.status) : "status-healthy"}">${active ? statusLabel(alert.status) : "Healthy"}</span>
+      </div>
+      ${active ? renderAlertInlinePanel(machine, alert, detailed) : renderCreateInlinePanel(machine, detailed)}
+    </article>`;
 }
 
 function formatElapsedSeconds(totalSeconds) {
@@ -514,16 +714,349 @@ function formatElapsedSeconds(totalSeconds) {
   return `${String(mins).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function formatAlertElapsedDuration(totalSeconds) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+  const parts = [];
+
+  if (days > 0) {
+    parts.push(`${days}d`);
+  }
+
+  parts.push(`${days > 0 ? String(hours).padStart(2, "0") : hours}h`);
+  parts.push(`${String(minutes).padStart(2, "0")}m`);
+  parts.push(`${String(remainingSeconds).padStart(2, "0")}s`);
+
+  return parts.join(" ");
+}
+
+function statusClass(status) {
+  return `status-${String(status || "").toLowerCase()}`;
+}
+
+function statusLabel(status) {
+  if (status === "ACKNOWLEDGED") return "Working";
+  return String(status || "");
+}
+
+function isDetailedOperatorView() {
+  return Boolean(state.view.machineGroup || state.view.machineId);
+}
+
+function getGroupSummary(machines) {
+  const activeAlerts = machines.filter((machine) => Boolean(machine.active_alert));
+  return {
+    activeAlerts: activeAlerts.length,
+    healthyMachines: machines.length - activeAlerts.length,
+  };
+}
+
+function renderDepartmentButtonsMarkup() {
+  const preferredOrder = Object.keys(departmentLabelMap);
+  const departments = [...state.departments].sort((left, right) => {
+    const leftIndex = preferredOrder.indexOf(left.name);
+    const rightIndex = preferredOrder.indexOf(right.name);
+    if (leftIndex === -1 && rightIndex === -1) return left.name.localeCompare(right.name);
+    if (leftIndex === -1) return 1;
+    if (rightIndex === -1) return -1;
+    return leftIndex - rightIndex;
+  });
+  return departments
+    .map((department) => {
+      const label = departmentLabelMap[department.name] || department.name;
+      const isSelected = state.selectedDepartment && Number(state.selectedDepartment.id) === Number(department.id);
+      const iconClass = getDepartmentIconClass(department.name);
+      return `
+        <button type="button" class="btn btn-lg board-category-btn${isSelected ? " is-active" : ""}" data-department-id="${department.id}" data-department-name="${escapeHtml(department.name)}">
+          <span class="board-category-btn__icon" aria-hidden="true"><i class="${iconClass}"></i></span>
+          <span class="d-block">${escapeHtml(label)}</span>
+        </button>`;
+    })
+    .join("");
+}
+
+function renderProblemOptionsMarkup(problems) {
+  return problems.length
+    ? problems
+        .map(
+          (problem) => `
+            <button type="button" class="problem-btn${state.selectedProblem && Number(state.selectedProblem.id) === Number(problem.id) ? " is-active" : ""}" data-problem-id="${problem.id}">
+              <span class="problem-btn__name">${escapeHtml(problem.name)}</span>
+            </button>`,
+        )
+        .join("")
+    : '<div class="problem-empty">No issues found for this department.</div>';
+}
+
+function getDepartmentIconClass(name) {
+  switch (String(name || "").toLowerCase()) {
+    case "maintenance":
+      return "bi bi-tools";
+    case "materials":
+      return "bi bi-box-seam";
+    case "quality":
+      return "bi bi-patch-check-fill";
+    case "supervisor":
+      return "bi bi-person-badge-fill";
+    case "safety":
+      return "bi bi-shield-exclamation";
+    case "production":
+      return "bi bi-gear-wide-connected";
+    default:
+      return "bi bi-dot";
+  }
+}
+
+function renderUserButtonsMarkup(users, selectedUserId, kind) {
+  const validSelected = users.some((user) => Number(user.id) === Number(selectedUserId)) ? selectedUserId : null;
+  if (!users.length) {
+    return '<div class="problem-empty">No users found for this machine and department.</div>';
+  }
+  return users
+    .map(
+      (user) => `
+        <button type="button" class="user-chip ${Number(validSelected) === Number(user.id) ? "is-selected" : ""}" data-user-choice="${kind}" data-user-id="${user.id}">
+          <span class="user-chip__name">${escapeHtml(user.display_name)}</span>
+          <span class="user-chip__meta">${escapeHtml(user.work_id || "")}</span>
+        </button>`,
+    )
+    .join("");
+}
+
+function renderCreateInlinePanel(machine, detailed) {
+  const preferredDepartment = state.selectedDepartment;
+  const problems = preferredDepartment
+    ? (state.issueGroups.find((entry) => Number(entry.department_id) === Number(preferredDepartment.id))?.problems || [])
+    : [];
+  const showFollowup = Boolean(preferredDepartment);
+  const canSubmit = Boolean(machine && state.selectedDepartment && state.selectedProblem);
+  const healthyTime = formatCurrentTime();
+  return `
+    <div class="machine-tile__inline-panel--create machine-modal--create machine-modal__create-stack ${detailed ? "machine-tile__inline-panel--detailed" : ""}" data-followup="${showFollowup ? "true" : "false"}">
+      <div class="machine-tile__inline-panel machine-tile__inline-panel--healthy">
+        <div class="machine-tile__healthy-band">
+          <div class="machine-tile__healthy-intro">
+            <div class="machine-tile__healthy-header">
+              <div class="machine-tile__healthy-summary">
+                <div class="machine-tile__healthy-summary-icon" aria-hidden="true">
+                  <i class="bi bi-check-circle-fill"></i>
+                  <span class="machine-tile__healthy-summary-pulse"></span>
+                </div>
+                <div class="machine-tile__healthy-summary-copy">
+                  <div class="machine-tile__healthy-summary-title">Machine running healthy</div>
+                  <div class="machine-tile__healthy-summary-time">Current time ${escapeHtml(healthyTime)}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="machine-tile__inline-panel machine-tile__inline-panel--create-body machine-modal__section--create-body">
+        <div class="machine-modal__section machine-modal__section--departments machine-modal__section--create-departments">
+          <div class="machine-tile__section-copy machine-tile__section-copy--departments">
+            <div class="machine-tile__section-title">Departments</div>
+            <div class="machine-tile__section-description">Select a department to continue.</div>
+          </div>
+          <div class="machine-tile__department-strip">
+            ${renderDepartmentButtonsMarkup()}
+          </div>
+        </div>
+        <div class="machine-modal__section machine-modal__section--reels machine-modal__section--create-reels">
+          <div class="machine-tile__section-copy machine-tile__section-copy--create-alert">
+            <div class="machine-tile__section-title">Issues</div>
+            <div class="machine-tile__section-description">Pick an issue from the list below.</div>
+          </div>
+          <div class="problem-list">${renderProblemOptionsMarkup(problems)}</div>
+        </div>
+        <div class="machine-modal__section machine-modal__section--note machine-modal__section--create-note">
+          <div class="machine-tile__section-copy machine-tile__section-copy--note">
+            <div class="machine-tile__section-title">Note</div>
+            <div class="machine-tile__section-description">Add context for the responder.</div>
+          </div>
+          <textarea class="form-control machine-tile__note-input" data-note-kind="create" rows="3" placeholder="Add context for the responder">${escapeHtml(state.createNoteDraft)}</textarea>
+        </div>
+        <div class="modal-footer machine-modal__footer machine-tile__inline-actions">
+          <button class="btn btn-danger btn-lg machine-modal__footer-btn" type="button" data-inline-action="send-message" ${canSubmit ? "" : "disabled"}>Send Message</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function formatCurrentTime() {
+  return new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function renderAlertInlinePanel(machine, alert, detailed) {
+  const isOpen = alert.status === "OPEN";
+  const threadMarkup = renderAlertMessageThread(alert);
+  const operatorNoteMarkup = renderOperatorCreatedNote(alert);
+  const liveTimerText = formatAlertElapsedDuration(Math.max(0, Math.floor(alert.elapsed_seconds || 0)));
+  const acknowledgedInText = Number.isFinite(Number(alert.acknowledged_seconds))
+    ? formatAlertElapsedDuration(Math.max(0, Math.floor(Number(alert.acknowledged_seconds))))
+    : "Pending";
+  const noteMarkup = isOpen
+    ? (operatorNoteMarkup ? `<div class="alert-note-summary">${operatorNoteMarkup}</div>` : '<div class="d-none" aria-hidden="true"></div>')
+    : (threadMarkup ? `<div class="alert-note-summary">${threadMarkup}</div>` : '<div class="d-none" aria-hidden="true"></div>');
+  return `
+    <div class="machine-tile__inline-panel machine-tile__inline-panel--response machine-modal machine-modal--response ${isOpen ? "machine-modal--response-open" : "machine-modal--response-working"} ${detailed ? "machine-tile__inline-panel--detailed" : ""}">
+      <div class="machine-tile__inline-panel-grid">
+        ${isOpen ? `
+          <div class="machine-modal__section machine-modal__section--response-waiting">
+            <div class="machine-modal__response-waiting-title">Waiting on Response</div>
+            <div class="machine-modal__response-waiting-subtitle">En espera de respuesta</div>
+          </div>` : ""}
+        ${isOpen ? "" : `
+          <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-responder">
+            <div class="machine-modal__response-label">Who is responding</div>
+            <div class="machine-modal__response-value">${escapeHtml(alert.responder_name_text || "Unassigned")}</div>
+          </div>
+        `}
+        <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-department">
+          <div class="machine-modal__response-label">ISSUE TYPE</div>
+          <div class="machine-modal__response-value">${escapeHtml(alert.department_name || machine.department_name || "Unknown")}</div>
+        </div>
+        <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-issue">
+          <div class="machine-modal__response-label">Issue</div>
+          <div class="machine-modal__response-value">${escapeHtml(alert.problem_name || alert.category_name || "Unknown")}</div>
+        </div>
+        ${isOpen ? "" : `
+          <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-ack">
+            <div class="machine-modal__response-label">Acknowledged in</div>
+            <div class="machine-modal__response-value">${escapeHtml(acknowledgedInText)}</div>
+          </div>
+        `}
+        ${isOpen ? "" : `
+          <div class="machine-modal__section machine-modal__section--response-followup">
+            <div class="machine-modal__followup-group machine-modal__followup-group--note">
+              <div class="machine-tile__section-copy machine-tile__section-copy--note">
+                <div class="machine-tile__section-title">NOTE</div>
+              </div>
+              ${noteMarkup}
+            </div>
+          </div>
+        `}
+        ${isOpen ? `
+          <div class="machine-modal__section machine-modal__section--response-followup">
+            <div class="machine-modal__followup-group machine-modal__followup-group--note">
+              <div class="machine-modal__response-label">Note</div>
+              ${noteMarkup}
+            </div>
+          </div>
+        ` : ""}
+        <div class="machine-modal__section machine-modal__section--timer-hero">
+          <div class="machine-modal__timer-hero-label">Elapsed timer</div>
+          <div class="machine-modal__timer-hero-value machine-tile__timer" data-live-timer="true" data-live-timer-format="alert-duration" data-elapsed-seconds="${Math.max(0, Math.floor(alert.elapsed_seconds || 0))}">${escapeHtml(liveTimerText)}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderOperatorCreatedNote(alert) {
+  const createdNote = String(alert?.created_note || "").trim();
+  if (!createdNote) return "";
+  return `
+    <div class="machine-tile__thread">
+      <div class="alert-note-bubble is-left">
+        <div class="alert-note-bubble__label">Operator Message</div>
+        <div class="alert-note-bubble__text">${escapeHtml(createdNote)}</div>
+      </div>
+    </div>`;
+}
+
+function renderAlertMessageThread(alert) {
+  const createdNote = String(alert?.created_note || "").trim();
+  const currentNote = String(alert?.note || "").trim();
+  const responderName = String(alert?.responder_name_text || "").trim();
+  const bubbles = [];
+  if (createdNote) {
+    bubbles.push({
+      side: "left",
+      label: "Operator Message",
+      text: createdNote,
+    });
+  }
+  if (currentNote && currentNote !== createdNote) {
+    bubbles.push({
+      side: "right",
+      label: responderName || "Response",
+      text: currentNote,
+    });
+  }
+  if (!bubbles.length && currentNote) {
+    bubbles.push({
+      side: "left",
+      label: "Note",
+      text: currentNote,
+    });
+  }
+  if (!bubbles.length) return "";
+  return `
+    <div class="machine-tile__thread">
+      ${bubbles
+        .map(
+          (bubble) => `
+            <div class="alert-note-bubble ${bubble.side === "right" ? "is-right" : "is-left"}">
+              <div class="alert-note-bubble__label">${escapeHtml(bubble.label)}</div>
+              <div class="alert-note-bubble__text">${escapeHtml(bubble.text)}</div>
+            </div>`,
+        )
+        .join("")}
+    </div>`;
+}
+
+function renderAlertTimerBlocks(alert) {
+  const isOpen = alert?.status === "OPEN";
+  const liveSeconds = Math.max(0, Math.floor(alert?.elapsed_seconds || 0));
+  const ackSeconds = Number.isFinite(Number(alert?.acknowledged_seconds))
+    ? Math.max(0, Math.floor(Number(alert.acknowledged_seconds)))
+    : null;
+  const requestTimerLabel = "Ack timer";
+  const requestTimerValue = isOpen ? "Pending" : formatElapsedSeconds(ackSeconds ?? liveSeconds);
+  const liveTimerValue = formatElapsedSeconds(liveSeconds);
+
+  return `
+    <div class="machine-tile__timers">
+      <div class="machine-tile__timer-block">
+        <div class="machine-tile__timer-label">${escapeHtml(requestTimerLabel)}</div>
+        <div class="machine-tile__timer machine-tile__timer--primary${isOpen ? " machine-tile__timer--live" : ""}">${requestTimerValue}</div>
+      </div>
+      ${isOpen ? "" : `
+        <div class="machine-tile__timer-block machine-tile__timer-block--muted">
+          <div class="machine-tile__timer-label">Live timer</div>
+          <div class="machine-tile__timer machine-tile__timer--secondary machine-tile__timer--live" data-live-timer="true" data-elapsed-seconds="${liveSeconds}">${liveTimerValue}</div>
+        </div>
+        <div class="machine-tile__timer-block machine-tile__timer-block--muted">
+          <div class="machine-tile__timer-label">Ack duration</div>
+          <div class="machine-tile__timer machine-tile__timer--secondary">${formatElapsedSeconds(ackSeconds ?? liveSeconds)}</div>
+        </div>`}
+    </div>`;
+}
+
 async function refreshBoardState() {
-  await loadBoardState();
-  normalizeViewState();
-  renderViewControls();
-  renderBoard();
-  if (state.selectedMachine) {
-    renderDepartmentButtons();
-    if (state.selectedDepartment) {
-      const group = state.issueGroups.find((entry) => Number(entry.department_id) === Number(state.selectedDepartment.id));
-      renderProblemOptions(group ? group.problems : []);
+  if (operatorRefreshInFlight) {
+    operatorRefreshQueued = true;
+    return;
+  }
+
+  operatorRefreshInFlight = true;
+  try {
+    await loadBoardState();
+    try {
+      await loadOperatorMetadata();
+    } catch (_error) {
+      console.warn("Failed to refresh operator metadata.");
+    }
+    normalizeViewState();
+    renderViewControls();
+    renderBoard();
+  } finally {
+    operatorRefreshInFlight = false;
+    if (operatorRefreshQueued) {
+      operatorRefreshQueued = false;
+      scheduleOperatorRefresh();
     }
   }
 }
@@ -550,10 +1083,12 @@ function setOperatorFallbackPolling(enabled) {
 }
 
 function updateElapsedTimers() {
-  document.querySelectorAll(".machine-tile__timer[data-elapsed-seconds]").forEach((timer) => {
+  liveTimerNodes.forEach((timer) => {
     const currentSeconds = Number(timer.dataset.elapsedSeconds || "0") + 1;
     timer.dataset.elapsedSeconds = String(currentSeconds);
-    timer.textContent = formatElapsedSeconds(currentSeconds);
+    timer.textContent = timer.dataset.liveTimerFormat === "alert-duration"
+      ? formatAlertElapsedDuration(currentSeconds)
+      : formatElapsedSeconds(currentSeconds);
   });
 }
 
@@ -573,6 +1108,59 @@ function renderEmptyBoard() {
     <div class="board-empty text-center p-4 p-md-5">
       <div class="h4 mb-2">No machines match this view.</div>
       <div class="small text-secondary">Open Screen View or unlock it to show more machines.</div>
+    </div>`;
+}
+
+function renderStatusDock(visibleMachines, detailed) {
+  if (!operatorStatusDock) return;
+  const total = visibleMachines.length;
+  const activeAlerts = visibleMachines.filter((machine) => Boolean(machine.active_alert)).length;
+  const healthy = total - activeAlerts;
+  const offline = visibleMachines.filter((machine) => !machine.is_active).length;
+  const lastRefresh = state.refreshedAt ? new Date(state.refreshedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "just now";
+  const viewLabel = detailed ? "Focused view" : "Full floor";
+  const steady = activeAlerts === 0;
+  const tone = steady ? "steady" : "busy";
+
+  operatorStatusDock.innerHTML = `
+    <div class="operator-status-dock__panel operator-status-dock__panel--${tone}">
+      <div class="operator-status-dock__headline">
+        <div class="operator-status-dock__status">
+          <span class="operator-status-dock__pulse"></span>
+          <span class="operator-status-dock__label">${steady ? "Line steady" : "Active attention"}</span>
+        </div>
+        <div class="operator-status-dock__title">${steady ? "All stations are running well" : `${activeAlerts} station${activeAlerts === 1 ? "" : "s"} need attention`}</div>
+        <div class="operator-status-dock__subcopy">${viewLabel} · refreshed ${escapeHtml(lastRefresh)}</div>
+      </div>
+      <div class="operator-status-dock__stats" role="list" aria-label="Operator status summary">
+        <div class="operator-status-dock__stat" role="listitem">
+          <i class="bi bi-check2-circle"></i>
+          <div>
+            <div class="operator-status-dock__stat-label">Healthy</div>
+            <div class="operator-status-dock__stat-value">${healthy}</div>
+          </div>
+        </div>
+        <div class="operator-status-dock__stat" role="listitem">
+          <i class="bi bi-exclamation-triangle-fill"></i>
+          <div>
+            <div class="operator-status-dock__stat-label">Alerts</div>
+            <div class="operator-status-dock__stat-value">${activeAlerts}</div>
+          </div>
+        </div>
+        <div class="operator-status-dock__stat" role="listitem">
+          <i class="bi bi-power"></i>
+          <div>
+            <div class="operator-status-dock__stat-label">Offline</div>
+            <div class="operator-status-dock__stat-value">${offline}</div>
+          </div>
+        </div>
+      </div>
+      <div class="operator-status-dock__icons" aria-hidden="true">
+        <span class="operator-status-dock__icon"><i class="bi bi-shield-check"></i></span>
+        <span class="operator-status-dock__icon"><i class="bi bi-lightning-charge-fill"></i></span>
+        <span class="operator-status-dock__icon"><i class="bi bi-gear-wide-connected"></i></span>
+        <span class="operator-status-dock__icon"><i class="bi bi-diagram-3-fill"></i></span>
+      </div>
     </div>`;
 }
 
@@ -746,6 +1334,10 @@ function resetAlertModal() {
   operatorAlertModalId.value = "";
   operatorAlertNote.value = "";
   operatorAlertActionBtn.textContent = "Acknowledge";
+  if (operatorAlertStatusPill) {
+    operatorAlertStatusPill.textContent = "";
+    operatorAlertStatusPill.className = "status-pill machine-modal__status-pill";
+  }
   if (operatorAlertAssigneeSummaryWrap) {
     operatorAlertAssigneeSummaryWrap.classList.add("d-none");
   }
@@ -757,6 +1349,18 @@ function resetAlertModal() {
   }
   if (operatorAlertNoteSummary) {
     operatorAlertNoteSummary.textContent = "";
+  }
+  if (operatorAlertPriorityState) {
+    operatorAlertPriorityState.textContent = "";
+  }
+  if (operatorAlertCreatedAt) {
+    operatorAlertCreatedAt.textContent = "";
+  }
+  if (operatorAlertTimerState) {
+    operatorAlertTimerState.textContent = "";
+  }
+  if (operatorAlertAckTimer) {
+    operatorAlertAckTimer.textContent = "";
   }
   if (operatorAlertUserButtonsWrap) {
     operatorAlertUserButtonsWrap.classList.remove("d-none");
@@ -785,27 +1389,23 @@ function syncDepartmentButtonState() {
 
 function syncDepartmentButtonVisibility() {
   departmentButtons.querySelectorAll(".board-category-btn").forEach((button) => {
-    const visible = !state.selectedDepartment || Number(button.dataset.departmentId) === Number(state.selectedDepartment.id);
-    button.hidden = !visible;
+    button.hidden = false;
   });
 }
 
 function syncProblemButtonState() {
-  problemList.querySelectorAll(".problem-btn").forEach((button) => {
+  machineBoard.querySelectorAll(".problem-btn").forEach((button) => {
     const active = state.selectedProblem && Number(button.dataset.problemId) === Number(state.selectedProblem.id);
     button.classList.toggle("is-active", Boolean(active));
   });
 }
 
-document.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-user-choice]");
-  if (!button) return;
-  const userId = Number(button.dataset.userId);
-  if (button.dataset.userChoice === "alert") {
-    state.selectedAlertUserId = Number.isFinite(userId) ? userId : null;
-    renderUserButtons(operatorAlertUserButtons, getRelevantUsersForSelection(state.selectedMachine, { id: state.selectedAlert?.department_id, name: state.selectedAlert?.department_name }), state.selectedAlertUserId, "alert");
-  }
-});
-
+function syncCreateSubmitState() {
+  const machineId = state.selectedMachine ? Number(state.selectedMachine.id) : null;
+  if (!machineId) return;
+  const submitButton = machineBoard.querySelector(`.operator-machine-tile[data-machine-id="${machineId}"] .machine-tile__inline-panel--create-body .machine-modal__footer-btn[data-inline-action="send-message"]`);
+  if (!submitButton) return;
+  submitButton.disabled = !(state.selectedMachine && state.selectedDepartment && state.selectedProblem);
+}
 
 boot();
