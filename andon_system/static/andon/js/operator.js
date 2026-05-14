@@ -987,13 +987,14 @@ function renderAlertInlinePanel(machine, alert, detailed) {
     : (threadMarkup ? `<div class="alert-note-summary">${threadMarkup}</div>` : '<div class="d-none" aria-hidden="true"></div>');
   return `
     <div class="machine-tile__inline-panel machine-tile__inline-panel--response machine-modal machine-modal--response ${isOpen ? "machine-modal--response-open" : "machine-modal--response-working"} ${detailed ? "machine-tile__inline-panel--detailed" : ""}">
+      ${isOpen ? `
+        <div class="machine-modal__section machine-modal__section--response-waiting">
+          <div class="machine-modal__response-waiting-title">Waiting on Response</div>
+          <div class="machine-modal__response-waiting-subtitle">En espera de respuesta</div>
+        </div>
+      ` : ""}
       ${renderRadiusPanel(machine, "machine-tile__radius-panel machine-tile__radius-panel--response")}
       <div class="machine-tile__inline-panel-grid">
-        ${isOpen ? `
-          <div class="machine-modal__section machine-modal__section--response-waiting">
-            <div class="machine-modal__response-waiting-title">Waiting on Response</div>
-            <div class="machine-modal__response-waiting-subtitle">En espera de respuesta</div>
-          </div>` : ""}
         ${isOpen ? "" : `
           <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-responder">
             <div class="machine-modal__response-label">Who is responding</div>
