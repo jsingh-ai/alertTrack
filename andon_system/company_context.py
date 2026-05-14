@@ -14,8 +14,8 @@ DEFAULT_COMPANIES = [
     SimpleNamespace(id=1, name="Five Star", slug="five-star", is_active=True),
     SimpleNamespace(id=2, name="Polytex", slug="polytex", is_active=True),
     SimpleNamespace(id=3, name="Starpak", slug="starpak", is_active=True),
-    SimpleNamespace(id=4, name="Ultrapak", slug="ultrapak", is_active=True),
-    SimpleNamespace(id=5, name="Superbag", slug="superbag", is_active=True),
+    SimpleNamespace(id=4, name="Superbag", slug="superbag", is_active=True),
+    SimpleNamespace(id=5, name="Ultrapak", slug="ultrapak", is_active=True),
 ]
 
 _COMPANIES_TABLE_EXISTS: bool | None = None
@@ -112,24 +112,48 @@ def ensure_default_companies():
     if not _companies_table_exists():
         return
     defaults = [
-        ("Five Star", "five-star"),
-        ("Polytex", "polytex"),
-        ("Starpak", "starpak"),
-        ("Ultrapak", "ultrapak"),
-        ("Superbag", "superbag"),
+        (1, "Five Star", "five-star"),
+        (2, "Polytex", "polytex"),
+        (3, "Starpak", "starpak"),
+        (4, "Superbag", "superbag"),
+        (5, "Ultrapak", "ultrapak"),
     ]
     created = False
-    for name, slug in defaults:
+    ultrapak = None
+    try:
+        ultrapak = Company.query.filter_by(slug="ultrapak").one_or_none()
+    except OperationalError:
+        return
+
+    superbag = None
+    try:
+        superbag = Company.query.filter_by(slug="superbag").one_or_none()
+    except OperationalError:
+        return
+
+    if ultrapak is not None and superbag is None:
+        ultrapak.name = "Superbag"
+        ultrapak.slug = "superbag"
+        superbag = ultrapak
+        created = True
+
+    for company_id, name, slug in defaults:
         try:
             company = Company.query.filter_by(slug=slug).one_or_none()
         except OperationalError:
             return
         if company is None:
-            company = Company(name=name, slug=slug, is_active=True)
+            company = Company(id=company_id, name=name, slug=slug, is_active=True)
             from .extensions import db
 
             db.session.add(company)
             created = True
+        else:
+            if company.name != name:
+                company.name = name
+                created = True
+            if company.id == company_id:
+                continue
     if created:
         from .extensions import db
 
