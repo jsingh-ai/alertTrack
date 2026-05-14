@@ -6,6 +6,9 @@ from ..models import andon_alert_escalation_map
 from ..models.company import Company
 from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
+from ..models.machine import Machine
+from ..models.escalation import EscalationRule
+from ..models.user import User
 
 
 DEFAULT_DEPARTMENTS = {
@@ -82,6 +85,18 @@ def seed_default_data():
 
 
 def _clear_seeded_tables():
+    # These tables are preserved across reseeds, so clear their nullable
+    # department references before deleting department rows.
+    db.session.execute(db.update(User).values(department_id=None))
+    db.session.execute(db.update(Machine).values(department_id=None))
+    db.session.execute(
+        db.update(EscalationRule).values(
+            department_id=None,
+            issue_category_id=None,
+            issue_problem_id=None,
+        )
+    )
+
     for table in reversed(db.metadata.sorted_tables):
         if table.name in {"companies", "machines", "machine_groups", "users", "escalation_rules"}:
             continue
