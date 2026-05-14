@@ -5959,7 +5959,7 @@ body.board-screen-shell.management-screen-shell .management-machine-card__hero--
 
 body.board-screen-shell.management-screen-shell .management-machine-card__hero--status-acknowledged {
   background: linear-gradient(180deg, #f0c74f 0%, #d59c00 100%);
-  color: #312200;
+  color: #f8fafc;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__hero--status-off {
@@ -6181,23 +6181,25 @@ body.board-screen-shell.management-screen-shell .management-machine-card__metric
   gap: 0.08rem;
   padding: 0.45rem 0.55rem;
   border-radius: 0.72rem;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(24, 50, 79, 0.08);
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__metric-label {
-  font-size: 0.5rem;
-  font-weight: 900;
-  letter-spacing: 0.12em;
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #5e7187;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__metric-value {
-  font-size: 0.72rem;
-  font-weight: 900;
-  line-height: 1.1;
-  color: #18324f;
+  min-width: 0;
+  color: #0f172a;
+  font-size: 0.93rem;
+  font-weight: 800;
+  line-height: 1.35;
+  word-break: break-word;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__state-row {
@@ -6219,23 +6221,24 @@ body.board-screen-shell.management-screen-shell .management-machine-card__state 
   gap: 0.08rem;
   padding: 0.55rem 0.62rem 0.58rem;
   border-radius: 0.8rem;
-  background: rgba(255, 255, 255, 0.74);
-  border: 1px solid rgba(24, 50, 79, 0.08);
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__state-label {
-  font-size: 0.52rem;
-  font-weight: 900;
-  letter-spacing: 0.11em;
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #5e7187;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__state-value {
-  font-size: 0.88rem;
+  min-width: 0;
+  color: #0f172a;
+  font-size: 0.93rem;
   font-weight: 800;
-  line-height: 1.16;
-  color: #18324f;
+  line-height: 1.35;
   word-break: break-word;
 }
 
@@ -6257,8 +6260,8 @@ body.board-screen-shell.management-screen-shell .management-machine-card__state-
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__state--issue-open {
-  background: rgba(255, 241, 241, 0.96);
-  border-color: rgba(224, 49, 49, 0.18);
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(148, 163, 184, 0.2);
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__state--timer-open {
@@ -6268,8 +6271,8 @@ body.board-screen-shell.management-screen-shell .management-machine-card__state-
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__state--issue-working {
-  background: rgba(255, 248, 229, 0.95);
-  border-color: rgba(240, 140, 0, 0.18);
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(148, 163, 184, 0.2);
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__state--timer-working {
@@ -6285,6 +6288,11 @@ body.board-screen-shell.management-screen-shell .management-machine-card__state-
 body.board-screen-shell.management-screen-shell .management-machine-card__state--elapsed-full .management-machine-card__state-label,
 body.board-screen-shell.management-screen-shell .management-machine-card__state--elapsed-full .management-machine-card__state-value {
   color: #f8fafc;
+  text-align: center;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__state--elapsed-full {
+  align-items: center;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__state--timer-working.management-machine-card__state--elapsed-full .management-machine-card__state-label,
