@@ -92,7 +92,10 @@ def _fetch_radius_rows(radius_machine_ids):
 
     try:
         with engine.connect() as connection:
-            rows = connection.execute(statement, {"machine_ids": sorted(radius_machine_ids)}).mappings().all()
+            rows = connection.execute(
+                statement,
+                {"machine_ids": [str(machine_id) for machine_id in sorted(radius_machine_ids)]},
+            ).mappings().all()
     except SQLAlchemyError:
         if has_app_context():
             current_app.logger.exception("Unable to load Radius machine status data")
