@@ -521,16 +521,8 @@
   }
 
   function openDeleteModal(form) {
-    if (!adminDeleteModal || !adminDeleteModalTitle || !adminDeleteModalTarget || !adminDeleteModalMessage || !adminDeleteModalConfirm) {
-      return false;
-    }
     const prompt = getDeletePrompt(form);
-    pendingDeleteForm = form;
-    adminDeleteModalTitle.textContent = prompt.title;
-    adminDeleteModalTarget.textContent = prompt.target;
-    adminDeleteModalMessage.textContent = prompt.message;
-    adminDeleteModal.show();
-    return true;
+    return window.confirm(`${prompt.title}\n\n${prompt.message}`);
   }
 
   adminDeleteModalConfirm?.addEventListener("click", () => {
@@ -983,7 +975,11 @@
     if (!form) return;
     if (form.dataset.kind?.endsWith("-delete") && form.dataset.skipDeleteConfirm !== "true") {
       event.preventDefault();
-      openDeleteModal(form);
+      if (!openDeleteModal(form)) {
+        return;
+      }
+      form.dataset.skipDeleteConfirm = "true";
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
       return;
     }
     if (form.dataset.skipDeleteConfirm === "true") {
