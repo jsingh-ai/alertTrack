@@ -11,15 +11,23 @@ const operatorLockView = document.getElementById("operatorLockView");
 const operatorClearView = document.getElementById("operatorClearView");
 const operatorViewSummary = document.getElementById("operatorViewSummary");
 const operatorStatusDock = document.getElementById("operatorStatusDock");
+const csrfHeaders = (headers = {}) => window.AndonSecurity?.withCsrfHeaders(headers) || headers;
 
 const departmentLabelMap = {
-  Maintenance: "Maintenance",
-  Materials: "Materials Alert",
-  Quality: "Quality Check",
-  Supervisor: "Supervisor",
-  Safety: "Safety",
-  Production: "Production",
+  Maintenance: "Call Maintenance",
+  Materials: "Call AVG",
+  Shipping: "Call Shipping",
+  Quality: "Call Quality",
+  Supervisor: "Call Supervisor",
+  Safety: "Call Safety",
+  Production: "Call AVG",
+  AVG: "Call AVG",
+  SPOT: "Call SPOT",
+  Spot: "Call SPOT",
 };
+
+const departmentPreferredOrder = ["Maintenance", "Safety", "Shipping", "Quality", "Supervisor", "Materials", "Production", "AVG", "SPOT", "Spot"];
+const singleRowDepartmentNames = new Set(["Materials", "Production", "AVG", "SPOT", "Spot"]);
 
 const state = {
   board: { machines: [], filters: { machine_types: [], areas: [], departments: [] } },
@@ -48,8 +56,17 @@ let operatorFallbackPollIntervalId = null;
 let operatorCreateTransitionFrameId = null;
 let operatorRefreshInFlight = false;
 let operatorRefreshQueued = false;
+let operatorInteractionLockUntil = 0;
 let liveTimerNodes = [];
 let operatorMetadataLoadPromise = null;
+
+function markOperatorInteractionActive(durationMs = 1800) {
+  operatorInteractionLockUntil = Date.now() + durationMs;
+}
+
+function getOperatorInteractionLockRemaining() {
+  return Math.max(0, operatorInteractionLockUntil - Date.now());
+}
 
 function normalizeActiveAlert(alert, machine) {
   return {
@@ -203,6 +220,7 @@ function onBoardInput(event) {
   const target = event.target;
   if (!(target instanceof HTMLTextAreaElement)) return;
   if (target.dataset.noteKind === "create") {
+    markOperatorInteractionActive();
     state.createNoteDraft = target.value;
     return;
   }
@@ -276,10 +294,9 @@ function closeMachinePanel() {
 }
 
 function renderDepartmentButtons() {
-  const preferredOrder = Object.keys(departmentLabelMap);
-  const departments = [...state.departments].sort((left, right) => {
-    const leftIndex = preferredOrder.indexOf(left.name);
-    const rightIndex = preferredOrder.indexOf(right.name);
+  const departments = getRenderableDepartments().sort((left, right) => {
+    const leftIndex = departmentPreferredOrder.indexOf(left.name);
+    const rightIndex = departmentPreferredOrder.indexOf(right.name);
     if (leftIndex === -1 && rightIndex === -1) return left.name.localeCompare(right.name);
     if (leftIndex === -1) return 1;
     if (rightIndex === -1) return -1;
@@ -288,8 +305,10 @@ function renderDepartmentButtons() {
   departmentButtons.innerHTML = departments
     .map((department) => {
       const label = departmentLabelMap[department.name] || department.name;
+      const fullRowClass = singleRowDepartmentNames.has(department.name) ? " board-category-btn--full-row" : "";
+      const disabledAttr = department.isPlaceholder ? " disabled" : "";
       return `
-        <button type="button" class="btn btn-lg board-category-btn" data-department-id="${department.id}" data-department-name="${escapeHtml(department.name)}">
+        <button type="button" class="btn btn-lg board-category-btn${fullRowClass}" data-department-id="${department.id}" data-department-name="${escapeHtml(department.name)}"${disabledAttr}>
           <span class="d-block">${escapeHtml(label)}</span>
         </button>`;
     })
@@ -300,6 +319,8 @@ function renderDepartmentButtons() {
 
 function onDepartmentButtonClick(button) {
   if (!button) return;
+  if (button.disabled) return;
+  markOperatorInteractionActive();
   const tile = button.closest(".operator-machine-tile");
   const machineId = Number(tile?.dataset.machineId);
   const machine = state.board.machines.find((row) => Number(row.id) === machineId) || null;
@@ -323,6 +344,7 @@ function onDepartmentButtonClick(button) {
 
 function onProblemClick(button) {
   if (!button) return;
+  markOperatorInteractionActive();
   const tile = button.closest(".operator-machine-tile");
   const machineId = Number(tile?.dataset.machineId);
   const machine = state.board.machines.find((row) => Number(row.id) === machineId) || null;
@@ -455,8 +477,9 @@ async function createAlertFromModal() {
   };
   const response = await fetch("/api/andon/alerts", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: csrfHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
+    credentials: "same-origin",
   });
   const data = await response.json();
   if (response.status === 409 && data?.error?.existing_alert) {
@@ -502,7 +525,12 @@ async function actOnActiveAlert() {
     endpoint = `/api/andon/alerts/${alertId}/cancel`;
     if (state.alertNoteDraft) payload.append("reason", state.alertNoteDraft);
   }
-  const response = await fetch(endpoint, { method: "POST", body: payload });
+  const response = await fetch(endpoint, {
+    method: "POST",
+    body: payload,
+    headers: csrfHeaders(),
+    credentials: "same-origin",
+  });
   const data = await response.json();
   if (!data.success) {
     alert(data.error.message);
@@ -755,10 +783,9 @@ function getGroupSummary(machines) {
 }
 
 function renderDepartmentButtonsMarkup() {
-  const preferredOrder = Object.keys(departmentLabelMap);
-  const departments = [...state.departments].sort((left, right) => {
-    const leftIndex = preferredOrder.indexOf(left.name);
-    const rightIndex = preferredOrder.indexOf(right.name);
+  const departments = getRenderableDepartments().sort((left, right) => {
+    const leftIndex = departmentPreferredOrder.indexOf(left.name);
+    const rightIndex = departmentPreferredOrder.indexOf(right.name);
     if (leftIndex === -1 && rightIndex === -1) return left.name.localeCompare(right.name);
     if (leftIndex === -1) return 1;
     if (rightIndex === -1) return -1;
@@ -769,13 +796,28 @@ function renderDepartmentButtonsMarkup() {
       const label = departmentLabelMap[department.name] || department.name;
       const isSelected = state.selectedDepartment && Number(state.selectedDepartment.id) === Number(department.id);
       const iconClass = getDepartmentIconClass(department.name);
+      const fullRowClass = singleRowDepartmentNames.has(department.name) ? " board-category-btn--full-row" : "";
+      const disabledAttr = department.isPlaceholder ? " disabled" : "";
       return `
-        <button type="button" class="btn btn-lg board-category-btn${isSelected ? " is-active" : ""}" data-department-id="${department.id}" data-department-name="${escapeHtml(department.name)}">
+        <button type="button" class="btn btn-lg board-category-btn${isSelected ? " is-active" : ""}${fullRowClass}" data-department-id="${department.id}" data-department-name="${escapeHtml(department.name)}"${disabledAttr}>
           <span class="board-category-btn__icon" aria-hidden="true"><i class="${iconClass}"></i></span>
           <span class="d-block">${escapeHtml(label)}</span>
         </button>`;
     })
     .join("");
+}
+
+function getRenderableDepartments() {
+  const departments = [...state.departments];
+  const hasSpot = departments.some((department) => String(department.name || "").toLowerCase() === "spot");
+  if (!hasSpot) {
+    departments.push({
+      id: "spot-placeholder",
+      name: "SPOT",
+      isPlaceholder: true,
+    });
+  }
+  return departments;
 }
 
 function renderProblemOptionsMarkup(problems) {
@@ -796,7 +838,7 @@ function getDepartmentIconClass(name) {
     case "maintenance":
       return "bi bi-tools";
     case "materials":
-      return "bi bi-box-seam";
+      return "bi bi-broadcast-pin";
     case "quality":
       return "bi bi-patch-check-fill";
     case "supervisor":
@@ -805,6 +847,12 @@ function getDepartmentIconClass(name) {
       return "bi bi-shield-exclamation";
     case "production":
       return "bi bi-gear-wide-connected";
+    case "avg":
+      return "bi bi-broadcast-pin";
+    case "spot":
+      return "bi bi-bullseye";
+    case "shipping":
+      return "bi bi-truck";
     default:
       return "bi bi-dot";
   }
@@ -879,7 +927,7 @@ function renderCreateInlinePanel(machine, detailed) {
           <textarea class="form-control machine-tile__note-input" data-note-kind="create" rows="3" placeholder="Add context for the responder">${escapeHtml(state.createNoteDraft)}</textarea>
         </div>
         <div class="modal-footer machine-modal__footer machine-tile__inline-actions">
-          <button class="btn btn-danger btn-lg machine-modal__footer-btn" type="button" data-inline-action="send-message" ${canSubmit ? "" : "disabled"}>Send Message</button>
+          <button class="btn btn-danger btn-lg machine-modal__footer-btn" type="button" data-inline-action="send-message" ${canSubmit ? "" : "disabled"}>Call</button>
         </div>
       </div>
     </div>`;
@@ -1065,10 +1113,13 @@ function scheduleOperatorRefresh() {
   if (operatorRefreshTimeoutId) {
     clearTimeout(operatorRefreshTimeoutId);
   }
+  const interactionLockRemaining = state.selectedMachine && !state.selectedAlert
+    ? getOperatorInteractionLockRemaining()
+    : 0;
   operatorRefreshTimeoutId = setTimeout(() => {
     operatorRefreshTimeoutId = null;
     refreshBoardState();
-  }, 150);
+  }, Math.max(150, interactionLockRemaining + 50));
 }
 
 function setOperatorFallbackPolling(enabled) {

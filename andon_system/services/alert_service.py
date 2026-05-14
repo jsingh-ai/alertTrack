@@ -4,6 +4,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from sqlalchemy.exc import IntegrityError
+
 from ..extensions import db
 from ..company_context import get_current_company_id
 from ..models.alert import (
@@ -109,9 +111,8 @@ def create_alert(payload: dict):
         raise AlertServiceError("Valid machine_id is required")
     if company_id and machine.company_id != company_id:
         raise AlertServiceError("Machine does not belong to the selected company")
-    # A true hard guarantee still belongs in the database schema later.
-    # This application-level check blocks the normal path now and keeps the
-    # request safe across SQLite and MySQL without a migration.
+    # Keep the friendly conflict path even though the database also enforces
+    # one active alert per machine now.
     existing_alert = _get_active_alert_for_machine(machine.id, company_id)
     if existing_alert:
         raise AlertServiceError(
@@ -177,7 +178,18 @@ def create_alert(payload: dict):
         message="Alert created",
         metadata={"note": payload.get("note")},
     )
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError as exc:
+        db.session.rollback()
+        existing_alert = _get_active_alert_for_machine(machine.id, company_id or machine.company_id)
+        if existing_alert:
+            raise AlertServiceError(
+                "An active alert already exists for this machine",
+                status_code=409,
+                data={"existing_alert": existing_alert.to_dict()},
+            ) from exc
+        raise
     _invalidate_live_caches(alert.company_id)
     emit_alert_created(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status)
     return alert

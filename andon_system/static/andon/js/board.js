@@ -4,6 +4,7 @@ const boardDepartment = document.getElementById("boardDepartment");
 const boardLockView = document.getElementById("boardLockView");
 const boardClearView = document.getElementById("boardClearView");
 const boardLockStatus = document.getElementById("boardLockStatus");
+const csrfHeaders = (headers = {}) => window.AndonSecurity?.withCsrfHeaders(headers) || headers;
 
 const storageKey = "andon-board-view";
 const lockedMachineGroup = "Press";
@@ -456,7 +457,12 @@ boardGrid.addEventListener("click", async (event) => {
       payload.append("note", draft.note.trim());
     }
     ackButton.disabled = true;
-    const response = await fetch(`/api/andon/alerts/${alertId}/acknowledge`, { method: "POST", body: payload });
+    const response = await fetch(`/api/andon/alerts/${alertId}/acknowledge`, {
+      method: "POST",
+      body: payload,
+      headers: csrfHeaders(),
+      credentials: "same-origin",
+    });
     const data = await response.json();
     if (!data.success) {
       ackButton.disabled = false;
@@ -483,7 +489,12 @@ boardGrid.addEventListener("click", async (event) => {
       payload.append("note", draft.note.trim());
     }
     closeButton.disabled = true;
-    const response = await fetch(`/api/andon/alerts/${alertId}/resolve`, { method: "POST", body: payload });
+    const response = await fetch(`/api/andon/alerts/${alertId}/resolve`, {
+      method: "POST",
+      body: payload,
+      headers: csrfHeaders(),
+      credentials: "same-origin",
+    });
     const data = await response.json();
     if (!data.success) {
       closeButton.disabled = false;

@@ -2258,6 +2258,10 @@ html[data-theme="light"] .operator-machine-group__count {
   min-height: 3.8rem;
 }
 
+.button-board-shell .operator-machine-tile .machine-tile__department-strip .board-category-btn--full-row {
+  flex-basis: 100%;
+}
+
 .button-board-shell .operator-machine-tile .machine-tile__inline-panel-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2410,6 +2414,11 @@ html[data-theme="light"] .operator-machine-group__count {
   white-space: normal;
 }
 
+.button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .machine-tile__department-strip .board-category-btn--full-row {
+  flex-basis: 100%;
+  width: 100%;
+}
+
 .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .machine-tile__department-strip .board-category-btn:hover,
 .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .machine-tile__department-strip .board-category-btn:focus-visible {
   background: #4f85e2;
@@ -2438,6 +2447,12 @@ html[data-theme="light"] .operator-machine-group__count {
   text-transform: uppercase;
   background: rgba(255, 255, 255, 0.16);
   color: #f8fbff;
+}
+
+.button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .machine-tile__department-strip .board-category-btn:disabled {
+  opacity: 0.68;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .button-board-shell .operator-machine-tile .board-category-btn__icon {
@@ -2540,19 +2555,20 @@ html[data-theme="light"] .operator-machine-group__count {
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .machine-modal__footer-btn {
-  min-width: 9.25rem;
+  width: 100%;
+  min-width: 0;
   min-height: 2.7rem;
   padding: 0.6rem 1rem;
   font-size: 0.92rem;
   border-radius: 0.9rem;
-  background: linear-gradient(180deg, #ef476f 0%, #d9305b 100%);
-  box-shadow: 0 12px 24px rgba(239, 71, 111, 0.18);
+  background: linear-gradient(180deg, #d62828 0%, #a91515 100%);
+  box-shadow: 0 12px 24px rgba(169, 21, 21, 0.24);
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .machine-modal__footer-btn:hover,
 .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .machine-modal__footer-btn:focus-visible {
-  background: linear-gradient(180deg, #f35c81 0%, #e43f6a 100%);
-  box-shadow: 0 14px 28px rgba(239, 71, 111, 0.24);
+  background: linear-gradient(180deg, #e03131 0%, #ba181b 100%);
+  box-shadow: 0 14px 28px rgba(186, 24, 27, 0.28);
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__inline-panel .machine-modal__section {
@@ -2704,7 +2720,7 @@ html[data-theme="light"] .operator-machine-group__count {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
-  justify-content: flex-end;
+  justify-content: stretch;
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__inline-help {
@@ -3775,12 +3791,13 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal__response-value {
   margin: 0;
-  font-size: clamp(1.4rem, 2.5vw, 2.35rem);
-  line-height: 1.02;
+  font-size: clamp(1.08rem, 1.8vw, 1.7rem);
+  line-height: 1.08;
   font-weight: 900;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
   color: #143f86;
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 #machineBoard .operator-machine-tile .machine-modal--response-open .machine-modal__section--response-tile .machine-modal__response-value {
@@ -3789,6 +3806,7 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal__section--timer-hero {
   display: grid;
+  container-type: inline-size;
   align-content: center;
   justify-items: center;
   box-sizing: border-box;
@@ -3824,23 +3842,26 @@ html[data-theme="light"] .operator-machine-group__count {
   letter-spacing: -0.075em;
   color: #c92a2a;
   white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
 }
 
 .button-board-shell .operator-machine-tile .machine-modal__timer-hero-value.machine-tile__timer {
   margin-top: 0.1rem;
-  font-size: clamp(7.5rem, 18vw, 15.75rem);
-  line-height: 0.72;
+  font-size: clamp(2rem, 16cqi, 7.5rem);
+  line-height: 0.8;
   font-style: normal;
-  letter-spacing: -0.11em;
+  letter-spacing: -0.07em;
 }
 
 #machineBoard .operator-machine-tile .machine-modal__section--timer-hero .machine-modal__timer-hero-value.machine-tile__timer {
   margin-top: 0.1rem;
-  font-size: clamp(6.6rem, 15.75vw, 14.5rem);
-  line-height: 0.82;
+  font-size: clamp(1.8rem, 14cqi, 6.75rem);
+  line-height: 0.84;
   font-style: normal;
-  font-weight: 500;
-  letter-spacing: -0.06em;
+  font-weight: 700;
+  letter-spacing: -0.045em;
   color: #c92a2a;
   white-space: nowrap;
 }
@@ -5883,11 +5904,36 @@ body.board-screen-shell.management-screen-shell .management-machine-card__top {
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__meta {
-  font-size: 0.58rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  gap: 0.45rem;
+  margin: 0.15rem 0 0.1rem;
+  font-size: 0.64rem;
   font-weight: 800;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #5e7187;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__meta-label {
+  color: #4e647d;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__meta-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 7.5rem;
+  padding: 0.34rem 0.8rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(10, 100, 169, 0.18) 0%, rgba(10, 100, 169, 0.28) 100%);
+  border: 1px solid rgba(10, 100, 169, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32);
+  color: #084c78;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__body {
@@ -6257,6 +6303,13 @@ html[data-theme="dark"] body.board-screen-shell.management-screen-shell .managem
 html[data-theme="dark"] body.board-screen-shell.management-screen-shell .management-machine-card__meta,
 html[data-theme="dark"] body.board-screen-shell.management-screen-shell .management-machine-card__state-label {
   color: rgba(229, 238, 252, 0.68);
+}
+
+html[data-theme="dark"] body.board-screen-shell.management-screen-shell .management-machine-card__meta-value {
+  background: linear-gradient(180deg, rgba(101, 192, 255, 0.22) 0%, rgba(52, 132, 196, 0.28) 100%);
+  border-color: rgba(143, 212, 255, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #b4e1ff;
 }
 
 html[data-theme="dark"] body.board-screen-shell.management-screen-shell .management-machine-card__state {

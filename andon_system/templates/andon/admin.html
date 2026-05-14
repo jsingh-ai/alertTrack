@@ -421,6 +421,7 @@
   const adminDeleteModalMessage = document.getElementById("adminDeleteModalMessage");
   const adminDeleteModalConfirm = document.getElementById("adminDeleteModalConfirm");
   const adminDeleteModal = adminDeleteModalElement && window.bootstrap ? new bootstrap.Modal(adminDeleteModalElement) : null;
+  const csrfHeaders = (headers = {}) => window.AndonSecurity?.withCsrfHeaders(headers) || headers;
   let pendingDeleteForm = null;
   if (!filter || !issueTableBody || !departmentTableBody || !issueForm || !machineGroupTableBody || !machineTableBody || !machineGroupSelect || !escalationRuleTableBody || !userTableBody || !userCreateForm || !userRoleSelect || !userMachineGroupSelect || !userDepartmentSelect) return;
   function notifyAndonRefresh() {
@@ -899,10 +900,10 @@
     const response = await fetch(`/andon/admin/user/${userId}/update`, {
       method: "POST",
       body: payload,
-      headers: {
+      headers: csrfHeaders({
         "X-Requested-With": "XMLHttpRequest",
         "Accept": "application/json",
-      },
+      }),
       credentials: "same-origin",
     });
     const data = await response.json().catch(() => ({}));
@@ -953,13 +954,14 @@
   }
 
   async function submitAjaxForm(form) {
+    window.AndonSecurity?.applyCsrf(form);
     const response = await fetch(form.action, {
       method: form.method || "POST",
       body: new FormData(form),
-      headers: {
+      headers: csrfHeaders({
         "X-Requested-With": "XMLHttpRequest",
         "Accept": "application/json",
-      },
+      }),
       credentials: "same-origin",
     });
     const payload = await response.json().catch(() => ({}));

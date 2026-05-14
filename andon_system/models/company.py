@@ -5,10 +5,7 @@ from ..extensions import db
 
 class Company(db.Model):
     __tablename__ = "companies"
-    __table_args__ = (
-        db.Index("ix_companies_is_active", "is_active"),
-        {"sqlite_autoincrement": True},
-    )
+    __table_args__ = (db.Index("ix_companies_is_active", "is_active"),)
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False, unique=True, index=True)

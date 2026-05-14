@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ app_name }}</title>
+  <meta name="csrf-token" content="{{ csrf_token }}">
   <script>
     (function () {
       const themeKey = "processguard-theme";
@@ -44,9 +45,9 @@
 
         <nav class="app-nav">
         {% set nav_items = [
+            ("pages.management_page", "Management", "bi-clipboard-data"),
             ("pages.operator_page", "Operator", "bi-house-door"),
             ("pages.board_page", "Board", "bi-display"),
-            ("pages.management_page", "Management", "bi-clipboard-data"),
             ("pages.reports_page", "Reports", "bi-graph-up"),
             ("pages.admin_page", "Admin", "bi-gear"),
         ] %}
@@ -121,6 +122,7 @@
       const sidebarMobileOpen = document.getElementById("sidebarMobileOpen");
       const sidebarMobileClose = document.getElementById("sidebarMobileClose");
       const appSidebarOverlay = document.getElementById("appSidebarOverlay");
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
 
       function getTheme() {
         return document.documentElement.dataset.theme || "dark";
@@ -160,16 +162,40 @@
         setTheme(getTheme() === "dark" ? "light" : "dark");
       }
 
-      function hasAdminAccess() {
-        return window.sessionStorage.getItem("andon-admin-access") === "true";
+      function getCsrfToken() {
+        return csrfToken;
       }
 
-      function grantAdminAccess() {
-        window.sessionStorage.setItem("andon-admin-access", "true");
+      function ensureCsrfField(form) {
+        if (!form || String(form.method || "get").toUpperCase() !== "POST") return;
+        let input = form.querySelector('input[name="csrf_token"]');
+        if (!input) {
+          input = document.createElement("input");
+          input.type = "hidden";
+          input.name = "csrf_token";
+          form.appendChild(input);
+        }
+        input.value = getCsrfToken();
       }
 
-      function revokeAdminAccess() {
-        window.sessionStorage.removeItem("andon-admin-access");
+      async function authenticateAdmin(password, nextUrl) {
+        const payload = new FormData();
+        payload.append("password", password);
+        payload.append("next", nextUrl);
+        const response = await fetch("{{ url_for('pages.admin_login') }}", {
+          method: "POST",
+          body: payload,
+          headers: {
+            "X-CSRF-Token": getCsrfToken(),
+            "Accept": "application/json",
+          },
+          credentials: "same-origin",
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.message || "Authentication failed");
+        }
+        return data;
       }
 
       themeToggleBtn?.addEventListener("click", toggleTheme);
@@ -182,26 +208,26 @@
       appSidebarOverlay?.addEventListener("click", closeMobileSidebar);
 
       document.querySelectorAll("[data-nav-link]").forEach((link) => {
-        link.addEventListener("click", (event) => {
+        link.addEventListener("click", async (event) => {
           const href = link.getAttribute("href") || "";
           if (!href.includes("/andon/admin")) return;
+          if ({{ admin_authenticated|tojson }}) return;
           event.preventDefault();
           const password = window.prompt("Enter admin password");
-          if (password === "123") {
-            grantAdminAccess();
-            window.location.href = href;
-          } else if (password !== null) {
-            revokeAdminAccess();
+          if (password === null) {
+            return;
+          }
+          try {
+            const data = await authenticateAdmin(password, href);
+            window.location.href = data.redirect_to || href;
+          } catch (error) {
+            window.alert(error.message || "Authentication failed");
           }
         });
       });
 
       setTheme(getTheme());
       setSidebarMode(getSidebarMode());
-
-      if (window.location.pathname.startsWith("/andon/admin") && !hasAdminAccess()) {
-        window.location.replace("{{ url_for('pages.operator_page') }}");
-      }
 
       if (window.matchMedia) {
         const mq = window.matchMedia("(max-width: 991.98px)");
@@ -245,6 +271,24 @@
           window.addEventListener(channelName, handler);
         },
       };
+
+      window.AndonSecurity = {
+        csrfToken: getCsrfToken(),
+        applyCsrf(form) {
+          ensureCsrfField(form);
+        },
+        withCsrfHeaders(headers = {}) {
+          return { ...headers, "X-CSRF-Token": getCsrfToken() };
+        },
+      };
+
+      document.querySelectorAll("form").forEach((form) => ensureCsrfField(form));
+      document.addEventListener("submit", (event) => {
+        const form = event.target;
+        if (form instanceof HTMLFormElement) {
+          ensureCsrfField(form);
+        }
+      }, true);
     })();
   </script>
   {% set realtime_room = "reports" if request.endpoint == "pages.reports_page" else ("board" if request.endpoint == "pages.board_page" else "operator") %}

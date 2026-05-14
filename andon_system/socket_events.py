@@ -3,7 +3,7 @@ from __future__ import annotations
 from flask import current_app
 from flask_socketio import disconnect, emit, join_room, leave_room
 
-from .company_context import get_current_company_id
+from .security import get_authorized_company_id
 from .services.realtime_service import BOARD_ROOM, OPERATOR_ROOM, REPORTS_ROOM, room_name
 
 VALID_ROOMS = {BOARD_ROOM, OPERATOR_ROOM, REPORTS_ROOM}
@@ -30,9 +30,10 @@ def register_socket_events(socketio):
         if room_type not in VALID_ROOMS:
             disconnect()
             return
-        company_id = get_current_company_id() or data.get("company_id")
+        company_id = get_authorized_company_id()
         if not company_id:
             emit("room_error", {"message": "No active company"})
+            disconnect()
             return
         room = room_name(company_id, room_type)
         join_room(room)
@@ -44,7 +45,7 @@ def register_socket_events(socketio):
         room_type = data.get("room") or BOARD_ROOM
         if room_type not in VALID_ROOMS:
             return
-        company_id = get_current_company_id() or data.get("company_id")
+        company_id = get_authorized_company_id()
         if not company_id:
             return
         leave_room(room_name(company_id, room_type))

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from ..extensions import db
 
@@ -38,6 +38,12 @@ class AndonAlert(db.Model):
         db.Index("ix_andon_alerts_arrived_at", "arrived_at"),
         db.Index("ix_andon_alerts_resolved_at", "resolved_at"),
         db.Index("ix_andon_alerts_cancelled_at", "cancelled_at"),
+        db.Index(
+            "uq_andon_alerts_active_machine",
+            "machine_id",
+            unique=True,
+            postgresql_where=text("status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')"),
+        ),
     )
 
     id = db.Column(db.Integer, primary_key=True)

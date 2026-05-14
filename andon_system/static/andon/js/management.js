@@ -318,6 +318,17 @@ function formatClockTime(value) {
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+function getStaticRadiusStatus(machine) {
+  const radiusStates = ["Production", "Make Ready", "Cleaning", "Ink Setup"];
+  const machineId = Number(machine?.id);
+  if (Number.isFinite(machineId)) {
+    return radiusStates[Math.abs(machineId) % radiusStates.length];
+  }
+  const machineName = String(machine?.name || "");
+  const fallbackIndex = machineName.length % radiusStates.length;
+  return radiusStates[fallbackIndex];
+}
+
 function renderMachineCard(machine, visibleDetails) {
   const active = Boolean(machine.active_alert);
   const alert = machine.active_alert;
@@ -358,6 +369,7 @@ function renderMachineCard(machine, visibleDetails) {
     : "No recent issue";
   const startedAt = lastClosedAlert ? formatClockTime(lastClosedAlert.created_at) : "—";
   const resolvedAt = lastClosedAlert ? formatClockTime(lastClosedAlert.closed_at) : "—";
+  const radiusStatus = getStaticRadiusStatus(machine);
 
   return `
     <article
@@ -376,7 +388,10 @@ function renderMachineCard(machine, visibleDetails) {
           <span class="management-machine-card__hero-text">${escapeHtml(statusLabelText)}</span>
         </div>
       </div>
-      <div class="management-machine-card__meta">${escapeHtml(machine.machine_type || "Unassigned")}</div>
+      <div class="management-machine-card__meta">
+        <span class="management-machine-card__meta-label">Radius Status</span>
+        <span class="management-machine-card__meta-value">${escapeHtml(radiusStatus)}</span>
+      </div>
       <div class="management-machine-card__metrics">
         <div class="management-machine-card__metric">
           <div class="management-machine-card__metric-label">Today</div>

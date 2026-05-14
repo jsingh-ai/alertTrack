@@ -4,9 +4,9 @@ from flask import Flask, g
 
 from .company_context import get_companies, get_current_company, set_current_company_slug
 from .config import config_by_name
-from .db_maintenance import ensure_andon_schema
 from .extensions import db, migrate, socketio
 from .routes import register_blueprints
+from .security import enforce_csrf, generate_csrf_token, is_admin_authenticated, validate_production_security_config
 
 
 def create_app(config_name: str | None = None) -> Flask:
@@ -19,6 +19,10 @@ def create_app(config_name: str | None = None) -> Flask:
 
     config_key = config_name or os.getenv("FLASK_CONFIG") or os.getenv("APP_ENV") or "default"
     app.config.from_object(config_by_name.get(config_key, config_by_name["default"]))
+    if not app.config.get("SQLALCHEMY_DATABASE_URI"):
+        raise RuntimeError("DATABASE_URL must be configured for PostgreSQL.")
+    if config_key == "production":
+        validate_production_security_config(app.config)
 
     db.init_app(app)
     if migrate is not None:
@@ -65,6 +69,8 @@ def create_app(config_name: str | None = None) -> Flask:
             "current_company": current_company,
             "companies": get_companies(),
             "socketio_enabled": socketio is not None and app.config.get("SOCKETIO_ENABLED"),
+            "admin_authenticated": is_admin_authenticated(),
+            "csrf_token": generate_csrf_token(),
             "model_refs": {
                 "Department": Department,
                 "Company": Company,
@@ -81,12 +87,12 @@ def create_app(config_name: str | None = None) -> Flask:
 
     @app.before_request
     def load_current_company():
+        enforce_csrf()
         g.current_company = get_current_company()
 
     with app.app_context():
         if app.config.get("ANDON_AUTO_SCHEMA_MAINTENANCE"):
             db.create_all()
-            ensure_andon_schema()
         app.logger.debug("Andon app initialized")
 
     return app

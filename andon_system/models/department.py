@@ -9,7 +9,6 @@ class Department(db.Model):
         db.UniqueConstraint("company_id", "name", name="uq_departments_company_name"),
         db.Index("ix_departments_company_id", "company_id"),
         db.Index("ix_departments_is_active", "is_active"),
-        {"sqlite_autoincrement": True},
     )
 
     id = db.Column(db.Integer, primary_key=True)

@@ -1,4 +1,4 @@
-from flask import Blueprint, redirect, render_template, request, url_for
+from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -9,6 +9,12 @@ from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
 from ..models.user import USER_ROLES, User
+from ..security import (
+    is_admin_authenticated,
+    is_safe_redirect_target,
+    set_admin_authenticated,
+    validate_admin_password,
+)
 from ..services.escalation_service import FIXED_ESCALATION_PHASES, ensure_fixed_escalation_rules
 
 pages_bp = Blueprint("pages", __name__)
@@ -55,6 +61,31 @@ def select_company():
     slug = request.form.get("company_slug")
     set_current_company_slug(slug)
     return redirect(request.referrer or url_for("pages.operator_page"))
+
+
+@pages_bp.post("/andon/admin/login")
+def admin_login():
+    password = request.form.get("password")
+    next_url = request.form.get("next") or url_for("pages.admin_page")
+    if not is_safe_redirect_target(next_url):
+        next_url = url_for("pages.admin_page")
+    if not validate_admin_password(password):
+        if request.accept_mimetypes.best == "application/json":
+            return jsonify({"ok": False, "message": "Invalid admin password"}), 403
+        flash("Invalid admin password", "warning")
+        return redirect(url_for("pages.operator_page"))
+    set_admin_authenticated(True)
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify({"ok": True, "redirect_to": next_url})
+    return redirect(next_url)
+
+
+@pages_bp.post("/andon/admin/logout")
+def admin_logout():
+    set_admin_authenticated(False)
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify({"ok": True, "redirect_to": url_for("pages.operator_page")})
+    return redirect(url_for("pages.operator_page"))
 
 
 @pages_bp.route("/andon/operator")
@@ -108,6 +139,9 @@ def reports_page():
 
 @pages_bp.route("/andon/admin")
 def admin_page():
+    if not is_admin_authenticated():
+        flash("Admin authentication required", "warning")
+        return redirect(url_for("pages.operator_page"))
     company = get_current_company()
     company_id = company.id if company else None
     escalation_rules_map = ensure_fixed_escalation_rules()

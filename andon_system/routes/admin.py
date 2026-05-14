@@ -13,10 +13,16 @@ from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
 from ..models.user import USER_ROLES, User
+from ..security import require_admin_authentication
 from ..services.cache_service import invalidate_cache
 from ..services.realtime_service import emit_admin_metadata_updated
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/andon/admin")
+
+
+@admin_bp.before_request
+def require_admin_session():
+    require_admin_authentication()
 
 
 def _int_or_none(value):
