@@ -1516,6 +1516,116 @@ tbody tr:has(.admin-filter-link:focus-visible) {
   margin-top: 0.35rem;
 }
 
+.radius-event-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  min-height: 2rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+  color: #0f172a;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.1);
+  flex-shrink: 0;
+}
+
+.radius-panel {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.82rem 0.88rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.92));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.radius-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.radius-panel__title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.radius-panel__machine {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.58rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.07);
+  color: #1e293b;
+  font-size: 0.73rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.radius-panel__grid {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.radius-panel__grid--pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.radius-panel__grid--stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.radius-panel__item {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.68rem 0.74rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.radius-panel__item--wide {
+  min-height: 4.25rem;
+}
+
+.radius-panel__label {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.radius-panel__value {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 0.93rem;
+  font-weight: 800;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .radius-panel__grid--pair,
+  body.board-screen-shell.management-screen-shell .management-machine-card__radius-grid--pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .machine-tile__meta {
   font-size: 0.9rem;
   opacity: 0.85;
@@ -2617,6 +2727,21 @@ html[data-theme="light"] .operator-machine-group__count {
   grid-column: 1 / -1;
 }
 
+.button-board-shell .operator-machine-tile .machine-tile__healthy-band .machine-tile__healthy-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.button-board-shell .operator-machine-tile .machine-tile__radius-panel {
+  margin-top: 0.7rem;
+}
+
+.button-board-shell .operator-machine-tile .machine-tile__radius-panel--response {
+  margin-bottom: 0.7rem;
+}
+
 .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create[data-followup="true"] .machine-tile__healthy-band {
   background: linear-gradient(180deg, rgba(221, 247, 228, 0.98), rgba(196, 238, 208, 0.98));
   border-color: rgba(47, 158, 68, 0.24);
@@ -2860,7 +2985,7 @@ html[data-theme="light"] .operator-machine-group__count {
 .button-board-shell .operator-machine-tile .machine-tile__top {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   gap: 0.35rem;
   padding: 0.85rem 4.4rem 0.85rem 1rem;
@@ -2924,6 +3049,12 @@ html[data-theme="light"] .operator-machine-group__count {
   top: 50%;
   right: 0.85rem;
   transform: translateY(-50%);
+}
+
+.button-board-shell .operator-machine-tile .machine-tile__top .radius-event-badge {
+  position: absolute;
+  top: 0.7rem;
+  right: 4.1rem;
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__alert {
@@ -5876,6 +6007,95 @@ body.board-screen-shell.management-screen-shell .management-machine-card__hero-t
   line-height: 1.15;
 }
 
+body.board-screen-shell.management-screen-shell .management-machine-card__title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__title-row .radius-event-badge {
+  margin-left: auto;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__radius {
+  margin-top: 0.75rem;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__radius-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__radius-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__radius-machine {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.58rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.07);
+  color: #1e293b;
+  font-size: 0.73rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__radius-grid {
+  display: grid;
+  gap: 0.6rem;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__radius-grid--pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__radius-grid--stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__radius-item {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.68rem 0.74rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__radius-item--wide {
+  min-height: 4.25rem;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__radius-label {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__radius-value {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 0.93rem;
+  font-weight: 800;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 body.board-screen-shell.management-screen-shell .management-machine-card--status-open {
   background: linear-gradient(180deg, #fff0f0 0%, #ffd9d9 100%);
   border-color: rgba(224, 49, 49, 0.28);
@@ -6849,6 +7069,18 @@ body.board-screen-shell .board-alert-card__top {
   gap: 0.45rem;
 }
 
+body.board-screen-shell .board-alert-card__title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+body.board-screen-shell .board-alert-card__title-row .radius-event-badge {
+  margin-top: 0.08rem;
+}
+
 body.board-screen-shell .board-alert-card__title {
   min-width: 0;
   flex: 1 1 auto;
@@ -6857,6 +7089,16 @@ body.board-screen-shell .board-alert-card__title {
   font-weight: 900;
   line-height: 1.05;
   letter-spacing: -0.03em;
+}
+
+body.board-screen-shell .board-alert-card .radius-panel {
+  margin-top: 0.48rem;
+  padding: 0.68rem 0.72rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(241, 245, 249, 0.94));
+}
+
+body.board-screen-shell .board-alert-card .radius-panel__value {
+  font-size: 0.84rem;
 }
 
 body.board-screen-shell .board-alert-card__issue {

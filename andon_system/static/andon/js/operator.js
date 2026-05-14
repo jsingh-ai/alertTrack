@@ -724,6 +724,7 @@ function renderMachineTile(machine, detailed) {
         <div class="machine-tile__identity ${detailed ? "machine-tile__identity--detailed" : ""}">
           <div class="machine-tile__name">${escapeHtml(machine.name)}</div>
         </div>
+        ${renderRadiusEventBadge(machine)}
         <span class="status-pill ${active ? statusClass(alert.status) : "status-healthy"}">${active ? statusLabel(alert.status) : "Healthy"}</span>
       </div>
       ${active ? renderAlertInlinePanel(machine, alert, detailed) : renderCreateInlinePanel(machine, detailed)}
@@ -874,6 +875,43 @@ function renderUserButtonsMarkup(users, selectedUserId, kind) {
     .join("");
 }
 
+function radiusValue(value) {
+  return escapeHtml(value || "N/A");
+}
+
+function renderRadiusEventBadge(machine) {
+  const value = String(machine?.radius?.event_type || "").trim();
+  if (!value) return "";
+  return `<span class="radius-event-badge" aria-label="Radius event type">${escapeHtml(value)}</span>`;
+}
+
+function renderRadiusPanel(machine, modifier = "") {
+  const radius = machine?.radius || null;
+  return `
+    <div class="radius-panel ${modifier}">
+      <div class="radius-panel__header">
+        <div class="radius-panel__title">Radius</div>
+        <div class="radius-panel__machine">Machine ${radiusValue(radius?.machine_id || machine?.radius_machine_id)}</div>
+      </div>
+      <div class="radius-panel__grid radius-panel__grid--pair">
+        <div class="radius-panel__item">
+          <div class="radius-panel__label">Operator Code</div>
+          <div class="radius-panel__value">${radiusValue(radius?.operation_code)}</div>
+        </div>
+        <div class="radius-panel__item">
+          <div class="radius-panel__label">Job Code</div>
+          <div class="radius-panel__value">${radiusValue(radius?.job_code)}</div>
+        </div>
+      </div>
+      <div class="radius-panel__grid radius-panel__grid--stack">
+        <div class="radius-panel__item radius-panel__item--wide">
+          <div class="radius-panel__label">Status</div>
+          <div class="radius-panel__value">${radiusValue(radius?.status_label)}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
 function renderCreateInlinePanel(machine, detailed) {
   const preferredDepartment = state.selectedDepartment;
   const problems = preferredDepartment
@@ -898,10 +936,12 @@ function renderCreateInlinePanel(machine, detailed) {
                   <div class="machine-tile__healthy-summary-time">Current time ${escapeHtml(healthyTime)}</div>
                 </div>
               </div>
+              ${renderRadiusEventBadge(machine)}
             </div>
           </div>
         </div>
       </div>
+      ${renderRadiusPanel(machine, "machine-tile__radius-panel")}
       <div class="machine-tile__inline-panel machine-tile__inline-panel--create-body machine-modal__section--create-body">
         <div class="machine-modal__section machine-modal__section--departments machine-modal__section--create-departments">
           <div class="machine-tile__section-copy machine-tile__section-copy--departments">
@@ -950,6 +990,7 @@ function renderAlertInlinePanel(machine, alert, detailed) {
     : (threadMarkup ? `<div class="alert-note-summary">${threadMarkup}</div>` : '<div class="d-none" aria-hidden="true"></div>');
   return `
     <div class="machine-tile__inline-panel machine-tile__inline-panel--response machine-modal machine-modal--response ${isOpen ? "machine-modal--response-open" : "machine-modal--response-working"} ${detailed ? "machine-tile__inline-panel--detailed" : ""}">
+      ${renderRadiusPanel(machine, "machine-tile__radius-panel machine-tile__radius-panel--response")}
       <div class="machine-tile__inline-panel-grid">
         ${isOpen ? `
           <div class="machine-modal__section machine-modal__section--response-waiting">

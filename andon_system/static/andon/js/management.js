@@ -322,12 +322,21 @@ function radiusValue(value) {
   return escapeHtml(value || "N/A");
 }
 
+function radiusEventBadge(machine) {
+  const value = String(machine?.radius?.event_type || "").trim();
+  if (!value) return "";
+  return `<span class="radius-event-badge" aria-label="Radius event type">${escapeHtml(value)}</span>`;
+}
+
 function renderRadiusGroup(machine) {
   const radius = machine?.radius || null;
   return `
     <div class="management-machine-card__radius">
-      <div class="management-machine-card__radius-title">Radius</div>
-      <div class="management-machine-card__radius-grid">
+      <div class="management-machine-card__radius-header">
+        <div class="management-machine-card__radius-title">Radius</div>
+        <div class="management-machine-card__radius-machine">Machine ${radiusValue(radius?.machine_id || machine?.radius_machine_id)}</div>
+      </div>
+      <div class="management-machine-card__radius-grid management-machine-card__radius-grid--pair">
         <div class="management-machine-card__radius-item">
           <span class="management-machine-card__radius-label">Operator Code</span>
           <span class="management-machine-card__radius-value">${radiusValue(radius?.operation_code)}</span>
@@ -336,11 +345,9 @@ function renderRadiusGroup(machine) {
           <span class="management-machine-card__radius-label">Job Code</span>
           <span class="management-machine-card__radius-value">${radiusValue(radius?.job_code)}</span>
         </div>
-        <div class="management-machine-card__radius-item">
-          <span class="management-machine-card__radius-label">Event Type</span>
-          <span class="management-machine-card__radius-value">${radiusValue(radius?.event_type)}</span>
-        </div>
-        <div class="management-machine-card__radius-item">
+      </div>
+      <div class="management-machine-card__radius-grid management-machine-card__radius-grid--stack">
+        <div class="management-machine-card__radius-item management-machine-card__radius-item--wide">
           <span class="management-machine-card__radius-label">Status</span>
           <span class="management-machine-card__radius-value">${radiusValue(radius?.status_label)}</span>
         </div>
@@ -399,15 +406,14 @@ function renderMachineCard(machine, visibleDetails) {
       aria-label="Open summary for ${escapeHtml(machine.name)}"
     >
       <div class="management-machine-card__hero management-machine-card__hero--${heroClass}">
-        <div class="management-machine-card__title">${escapeHtml(machine.name)}</div>
+        <div class="management-machine-card__title-row">
+          <div class="management-machine-card__title">${escapeHtml(machine.name)}</div>
+          ${radiusEventBadge(machine)}
+        </div>
         <div class="management-machine-card__hero-status">
           <span class="management-machine-card__hero-icon"><i class="bi ${statusIcon}"></i></span>
           <span class="management-machine-card__hero-text">${escapeHtml(statusLabelText)}</span>
         </div>
-      </div>
-      <div class="management-machine-card__meta">
-        <span class="management-machine-card__meta-label">Radius Machine</span>
-        <span class="management-machine-card__meta-value">${escapeHtml(machine.radius?.machine_id || machine.radius_machine_id || "N/A")}</span>
       </div>
       <div class="management-machine-card__metrics">
         <div class="management-machine-card__metric">

@@ -205,6 +205,43 @@ function matchesFilter(alert) {
   return true;
 }
 
+function radiusValue(value) {
+  return escapeHtml(value || "N/A");
+}
+
+function renderRadiusEventBadge(machine) {
+  const value = String(machine?.radius?.event_type || "").trim();
+  if (!value) return "";
+  return `<span class="radius-event-badge" aria-label="Radius event type">${escapeHtml(value)}</span>`;
+}
+
+function renderRadiusPanel(machine) {
+  const radius = machine?.radius || null;
+  return `
+    <div class="radius-panel radius-panel--board">
+      <div class="radius-panel__header">
+        <div class="radius-panel__title">Radius</div>
+        <div class="radius-panel__machine">Machine ${radiusValue(radius?.machine_id || machine?.radius_machine_id)}</div>
+      </div>
+      <div class="radius-panel__grid radius-panel__grid--pair">
+        <div class="radius-panel__item">
+          <div class="radius-panel__label">Operator Code</div>
+          <div class="radius-panel__value">${radiusValue(radius?.operation_code)}</div>
+        </div>
+        <div class="radius-panel__item">
+          <div class="radius-panel__label">Job Code</div>
+          <div class="radius-panel__value">${radiusValue(radius?.job_code)}</div>
+        </div>
+      </div>
+      <div class="radius-panel__grid radius-panel__grid--stack">
+        <div class="radius-panel__item radius-panel__item--wide">
+          <div class="radius-panel__label">Status</div>
+          <div class="radius-panel__value">${radiusValue(radius?.status_label)}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
 function cardTemplate(alert) {
   const issue = String(alert.issue_problem?.name || "").trim();
   const operatorMessage = String(alert.created_note || alert.note || "").trim();
@@ -220,9 +257,13 @@ function cardTemplate(alert) {
   return `
     <article class="board-card h-100 board-alert-card ${statusClass(alert.status)} ${isOpen ? "board-alert-card--inline-open" : ""}" data-alert-id="${alert.id}">
       <div class="board-alert-card__top">
-        <h3 class="board-alert-card__title">${escapeHtml(alert.machine?.name || "")}</h3>
+        <div class="board-alert-card__title-row">
+          <h3 class="board-alert-card__title">${escapeHtml(alert.machine?.name || "")}</h3>
+          ${renderRadiusEventBadge(alert.machine)}
+        </div>
         <span class="status-pill ${statusClass(alert.status)}">${statusLabel(alert.status)}</span>
       </div>
+      ${renderRadiusPanel(alert.machine)}
       <div class="board-alert-card__issue ${isAcknowledged ? "board-alert-card__issue--acknowledged" : ""}">
         <div class="board-alert-card__issue-value">${escapeHtml(issue || "Unassigned")}</div>
       </div>

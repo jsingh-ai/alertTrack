@@ -12,6 +12,7 @@ from andon_system import create_app
 from andon_system.extensions import db
 from andon_system.models import AndonAlert, Machine
 from andon_system.services.radius_service import resolve_radius_machine_id
+from andon_system.services.seed_service import seed_default_data
 
 
 def main():
@@ -24,6 +25,7 @@ def main():
             index.create(bind=db.engine, checkfirst=True)
         for index in Machine.__table__.indexes:
             index.create(bind=db.engine, checkfirst=True)
+        seed_default_data()
     print("Initialized Andon database.")
 
 
