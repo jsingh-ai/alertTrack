@@ -892,7 +892,11 @@ function renderRadiusPanel(machine, modifier = "") {
         <div class="radius-panel__title">Radius</div>
         <div class="radius-panel__machine">Machine ${radiusValue(radius?.machine_id || machine?.radius_machine_id)}</div>
       </div>
-      <div class="radius-panel__grid radius-panel__grid--pair">
+      <div class="radius-panel__grid radius-panel__grid--operator">
+        <div class="radius-panel__item">
+          <div class="radius-panel__label">Status</div>
+          <div class="radius-panel__value">${radiusValue(radius?.status_label)}</div>
+        </div>
         <div class="radius-panel__item">
           <div class="radius-panel__label">Operator Code</div>
           <div class="radius-panel__value">${radiusValue(radius?.operation_code)}</div>
@@ -900,12 +904,6 @@ function renderRadiusPanel(machine, modifier = "") {
         <div class="radius-panel__item">
           <div class="radius-panel__label">Job Code</div>
           <div class="radius-panel__value">${radiusValue(radius?.job_code)}</div>
-        </div>
-      </div>
-      <div class="radius-panel__grid radius-panel__grid--stack">
-        <div class="radius-panel__item radius-panel__item--wide">
-          <div class="radius-panel__label">Status</div>
-          <div class="radius-panel__value">${radiusValue(radius?.status_label)}</div>
         </div>
       </div>
     </div>`;

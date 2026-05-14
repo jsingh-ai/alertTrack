@@ -113,6 +113,9 @@ function buildAlertsFromMachines(machines) {
         name: machine.name,
         machine_type: machine.machine_type,
         department_id: machine.department_id,
+        department_name: machine.department_name,
+        radius_machine_id: machine.radius_machine_id,
+        radius: machine.radius || null,
       },
       department: {
         id: machine.active_alert.department_id || machine.department_id,

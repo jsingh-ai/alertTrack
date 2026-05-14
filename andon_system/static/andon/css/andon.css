@@ -2738,8 +2738,22 @@ html[data-theme="light"] .operator-machine-group__count {
   margin-top: 0.28rem;
 }
 
+.button-board-shell .operator-machine-tile .machine-tile__radius-panel .radius-panel__grid--operator {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.button-board-shell .operator-machine-tile .machine-tile__radius-panel .radius-panel__item {
+  align-content: start;
+}
+
 .button-board-shell .operator-machine-tile .machine-tile__radius-panel--response {
   margin-bottom: 0.7rem;
+}
+
+@media (max-width: 720px) {
+  .button-board-shell .operator-machine-tile .machine-tile__radius-panel .radius-panel__grid--operator {
+    grid-template-columns: 1fr;
+  }
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create[data-followup="true"] .machine-tile__healthy-band {
