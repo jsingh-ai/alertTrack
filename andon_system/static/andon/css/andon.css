@@ -3002,7 +3002,7 @@ html[data-theme="light"] .operator-machine-group__count {
   align-items: flex-start;
   justify-content: center;
   gap: 0.35rem;
-  padding: 0.85rem 4.4rem 0.85rem 1rem;
+  padding: 0.85rem 1rem;
   border-radius: 0.95rem;
   color: #fff;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
@@ -3068,7 +3068,7 @@ html[data-theme="light"] .operator-machine-group__count {
 .button-board-shell .operator-machine-tile .machine-tile__top .radius-event-badge {
   position: absolute;
   top: 0.7rem;
-  right: 4.1rem;
+  right: 0.85rem;
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__alert {
@@ -3927,11 +3927,11 @@ html[data-theme="light"] .operator-machine-group__count {
 .machine-modal__response-label {
   margin: 0;
   margin-bottom: 0.12rem;
-  font-size: 0.62rem;
-  font-weight: 900;
-  letter-spacing: 0.13em;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #5a6c84;
+  color: #64748b;
 }
 
 .machine-modal__response-value {
@@ -7152,6 +7152,13 @@ body.board-screen-shell .board-alert-card .radius-panel {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(241, 245, 249, 0.94));
 }
 
+body.board-screen-shell .board-alert-card .radius-panel__title {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+}
+
 body.board-screen-shell .board-alert-card .radius-panel__value {
   font-size: 0.84rem;
 }
@@ -7198,13 +7205,13 @@ body.board-screen-shell .board-alert-card__actions {
   margin-top: 0.28rem;
   padding: 0.6rem 0.65rem 0.7rem;
   border-radius: 0.85rem;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(24, 50, 79, 0.08);
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 body.board-screen-shell .board-alert-card.status-open .board-alert-card__actions {
-  background: rgba(255, 255, 255, 0.5);
-  border-color: rgba(224, 49, 49, 0.16);
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(148, 163, 184, 0.2);
 }
 
 body.board-screen-shell .board-alert-card__working-actions {
@@ -7214,13 +7221,13 @@ body.board-screen-shell .board-alert-card__working-actions {
   margin-top: 0.28rem;
   padding: 0.6rem 0.65rem 0.7rem;
   border-radius: 0.85rem;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(24, 50, 79, 0.08);
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 body.board-screen-shell .board-alert-card.status-acknowledged .board-alert-card__working-actions {
-  background: rgba(255, 255, 255, 0.54);
-  border-color: rgba(208, 137, 0, 0.16);
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(148, 163, 184, 0.2);
 }
 
 body.board-screen-shell .board-alert-card.status-acknowledged .board-alert-card__working-actions > .board-alert-card__action-title {
@@ -7228,11 +7235,11 @@ body.board-screen-shell .board-alert-card.status-acknowledged .board-alert-card_
 }
 
 body.board-screen-shell .board-alert-card__action-title {
-  font-size: 0.58rem;
-  font-weight: 900;
+  font-size: 0.68rem;
+  font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--andon-muted);
+  color: #64748b;
 }
 
 body.board-screen-shell .board-alert-card__chip-grid {
@@ -7397,16 +7404,16 @@ body.board-screen-shell .board-alert-card__note {
   margin-top: 0.28rem;
   padding: 0.55rem 0.62rem 0.6rem;
   border-radius: 0.82rem;
-  background: rgba(255, 255, 255, 0.48);
-  border: 1px solid rgba(24, 50, 79, 0.08);
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 body.board-screen-shell .board-alert-card__note-label {
-  font-size: 0.56rem;
-  font-weight: 900;
-  letter-spacing: 0.1em;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--andon-muted);
+  color: #64748b;
 }
 
 body.board-screen-shell .board-alert-card__note-value {
@@ -7419,8 +7426,8 @@ body.board-screen-shell .board-alert-card__note-value {
 }
 
 body.board-screen-shell .board-alert-card__note--responding {
-  background: rgba(255, 255, 255, 0.48);
-  border-color: rgba(24, 50, 79, 0.08);
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(148, 163, 184, 0.2);
 }
 
 body.board-screen-shell .board-alert-card.status-acknowledged .board-alert-card__note--responding .board-alert-card__note-value {
@@ -7434,16 +7441,16 @@ body.board-screen-shell .board-alert-card__timer-box {
   margin-top: 0.28rem;
   padding: 0.55rem 0.62rem 0.6rem;
   border-radius: 0.82rem;
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid rgba(24, 50, 79, 0.08);
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 body.board-screen-shell .board-alert-card__timer-label {
-  font-size: 0.56rem;
-  font-weight: 900;
-  letter-spacing: 0.1em;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--andon-muted);
+  color: #64748b;
   text-align: center;
 }
 

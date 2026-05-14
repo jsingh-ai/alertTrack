@@ -181,7 +181,7 @@ function syncInlineCardState(alertId) {
 function renderInlineUserButtons(users, selectedUserId, alertId) {
   const validSelected = users.some((user) => Number(user.id) === Number(selectedUserId)) ? selectedUserId : null;
   if (!users.length) {
-    return '<div class="problem-empty">No users found for this machine and department.</div>';
+    return "";
   }
   return users
     .map(
@@ -257,7 +257,6 @@ function cardTemplate(alert) {
       <div class="board-alert-card__top">
         <div class="board-alert-card__title-row">
           <h3 class="board-alert-card__title">${escapeHtml(alert.machine?.name || "")}</h3>
-          ${renderRadiusEventBadge(alert.machine)}
         </div>
         <span class="status-pill ${statusClass(alert.status)}">${statusLabel(alert.status)}</span>
       </div>
@@ -307,10 +306,12 @@ function cardTemplate(alert) {
       ` : ""}
       ${isOpen ? `
         <div class="board-alert-card__actions">
-          <div class="board-alert-card__action-title">WHO IS ACCEPTING</div>
-          <div class="user-chip-grid board-alert-card__chip-grid">
-            ${renderInlineUserButtons(users, selectedResponderUserId, alert.id)}
-          </div>
+          ${users.length ? `
+            <div class="board-alert-card__action-title">WHO IS ACCEPTING</div>
+            <div class="user-chip-grid board-alert-card__chip-grid">
+              ${renderInlineUserButtons(users, selectedResponderUserId, alert.id)}
+            </div>
+          ` : ""}
           <div class="board-alert-card__action-title">Note</div>
           <textarea class="form-control board-alert-card__note-input" rows="2" placeholder="Add note" data-board-alert-note="true" data-board-alert-id="${alert.id}">${escapeHtml(draft.note)}</textarea>
           <button type="button" class="btn btn-primary board-alert-card__ack-btn" data-board-acknowledge="true" data-alert-id="${alert.id}">Acknowledge</button>
