@@ -541,7 +541,7 @@
       adminDeleteModal.hide();
     }
     form.dataset.skipDeleteConfirm = "true";
-    form.requestSubmit();
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   });
 
   adminDeleteModalElement?.addEventListener("hidden.bs.modal", () => {
