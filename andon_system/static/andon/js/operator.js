@@ -725,11 +725,6 @@ function renderMachineTile(machine, detailed) {
           <div class="machine-tile__name">${escapeHtml(machine.name)}</div>
         </div>
         ${renderRadiusEventBadge(machine)}
-<<<<<<< HEAD
-        <span class="status-pill ${active ? statusClass(alert.status) : "status-healthy"}">${active ? statusLabel(alert.status) : "Healthy"}</span>
-=======
-        ${active ? `<span class="status-pill ${statusClass(alert.status)}">${statusLabel(alert.status)}</span>` : ""}
->>>>>>> 8857197 (CSS Changes)
       </div>
       ${active ? renderAlertInlinePanel(machine, alert, detailed) : renderCreateInlinePanel(machine, detailed)}
     </article>`;

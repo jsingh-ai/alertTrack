@@ -2735,11 +2735,7 @@ html[data-theme="light"] .operator-machine-group__count {
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__radius-panel {
-<<<<<<< HEAD
-  margin-top: 0.7rem;
-=======
   margin-top: 0.28rem;
->>>>>>> 8857197 (CSS Changes)
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__radius-panel--response {
@@ -6014,48 +6010,6 @@ body.board-screen-shell.management-screen-shell .management-machine-card__hero-t
 body.board-screen-shell.management-screen-shell .management-machine-card__title-row {
   display: flex;
   align-items: flex-start;
-<<<<<<< HEAD
-  justify-content: space-between;
-  gap: 0.8rem;
-}
-
-body.board-screen-shell.management-screen-shell .management-machine-card__title-row .radius-event-badge {
-  margin-left: auto;
-}
-
-body.board-screen-shell.management-screen-shell .management-machine-card__radius {
-  margin-top: 0.75rem;
-}
-
-body.board-screen-shell.management-screen-shell .management-machine-card__radius-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.65rem;
-}
-
-body.board-screen-shell.management-screen-shell .management-machine-card__radius-title {
-  margin: 0;
-  color: #0f172a;
-  font-size: 0.76rem;
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-body.board-screen-shell.management-screen-shell .management-machine-card__radius-machine {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.28rem 0.58rem;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.07);
-  color: #1e293b;
-  font-size: 0.73rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-=======
   justify-content: center;
   position: relative;
   width: 100%;
@@ -6072,7 +6026,6 @@ body.board-screen-shell.management-screen-shell .management-machine-card__title-
 
 body.board-screen-shell.management-screen-shell .management-machine-card__radius {
   margin-top: 0;
->>>>>>> 8857197 (CSS Changes)
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__radius-grid {
@@ -6119,8 +6072,6 @@ body.board-screen-shell.management-screen-shell .management-machine-card__radius
   word-break: break-word;
 }
 
-<<<<<<< HEAD
-=======
 body.board-screen-shell.management-screen-shell .management-machine-card__section {
   display: grid;
   gap: 0.45rem;
@@ -6138,8 +6089,6 @@ body.board-screen-shell.management-screen-shell .management-machine-card__sectio
   text-transform: uppercase;
   color: #4e647d;
 }
-
->>>>>>> 8857197 (CSS Changes)
 body.board-screen-shell.management-screen-shell .management-machine-card--status-open {
   background: linear-gradient(180deg, #fff0f0 0%, #ffd9d9 100%);
   border-color: rgba(224, 49, 49, 0.28);

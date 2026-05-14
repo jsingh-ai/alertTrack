@@ -332,13 +332,6 @@ function renderRadiusGroup(machine) {
   const radius = machine?.radius || null;
   return `
     <div class="management-machine-card__radius">
-<<<<<<< HEAD
-      <div class="management-machine-card__radius-header">
-        <div class="management-machine-card__radius-title">Radius</div>
-        <div class="management-machine-card__radius-machine">Machine ${radiusValue(radius?.machine_id || machine?.radius_machine_id)}</div>
-      </div>
-=======
->>>>>>> 8857197 (CSS Changes)
       <div class="management-machine-card__radius-grid management-machine-card__radius-grid--pair">
         <div class="management-machine-card__radius-item">
           <span class="management-machine-card__radius-label">Operator Code</span>
@@ -418,20 +411,6 @@ function renderMachineCard(machine, visibleDetails) {
           <span class="management-machine-card__hero-text">${escapeHtml(statusLabelText)}</span>
         </div>
       </div>
-<<<<<<< HEAD
-      <div class="management-machine-card__metrics">
-        <div class="management-machine-card__metric">
-          <div class="management-machine-card__metric-label">Today</div>
-          <div class="management-machine-card__metric-value">${stats.totalAlerts}</div>
-        </div>
-        <div class="management-machine-card__metric">
-          <div class="management-machine-card__metric-label">Avg ack</div>
-          <div class="management-machine-card__metric-value">${escapeHtml(stats.averageAcknowledge)}</div>
-        </div>
-        <div class="management-machine-card__metric">
-          <div class="management-machine-card__metric-label">Avg fix</div>
-          <div class="management-machine-card__metric-value">${escapeHtml(stats.averageFix)}</div>
-=======
       <div class="management-machine-card__section management-machine-card__section--metrics">
         <div class="management-machine-card__section-title">Performance</div>
         <div class="management-machine-card__metrics">
@@ -447,7 +426,6 @@ function renderMachineCard(machine, visibleDetails) {
             <div class="management-machine-card__metric-label">Avg fix</div>
             <div class="management-machine-card__metric-value">${escapeHtml(stats.averageFix)}</div>
           </div>
->>>>>>> 8857197 (CSS Changes)
         </div>
       </div>
       <div class="management-machine-card__section management-machine-card__section--status">
