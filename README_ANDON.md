@@ -73,7 +73,7 @@ export SECRET_KEY=use-a-long-random-secret
 Recommended production command:
 
 ```bash
-gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:8000 wsgi:app
+gunicorn --worker-class gthread --threads 8 -w 1 --bind 0.0.0.0:8000 wsgi:app
 ```
 
 `REDIS_REQUIRED=true` is recommended in production. If `REDIS_REQUIRED` is left off, the app can fall back to in-memory cache behavior in development when Redis is unavailable. Redis is used for cache and the Socket.IO message queue only; it is not the source of truth for alerts, users, machines, reports, or machine status.

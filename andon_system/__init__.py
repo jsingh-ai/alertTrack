@@ -2,7 +2,7 @@ import os
 
 from flask import Flask, g
 
-from .company_context import get_companies, get_current_company, set_current_company_slug
+from .company_context import get_companies, get_current_company
 from .config import config_by_name
 from .extensions import db, migrate, socketio
 from .routes import register_blueprints
@@ -40,18 +40,7 @@ def create_app(config_name: str | None = None) -> Flask:
 
     register_blueprints(app)
 
-    from .models import (  # noqa: WPS433
-        AndonAlert,
-        AndonAlertEvent,
-        Company,
-        Department,
-        EscalationRule,
-        IssueCategory,
-        IssueProblem,
-        Machine,
-        MachineGroup,
-        User,
-    )
+    from . import models  # noqa: F401,WPS433
 
     @app.template_filter("utc_local")
     def utc_local(value):
@@ -71,18 +60,6 @@ def create_app(config_name: str | None = None) -> Flask:
             "socketio_enabled": socketio is not None and app.config.get("SOCKETIO_ENABLED"),
             "admin_authenticated": is_admin_authenticated(),
             "csrf_token": generate_csrf_token(),
-            "model_refs": {
-                "Department": Department,
-                "Company": Company,
-                "Machine": Machine,
-                "MachineGroup": MachineGroup,
-                "User": User,
-                "IssueCategory": IssueCategory,
-                "IssueProblem": IssueProblem,
-                "AndonAlert": AndonAlert,
-                "AndonAlertEvent": AndonAlertEvent,
-                "EscalationRule": EscalationRule,
-            },
         }
 
     @app.before_request

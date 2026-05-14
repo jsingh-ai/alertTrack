@@ -10,6 +10,7 @@ class Machine(db.Model):
         db.Index("ix_machines_company_id", "company_id"),
         db.Index("ix_machines_department_id", "department_id"),
         db.Index("ix_machines_machine_type", "machine_type"),
+        db.Index("ix_machines_radius_machine_id", "radius_machine_id"),
         db.Index("ix_machines_is_active", "is_active"),
     )
 
@@ -18,6 +19,7 @@ class Machine(db.Model):
     machine_code = db.Column(db.String(64), nullable=False, index=True)
     name = db.Column(db.String(160), nullable=False, index=True)
     machine_type = db.Column(db.String(80), nullable=True)
+    radius_machine_id = db.Column(db.Integer, nullable=True)
     area = db.Column(db.String(120), nullable=True)
     line = db.Column(db.String(120), nullable=True)
     department_id = db.Column(db.Integer, db.ForeignKey("departments.id"), nullable=True)
@@ -36,6 +38,7 @@ class Machine(db.Model):
             "machine_code": self.machine_code,
             "name": self.name,
             "machine_type": self.machine_type,
+            "radius_machine_id": self.radius_machine_id,
             "area": self.area,
             "line": self.line,
             "department_id": self.department_id,

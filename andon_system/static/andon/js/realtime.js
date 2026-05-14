@@ -37,7 +37,6 @@
   };
 
   if (!config.enabled || !config.companyId || !config.room || typeof window.io !== "function") {
-    console.info("Andon realtime disabled or unavailable; using HTTP refresh fallback.");
     window.setTimeout(() => dispatchStatus(false, "unavailable"), 0);
     return;
   }
@@ -53,23 +52,17 @@
 
   socket.on("connect", () => {
     window.AndonRealtime.connected = true;
-    console.info("Andon realtime connected.");
     dispatchStatus(true, "connected");
-    socket.emit("join_company_room", {
-      company_id: config.companyId,
-      room: config.room,
-    });
+    socket.emit("join_company_room", { room: config.room });
   });
 
   socket.on("disconnect", () => {
     window.AndonRealtime.connected = false;
-    console.info("Andon realtime disconnected; HTTP refresh fallback remains available.");
     dispatchStatus(false, "disconnected");
   });
 
-  socket.on("connect_error", (error) => {
+  socket.on("connect_error", () => {
     window.AndonRealtime.connected = false;
-    console.info("Andon realtime connection failed; HTTP refresh fallback remains available.", error?.message || error);
     dispatchStatus(false, "connect_error");
   });
 

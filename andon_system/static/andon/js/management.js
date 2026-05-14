@@ -318,15 +318,34 @@ function formatClockTime(value) {
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-function getStaticRadiusStatus(machine) {
-  const radiusStates = ["Production", "Make Ready", "Cleaning", "Ink Setup"];
-  const machineId = Number(machine?.id);
-  if (Number.isFinite(machineId)) {
-    return radiusStates[Math.abs(machineId) % radiusStates.length];
-  }
-  const machineName = String(machine?.name || "");
-  const fallbackIndex = machineName.length % radiusStates.length;
-  return radiusStates[fallbackIndex];
+function radiusValue(value) {
+  return escapeHtml(value || "N/A");
+}
+
+function renderRadiusGroup(machine) {
+  const radius = machine?.radius || null;
+  return `
+    <div class="management-machine-card__radius">
+      <div class="management-machine-card__radius-title">Radius</div>
+      <div class="management-machine-card__radius-grid">
+        <div class="management-machine-card__radius-item">
+          <span class="management-machine-card__radius-label">Operator Code</span>
+          <span class="management-machine-card__radius-value">${radiusValue(radius?.operation_code)}</span>
+        </div>
+        <div class="management-machine-card__radius-item">
+          <span class="management-machine-card__radius-label">Job Code</span>
+          <span class="management-machine-card__radius-value">${radiusValue(radius?.job_code)}</span>
+        </div>
+        <div class="management-machine-card__radius-item">
+          <span class="management-machine-card__radius-label">Event Type</span>
+          <span class="management-machine-card__radius-value">${radiusValue(radius?.event_type)}</span>
+        </div>
+        <div class="management-machine-card__radius-item">
+          <span class="management-machine-card__radius-label">Status</span>
+          <span class="management-machine-card__radius-value">${radiusValue(radius?.status_label)}</span>
+        </div>
+      </div>
+    </div>`;
 }
 
 function renderMachineCard(machine, visibleDetails) {
@@ -369,8 +388,6 @@ function renderMachineCard(machine, visibleDetails) {
     : "No recent issue";
   const startedAt = lastClosedAlert ? formatClockTime(lastClosedAlert.created_at) : "—";
   const resolvedAt = lastClosedAlert ? formatClockTime(lastClosedAlert.closed_at) : "—";
-  const radiusStatus = getStaticRadiusStatus(machine);
-
   return `
     <article
       class="management-machine-card management-machine-card--${statusClass(status)} management-machine-card--clickable"
@@ -389,8 +406,8 @@ function renderMachineCard(machine, visibleDetails) {
         </div>
       </div>
       <div class="management-machine-card__meta">
-        <span class="management-machine-card__meta-label">Radius Status</span>
-        <span class="management-machine-card__meta-value">${escapeHtml(radiusStatus)}</span>
+        <span class="management-machine-card__meta-label">Radius Machine</span>
+        <span class="management-machine-card__meta-value">${escapeHtml(machine.radius?.machine_id || machine.radius_machine_id || "N/A")}</span>
       </div>
       <div class="management-machine-card__metrics">
         <div class="management-machine-card__metric">
@@ -406,6 +423,7 @@ function renderMachineCard(machine, visibleDetails) {
           <div class="management-machine-card__metric-value">${escapeHtml(stats.averageFix)}</div>
         </div>
       </div>
+      ${renderRadiusGroup(machine)}
       <div class="management-machine-card__body">
         ${isOffline ? `<div class="management-machine-card__state management-machine-card__state--offline">Offline</div>` : active ? `
           <div class="management-machine-card__state-row management-machine-card__state-row--two">

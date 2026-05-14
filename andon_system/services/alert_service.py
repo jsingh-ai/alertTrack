@@ -397,20 +397,6 @@ def get_active_alert_metrics():
     return grouped
 
 
-def get_alert_history(limit=100):
-    return AndonAlert.query.order_by(AndonAlert.created_at.desc()).limit(limit).all()
-
-
-def get_alerts_for_machine(machine_id):
-    return AndonAlert.query.filter(AndonAlert.machine_id == machine_id).order_by(AndonAlert.created_at.desc()).all()
-
-
-def check_alerts_for_escalation():
-    from .escalation_service import check_escalations
-
-    return check_escalations()
-
-
 def _invalidate_live_caches(company_id):
     invalidate_cache("board_state", company_id)
     invalidate_cache("report_summary", company_id)

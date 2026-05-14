@@ -12,6 +12,7 @@ class BaseConfig:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-andon-secret-key")
     ADMIN_PASSWORD = os.getenv("ANDON_ADMIN_PASSWORD")
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
+    PRESS_RADIUS_DATABASE_URL = os.getenv("PRESS_RADIUS_DATABASE_URL")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
@@ -25,7 +26,7 @@ class BaseConfig:
     REDIS_REQUIRED = os.getenv("REDIS_REQUIRED", "false").lower() in {"1", "true", "yes", "on"}
     SOCKETIO_ENABLED = os.getenv("SOCKETIO_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     SOCKETIO_MESSAGE_QUEUE = os.getenv("SOCKETIO_MESSAGE_QUEUE") or REDIS_URL
-    SOCKETIO_ASYNC_MODE = os.getenv("SOCKETIO_ASYNC_MODE") or None
+    SOCKETIO_ASYNC_MODE = os.getenv("SOCKETIO_ASYNC_MODE") or "threading"
 
 
 class DevelopmentConfig(BaseConfig):

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from sqlalchemy import update
-from flask import Blueprint, jsonify, flash, redirect, render_template, request, url_for
+from flask import Blueprint, jsonify, flash, redirect, request, url_for
 
-from ..company_context import get_current_company, get_current_company_id
+from ..company_context import get_current_company
 from ..extensions import db
-from ..models.company import Company
 from ..models.alert import AndonAlert, AndonAlertEvent
 from ..models.department import Department
 from ..models.escalation import EscalationRule
@@ -15,6 +14,7 @@ from ..models.machine_group import MachineGroup
 from ..models.user import USER_ROLES, User
 from ..security import require_admin_authentication
 from ..services.cache_service import invalidate_cache
+from ..services.radius_service import resolve_radius_machine_id
 from ..services.realtime_service import emit_admin_metadata_updated
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/andon/admin")
@@ -62,14 +62,6 @@ def _machine_group_count(group_name: str) -> int:
 def _company_id():
     company = get_current_company()
     return company.id if company else None
-
-
-def _company_query(model):
-    query = model.query
-    company_id = _company_id()
-    if company_id and hasattr(model, "company_id"):
-        query = query.filter(model.company_id == company_id)
-    return query
 
 
 def _invalidate_company_caches(company_id):
@@ -244,20 +236,35 @@ def create_machine():
         return redirect(url_for("pages.admin_page"))
 
     name = request.form["name"].strip()
+    machine_code = (request.form.get("machine_code") or "").strip()
     if not name:
         if _is_ajax_request():
             return jsonify({"ok": False, "message": "Machine name is required"}), 400
         flash("Machine name is required", "warning")
         return redirect(url_for("pages.admin_page"))
+    if not machine_code:
+        machine_code = _machine_code_from_name(name, company_id)
+
+    existing_machine = Machine.query.filter_by(company_id=company_id, machine_code=machine_code).one_or_none()
+    if existing_machine:
+        if _is_ajax_request():
+            return jsonify({"ok": False, "message": "Machine code already exists"}), 400
+        flash("Machine code already exists", "warning")
+        return redirect(url_for("pages.admin_page"))
 
     machine = Machine(
         company_id=company_id,
-        machine_code=_machine_code_from_name(name, company_id),
+        machine_code=machine_code,
         name=name,
         machine_type=group.name,
+        radius_machine_id=None,
         department_id=_int_or_none(request.form.get("department_id")),
         is_active=True,
     )
+    if machine_code.isdigit():
+        machine.radius_machine_id = int(machine_code)
+    else:
+        machine.radius_machine_id = resolve_radius_machine_id(machine)
     db.session.add(machine)
     db.session.commit()
     _invalidate_company_caches(company_id)
@@ -270,6 +277,7 @@ def create_machine():
                 "name": machine.name,
                 "machine_type": machine.machine_type,
                 "machine_group": machine.machine_type,
+                "radius_machine_id": machine.radius_machine_id,
                 "department_id": machine.department_id,
                 "department_name": machine.department.name if machine.department else None,
                 "is_active": machine.is_active,

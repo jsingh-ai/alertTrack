@@ -11,6 +11,7 @@ from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
 from ..models.user import User
 from .escalation_service import ensure_fixed_escalation_rules
+from .radius_service import resolve_radius_machine_id
 
 
 def seed_default_data():
@@ -40,10 +41,16 @@ def seed_default_data():
         group_rows[group_name] = _get_or_create(MachineGroup, company_id=starpak.id, name=group_name, defaults={"is_active": True})
 
     machines = [
-        {"machine_code": "PRESS-1", "name": "Press 1", "machine_type": "Press", "area": "Press Room", "line": "Line 1", "department": "Production"},
-        {"machine_code": "PRESS-2", "name": "Press 2", "machine_type": "Press", "area": "Press Room", "line": "Line 1", "department": "Production"},
-        {"machine_code": "PRESS-3", "name": "Press 3", "machine_type": "Press", "area": "Press Room", "line": "Line 2", "department": "Production"},
-        {"machine_code": "PRESS-4", "name": "Press 4", "machine_type": "Press", "area": "Press Room", "line": "Line 2", "department": "Production"},
+        {
+            "machine_code": f"PRESS-{number}",
+            "name": f"Press {number}",
+            "machine_type": "Press",
+            "area": "Press Room",
+            "line": f"Line {((number - 1) // 2) + 1}",
+            "department": "Production",
+        }
+        for number in range(1, 16)
+    ] + [
         {"machine_code": "EXTRUSION-1", "name": "Extrusion 1", "machine_type": "Extrusion", "area": "Extrusion", "line": "Line 5", "department": "Production"},
         {"machine_code": "EXTRUSION-2", "name": "Extrusion 2", "machine_type": "Extrusion", "area": "Extrusion", "line": "Line 5", "department": "Production"},
         {"machine_code": "SLITTER-1", "name": "Slitter 1", "machine_type": "Slitter", "area": "Converting", "line": "Line 3", "department": "Materials"},
@@ -71,6 +78,7 @@ def seed_default_data():
         machine_rows[machine["name"]].area = machine["area"]
         machine_rows[machine["name"]].line = machine["line"]
         machine_rows[machine["name"]].department_id = department_rows[machine["department"]].id
+        machine_rows[machine["name"]].radius_machine_id = resolve_radius_machine_id(machine_rows[machine["name"]])
         machine_rows[machine["name"]].is_active = True
         group_rows[machine["machine_type"]].is_active = True
 

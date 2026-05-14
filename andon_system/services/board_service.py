@@ -11,6 +11,7 @@ from ..models.issue import IssueCategory
 from ..models.machine import Machine
 from ..models.user import User
 from .cache_service import get_cached, set_cached
+from .radius_service import build_radius_status_map
 
 BOARD_STATE_CACHE_TTL_SECONDS = 5
 OPERATOR_METADATA_CACHE_TTL_SECONDS = 300
@@ -31,7 +32,12 @@ def build_board_state():
 
     result = {
         "machines": [
-            _serialize_machine(machine, context["alert_by_machine"], context["created_notes_by_alert_id"])
+            _serialize_machine(
+                machine,
+                context["alert_by_machine"],
+                context["created_notes_by_alert_id"],
+                context["radius_status_by_machine"],
+            )
             for machine in context["visible_machines"]
         ],
         "departments": [
@@ -91,7 +97,12 @@ def build_operator_snapshot():
     context = _load_board_context(company_id, include_alerts=True)
     result = {
         "machines": [
-            _serialize_machine(machine, context["alert_by_machine"], context["created_notes_by_alert_id"])
+            _serialize_machine(
+                machine,
+                context["alert_by_machine"],
+                context["created_notes_by_alert_id"],
+                context["radius_status_by_machine"],
+            )
             for machine in context["visible_machines"]
         ],
     }
@@ -178,6 +189,7 @@ def _load_board_context(company_id, include_alerts: bool):
         if (user.department is None or user.department.is_active)
         and (user.machine_group is None or user.machine_group.is_active)
     ]
+    radius_status_by_machine = build_radius_status_map(visible_machines)
 
     alert_by_machine = {}
     created_notes_by_alert_id = {}
@@ -209,6 +221,7 @@ def _load_board_context(company_id, include_alerts: bool):
         "visible_departments": visible_departments,
         "visible_issue_categories": visible_issue_categories,
         "visible_users": visible_users,
+        "radius_status_by_machine": radius_status_by_machine,
         "alert_by_machine": alert_by_machine,
         "created_notes_by_alert_id": created_notes_by_alert_id,
     }
@@ -245,7 +258,7 @@ def _serialize_active_alert(alert, created_note=None):
     }
 
 
-def _serialize_machine(machine, alert_by_machine, created_notes_by_alert_id):
+def _serialize_machine(machine, alert_by_machine, created_notes_by_alert_id, radius_status_by_machine):
     active_alert = alert_by_machine.get(machine.id)
     created_note = created_notes_by_alert_id.get(active_alert.id) if active_alert else None
     return {
@@ -253,11 +266,13 @@ def _serialize_machine(machine, alert_by_machine, created_notes_by_alert_id):
         "name": machine.name,
         "machine_code": machine.machine_code,
         "machine_type": machine.machine_type,
+        "radius_machine_id": machine.radius_machine_id,
         "area": machine.area,
         "line": machine.line,
         "department_id": machine.department_id,
         "department_name": machine.department.name if machine.department else None,
         "is_active": machine.is_active,
+        "radius": radius_status_by_machine.get(machine.id),
         "active_alert": _serialize_active_alert(active_alert, created_note),
     }
 

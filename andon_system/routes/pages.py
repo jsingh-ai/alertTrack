@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from ..company_context import get_current_company, set_current_company_slug
-from ..models.escalation import EscalationRule
 from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine

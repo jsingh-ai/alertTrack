@@ -83,7 +83,7 @@
         </div>
         <h2 class="h4 mb-3">Machines</h2>
         <form class="row g-2 mb-3 js-ajax-form" method="post" action="{{ url_for('admin.create_machine') }}" data-kind="machine-create">
-          <div class="col-md-5">
+          <div class="col-md-4">
             <label class="form-label">Group</label>
             <select class="form-select" name="machine_group" id="machineGroupSelect" required>
               <option value="">All</option>
@@ -92,20 +92,25 @@
               {% endfor %}
             </select>
           </div>
-          <div class="col-md-5">
+          <div class="col-md-3">
             <label class="form-label">Machine Name</label>
             <input class="form-control" name="name" placeholder="Machine name" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Machine Code</label>
+            <input class="form-control" name="machine_code" placeholder="201, PRESS-2, etc.">
           </div>
           <div class="col-md-2 d-flex align-items-end"><button class="btn btn-primary w-100">Add</button></div>
         </form>
         <div class="table-responsive">
           <table class="table table-sm table-dark table-striped align-middle">
-            <thead><tr><th>Group</th><th>Name</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Group</th><th>Name</th><th>Code</th><th>Status</th><th></th></tr></thead>
             <tbody id="machineTableBody">
               {% for machine in machines %}
               <tr id="machine-row-{{ machine.id }}" data-machine-id="{{ machine.id }}" data-machine-group="{{ machine.machine_type or '' }}">
                 <td class="machine-group">{{ machine.machine_type or "-" }}</td>
                 <td class="machine-name">{{ machine.name }}</td>
+                <td class="machine-code">{{ machine.machine_code or "-" }}</td>
                 <td class="machine-status">{{ "Active" if machine.is_active else "Inactive" }}</td>
                 <td class="text-end d-flex justify-content-end gap-2">
                   <form class="js-ajax-form" method="post" action="{{ url_for('admin.toggle_machine', machine_id=machine.id) }}" data-kind="machine-toggle">
@@ -731,6 +736,7 @@
       <tr id="machine-row-${machine.id}" data-machine-id="${machine.id}" data-machine-group="${escapeHtml(machine.machine_group || machine.machine_type || "")}">
         <td class="machine-group">${escapeHtml(machine.machine_group || machine.machine_type || "-")}</td>
         <td class="machine-name">${escapeHtml(machine.name)}</td>
+        <td class="machine-code">${escapeHtml(machine.machine_code || "-")}</td>
         <td class="machine-status">${machine.is_active ? "Active" : "Inactive"}</td>
         <td class="text-end d-flex justify-content-end gap-2">
           <form class="js-ajax-form" method="post" action="/andon/admin/machine/${machine.id}/toggle" data-kind="machine-toggle">
@@ -844,6 +850,7 @@
     row.dataset.machineGroup = machine.machine_group || machine.machine_type || "";
     row.querySelector(".machine-name").textContent = machine.name;
     row.querySelector(".machine-group").textContent = machine.machine_group || machine.machine_type || "-";
+    row.querySelector(".machine-code").textContent = machine.machine_code || "-";
     row.querySelector(".machine-status").textContent = machine.is_active ? "Active" : "Inactive";
   }
 

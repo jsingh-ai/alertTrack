@@ -2,9 +2,9 @@ Flask
 Flask-SQLAlchemy
 Flask-Migrate
 Flask-SocketIO
+simple-websocket
 python-dotenv
 pymysql
 psycopg[binary]
 redis
-eventlet
 gunicorn
