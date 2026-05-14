@@ -437,14 +437,14 @@ function renderMachineCard(machine, visibleDetails) {
                 <div class="management-machine-card__state-label">Issue</div>
                 <div class="management-machine-card__state-value">${escapeHtml(issue)}</div>
               </div>
-              <div class="management-machine-card__state ${timerStateClass}">
-                <div class="management-machine-card__state-label">Elapsed</div>
-                <div class="management-machine-card__state-value" data-live-timer="true" data-elapsed-seconds="${Math.max(0, Math.floor(alert.elapsed_seconds || 0))}">${escapeHtml(timer)}</div>
+              <div class="management-machine-card__state management-machine-card__state--responder">
+                <div class="management-machine-card__state-label">Responder</div>
+                <div class="management-machine-card__state-value">${escapeHtml(responder || "No Responder Assigned")}</div>
               </div>
             </div>
-            <div class="management-machine-card__state management-machine-card__state--responder">
-              <div class="management-machine-card__state-label">Responder</div>
-              <div class="management-machine-card__state-value">${escapeHtml(responder || "No Responder Assigned")}</div>
+            <div class="management-machine-card__state ${timerStateClass} management-machine-card__state--elapsed-full">
+              <div class="management-machine-card__state-label">Elapsed</div>
+              <div class="management-machine-card__state-value management-machine-card__state-value--elapsed" data-live-timer="true" data-elapsed-seconds="${Math.max(0, Math.floor(alert.elapsed_seconds || 0))}">${escapeHtml(timer)}</div>
             </div>
           ` : `
             <div class="management-machine-card__history">
