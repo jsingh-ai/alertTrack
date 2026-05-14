@@ -20,14 +20,14 @@ const departmentLabelMap = {
   Quality: "Call Quality",
   Supervisor: "Call Supervisor",
   Safety: "Call Safety",
-  Production: "Call AVG",
+  Production: "Call Shipping",
   AVG: "Call AVG",
   SPOT: "Call SPOT",
   Spot: "Call SPOT",
 };
 
-const departmentPreferredOrder = ["Maintenance", "Safety", "Shipping", "Quality", "Supervisor", "Materials", "Production", "AVG", "SPOT", "Spot"];
-const singleRowDepartmentNames = new Set(["Materials", "Production", "AVG", "SPOT", "Spot"]);
+const departmentPreferredOrder = ["Maintenance", "Safety", "Shipping", "Production", "Quality", "Supervisor", "Materials", "AVG", "SPOT", "Spot"];
+const singleRowDepartmentNames = new Set(["Materials", "AVG", "SPOT", "Spot"]);
 
 const state = {
   board: { machines: [], filters: { machine_types: [], areas: [], departments: [] } },
@@ -725,7 +725,11 @@ function renderMachineTile(machine, detailed) {
           <div class="machine-tile__name">${escapeHtml(machine.name)}</div>
         </div>
         ${renderRadiusEventBadge(machine)}
+<<<<<<< HEAD
         <span class="status-pill ${active ? statusClass(alert.status) : "status-healthy"}">${active ? statusLabel(alert.status) : "Healthy"}</span>
+=======
+        ${active ? `<span class="status-pill ${statusClass(alert.status)}">${statusLabel(alert.status)}</span>` : ""}
+>>>>>>> 8857197 (CSS Changes)
       </div>
       ${active ? renderAlertInlinePanel(machine, alert, detailed) : renderCreateInlinePanel(machine, detailed)}
     </article>`;
@@ -847,7 +851,7 @@ function getDepartmentIconClass(name) {
     case "safety":
       return "bi bi-shield-exclamation";
     case "production":
-      return "bi bi-gear-wide-connected";
+      return "bi bi-truck";
     case "avg":
       return "bi bi-broadcast-pin";
     case "spot":

@@ -12,9 +12,9 @@ DEFAULT_DEPARTMENTS = {
     "Maintenance": "Maintenance department",
     "Quality": "Quality department",
     "Materials": "Materials department",
+    "Shipping": "Shipping department",
     "Supervisor": "Supervisor team",
     "Safety": "Safety department",
-    "Production": "Production team",
     "Spot": "Spot department",
 }
 
@@ -22,9 +22,9 @@ DEFAULT_CATEGORIES = [
     {"name": "Maintenance", "department": "Maintenance", "color": "#dc3545", "priority": 1},
     {"name": "Quality", "department": "Quality", "color": "#fd7e14", "priority": 2},
     {"name": "Materials", "department": "Materials", "color": "#0d6efd", "priority": 2},
+    {"name": "Shipping", "department": "Shipping", "color": "#20c997", "priority": 2},
     {"name": "Safety", "department": "Safety", "color": "#198754", "priority": 2},
     {"name": "Supervisor", "department": "Supervisor", "color": "#6f42c1", "priority": 1},
-    {"name": "Production", "department": "Production", "color": "#20c997", "priority": 2},
     {"name": "Spot", "department": "Spot", "color": "#6c757d", "priority": 2},
 ]
 
@@ -47,6 +47,11 @@ DEFAULT_PROBLEMS = {
         "Wrong material",
         "Roll change needed",
     ],
+    "Shipping": [
+        "Shipping assistance needed",
+        "Truck loading delay",
+        "Finished goods pickup needed",
+    ],
     "Safety": [
         "PPE issue",
         "Spill cleanup needed",
@@ -56,11 +61,6 @@ DEFAULT_PROBLEMS = {
         "Supervisor assistance needed",
         "Line support needed",
         "Escalation review required",
-    ],
-    "Production": [
-        "Line stop",
-        "Operator assistance needed",
-        "Startup issue",
     ],
     "Spot": [
         "Spot assistance needed",

@@ -173,10 +173,6 @@ function syncInlineCardState(alertId) {
   card.querySelectorAll("[data-board-inline-user-id]").forEach((button) => {
     button.classList.toggle("is-selected", Number(button.dataset.boardInlineUserId) === Number(selectedUserId));
   });
-  const ackButton = card.querySelector("[data-board-acknowledge]");
-  if (ackButton) {
-    ackButton.disabled = !selectedUserId;
-  }
 }
 
 function renderInlineUserButtons(users, selectedUserId, alertId) {
@@ -252,7 +248,6 @@ function cardTemplate(alert) {
   const draft = getInlineDraft(alert.id);
   const selectedResponderUserId = getInlineResponderUserId(alert.id);
   const users = isOpen ? getRelevantUsers(alert.machine, { id: alert.department?.id, name: alert.department?.name }) : [];
-  const canAcknowledge = Boolean(selectedResponderUserId);
   const canClose = Boolean(alert.responder_user_id || alert.responder_name_text);
   return `
     <article class="board-card h-100 board-alert-card ${statusClass(alert.status)} ${isOpen ? "board-alert-card--inline-open" : ""}" data-alert-id="${alert.id}">
@@ -272,11 +267,6 @@ function cardTemplate(alert) {
           <div class="board-alert-card__note-label">Who is responding</div>
           <div class="board-alert-card__responder-value">${escapeHtml(alert.responder_name_text)}</div>
         </div>` : ""}
-      ${isOpen && operatorMessage ? `
-        <div class="board-alert-card__note">
-          <div class="board-alert-card__note-label">Operator Message</div>
-          <div class="board-alert-card__note-value">${escapeHtml(operatorMessage)}</div>
-        </div>` : ""}
       ${isAcknowledged ? `
         <div class="board-alert-card__timer-box">
           <div class="board-alert-card__timer-label">Elapsed timer</div>
@@ -289,6 +279,11 @@ function cardTemplate(alert) {
           <div class="alert-timer board-alert-card__timer" data-elapsed-seconds="${elapsedSeconds}">${formatElapsedSeconds(elapsedSeconds)}</div>
         </div>
       ` : ""}
+      ${isOpen && operatorMessage ? `
+        <div class="board-alert-card__note">
+          <div class="board-alert-card__note-label">Operator Message</div>
+          <div class="board-alert-card__note-value">${escapeHtml(operatorMessage)}</div>
+        </div>` : ""}
       ${isAcknowledged ? `
         <div class="board-alert-card__working-actions">
           <div class="board-alert-card__action-title">Discussion Chat</div>
@@ -315,7 +310,7 @@ function cardTemplate(alert) {
           </div>
           <div class="board-alert-card__action-title">Note</div>
           <textarea class="form-control board-alert-card__note-input" rows="2" placeholder="Add note" data-board-alert-note="true" data-board-alert-id="${alert.id}">${escapeHtml(draft.note)}</textarea>
-          <button type="button" class="btn btn-primary board-alert-card__ack-btn" data-board-acknowledge="true" data-alert-id="${alert.id}" ${canAcknowledge ? "" : "disabled"}>Acknowledge</button>
+          <button type="button" class="btn btn-primary board-alert-card__ack-btn" data-board-acknowledge="true" data-alert-id="${alert.id}">Acknowledge</button>
         </div>
       ` : ""}
     </article>`;
@@ -487,12 +482,10 @@ boardGrid.addEventListener("click", async (event) => {
     if (!alertData) return;
     const draft = getInlineDraft(alertId);
     const responderUserId = getInlineResponderUserId(alertId);
-    if (!responderUserId) {
-      window.alert("Select an operator before acknowledging.");
-      return;
-    }
     const payload = new FormData();
-    payload.append("responder_user_id", String(responderUserId));
+    if (responderUserId) {
+      payload.append("responder_user_id", String(responderUserId));
+    }
     payload.append("responder_name_text", "");
     if (draft.note.trim()) {
       payload.append("note", draft.note.trim());

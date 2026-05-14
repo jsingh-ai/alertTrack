@@ -2735,7 +2735,11 @@ html[data-theme="light"] .operator-machine-group__count {
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__radius-panel {
+<<<<<<< HEAD
   margin-top: 0.7rem;
+=======
+  margin-top: 0.28rem;
+>>>>>>> 8857197 (CSS Changes)
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__radius-panel--response {
@@ -6010,6 +6014,7 @@ body.board-screen-shell.management-screen-shell .management-machine-card__hero-t
 body.board-screen-shell.management-screen-shell .management-machine-card__title-row {
   display: flex;
   align-items: flex-start;
+<<<<<<< HEAD
   justify-content: space-between;
   gap: 0.8rem;
 }
@@ -6050,6 +6055,24 @@ body.board-screen-shell.management-screen-shell .management-machine-card__radius
   font-weight: 800;
   letter-spacing: 0.04em;
   white-space: nowrap;
+=======
+  justify-content: center;
+  position: relative;
+  width: 100%;
+  min-height: 1.4rem;
+  padding: 0 2.9rem;
+  box-sizing: border-box;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__title-row .radius-event-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__radius {
+  margin-top: 0;
+>>>>>>> 8857197 (CSS Changes)
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__radius-grid {
@@ -6096,6 +6119,27 @@ body.board-screen-shell.management-screen-shell .management-machine-card__radius
   word-break: break-word;
 }
 
+<<<<<<< HEAD
+=======
+body.board-screen-shell.management-screen-shell .management-machine-card__section {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.58rem 0.62rem 0.62rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.56);
+  border: 1px solid rgba(24, 50, 79, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32);
+}
+
+body.board-screen-shell.management-screen-shell .management-machine-card__section-title {
+  font-size: 0.56rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #4e647d;
+}
+
+>>>>>>> 8857197 (CSS Changes)
 body.board-screen-shell.management-screen-shell .management-machine-card--status-open {
   background: linear-gradient(180deg, #fff0f0 0%, #ffd9d9 100%);
   border-color: rgba(224, 49, 49, 0.28);
@@ -6552,6 +6596,16 @@ html[data-theme="dark"] body.board-screen-shell.management-screen-shell .managem
 
 html[data-theme="dark"] body.board-screen-shell.management-screen-shell .management-machine-card__metric-value {
   color: #edf4ff;
+}
+
+html[data-theme="dark"] body.board-screen-shell.management-screen-shell .management-machine-card__section {
+  background: rgba(10, 17, 30, 0.68);
+  border-color: rgba(148, 163, 184, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+html[data-theme="dark"] body.board-screen-shell.management-screen-shell .management-machine-card__section-title {
+  color: rgba(229, 238, 252, 0.74);
 }
 
 html[data-theme="dark"] body.board-screen-shell.management-screen-shell .management-machine-card__state--alert {
