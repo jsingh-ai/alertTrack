@@ -5947,8 +5947,8 @@ body.board-screen-shell.management-screen-shell .management-department-panel__su
 
 body.board-screen-shell.management-screen-shell .management-department-panel__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14.3rem), 1fr));
-  gap: 0.7rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 21.5rem), 1fr));
+  gap: 0.65rem;
   width: 100%;
   box-sizing: border-box;
 }
@@ -5984,10 +5984,10 @@ html[data-theme="dark"] body.board-screen-shell.management-screen-shell .board-d
 body.board-screen-shell.management-screen-shell .management-machine-card {
   display: flex;
   flex-direction: column;
-  gap: 0.39rem;
+  gap: 0.24rem;
   min-width: 0;
   width: 100%;
-  padding: 0.7rem 0.73rem 0.75rem;
+  padding: 0.46rem 0.78rem 0.5rem;
   border-radius: 0.95rem;
   border: 1px solid rgba(24, 50, 79, 0.1);
   background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
@@ -6010,9 +6010,9 @@ body.board-screen-shell.management-screen-shell .management-machine-card--clicka
 body.board-screen-shell.management-screen-shell .management-machine-card__hero {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  margin: -0.7rem -0.73rem 0;
-  padding: 0.68rem 0.73rem 0.64rem;
+  gap: 0.12rem;
+  margin: -0.46rem -0.78rem 0;
+  padding: 0.46rem 0.78rem 0.42rem;
   border-radius: 0.95rem 0.95rem 0.7rem 0.7rem;
 }
 
@@ -6040,7 +6040,7 @@ body.board-screen-shell.management-screen-shell .management-machine-card__title 
   min-width: 0;
   font-size: 1.01rem;
   font-weight: 900;
-  line-height: 1.08;
+  line-height: 1.02;
   letter-spacing: -0.02em;
   color: inherit;
   text-align: center;
@@ -6052,7 +6052,7 @@ body.board-screen-shell.management-screen-shell .management-machine-card__hero-s
   justify-content: center;
   gap: 0.39rem;
   align-self: center;
-  font-size: 0.62rem;
+  font-size: 0.56rem;
   font-weight: 900;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -6063,8 +6063,8 @@ body.board-screen-shell.management-screen-shell .management-machine-card__hero-i
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.38rem;
-  height: 1.38rem;
+  width: 1.2rem;
+  height: 1.2rem;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
   flex-shrink: 0;
@@ -6096,7 +6096,7 @@ body.board-screen-shell.management-screen-shell .management-machine-card__title-
   justify-content: center;
   position: relative;
   width: 100%;
-  min-height: 1.32rem;
+  min-height: 1.1rem;
   padding: 0 2.6rem;
   box-sizing: border-box;
 }
@@ -6113,7 +6113,7 @@ body.board-screen-shell.management-screen-shell .management-machine-card__radius
 
 body.board-screen-shell.management-screen-shell .management-machine-card__radius-grid {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.3rem;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__radius-grid--pair {
@@ -6127,21 +6127,21 @@ body.board-screen-shell.management-screen-shell .management-machine-card__radius
 
 body.board-screen-shell.management-screen-shell .management-machine-card__radius-item {
   display: grid;
-  gap: 0.22rem;
+  gap: 0.12rem;
   min-width: 0;
-  padding: 0.57rem 0.62rem;
+  padding: 0.38rem 0.48rem;
   border-radius: 0.78rem;
   background: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__radius-item--wide {
-  min-height: 3.85rem;
+  min-height: 2.7rem;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__radius-label {
   color: #64748b;
-  font-size: 0.66rem;
+  font-size: 0.56rem;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -6150,16 +6150,16 @@ body.board-screen-shell.management-screen-shell .management-machine-card__radius
 body.board-screen-shell.management-screen-shell .management-machine-card__radius-value {
   min-width: 0;
   color: #0f172a;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   font-weight: 800;
-  line-height: 1.25;
+  line-height: 1.15;
   word-break: break-word;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__section {
   display: grid;
-  gap: 0.35rem;
-  padding: 0.5rem 0.55rem 0.55rem;
+  gap: 0.2rem;
+  padding: 0.32rem 0.42rem 0.36rem;
   border-radius: 0.78rem;
   background: rgba(255, 255, 255, 0.56);
   border: 1px solid rgba(24, 50, 79, 0.08);
@@ -6167,7 +6167,7 @@ body.board-screen-shell.management-screen-shell .management-machine-card__sectio
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__section-title {
-  font-size: 0.55rem;
+  font-size: 0.48rem;
   font-weight: 900;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -6235,20 +6235,20 @@ body.board-screen-shell.management-screen-shell .management-machine-card__meta-v
 
 body.board-screen-shell.management-screen-shell .management-machine-card__body {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.24rem;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.33rem;
+  gap: 0.22rem;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__metric {
   display: flex;
   flex-direction: column;
-  gap: 0.08rem;
-  padding: 0.4rem 0.46rem;
+  gap: 0.04rem;
+  padding: 0.28rem 0.34rem;
   border-radius: 0.62rem;
   background: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(148, 163, 184, 0.2);
@@ -6256,7 +6256,7 @@ body.board-screen-shell.management-screen-shell .management-machine-card__metric
 
 body.board-screen-shell.management-screen-shell .management-machine-card__metric-label {
   color: #64748b;
-  font-size: 0.64rem;
+  font-size: 0.54rem;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -6265,15 +6265,15 @@ body.board-screen-shell.management-screen-shell .management-machine-card__metric
 body.board-screen-shell.management-screen-shell .management-machine-card__metric-value {
   min-width: 0;
   color: #0f172a;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 800;
-  line-height: 1.2;
+  line-height: 1.1;
   word-break: break-word;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__state-row {
   display: grid;
-  gap: 0.33rem;
+  gap: 0.22rem;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__state-row--two {
@@ -6287,8 +6287,8 @@ body.board-screen-shell.management-screen-shell .management-machine-card__state-
 body.board-screen-shell.management-screen-shell .management-machine-card__state {
   display: flex;
   flex-direction: column;
-  gap: 0.08rem;
-  padding: 0.46rem 0.53rem 0.48rem;
+  gap: 0.04rem;
+  padding: 0.3rem 0.38rem 0.34rem;
   border-radius: 0.68rem;
   background: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(148, 163, 184, 0.2);
@@ -6296,7 +6296,7 @@ body.board-screen-shell.management-screen-shell .management-machine-card__state 
 
 body.board-screen-shell.management-screen-shell .management-machine-card__state-label {
   color: #64748b;
-  font-size: 0.64rem;
+  font-size: 0.54rem;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -6305,14 +6305,14 @@ body.board-screen-shell.management-screen-shell .management-machine-card__state-
 body.board-screen-shell.management-screen-shell .management-machine-card__state-value {
   min-width: 0;
   color: #0f172a;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   font-weight: 800;
-  line-height: 1.22;
+  line-height: 1.12;
   word-break: break-word;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__state-value--elapsed {
-  font-size: 1.1rem;
+  font-size: 0.96rem;
   font-weight: 900;
   line-height: 1.05;
   letter-spacing: -0.02em;
@@ -6386,15 +6386,15 @@ body.board-screen-shell.management-screen-shell .management-machine-card__state-
 
 body.board-screen-shell.management-screen-shell .management-machine-card__history {
   display: grid;
-  gap: 0.24rem;
-  padding: 0.46rem 0.53rem 0.48rem;
+  gap: 0.16rem;
+  padding: 0.3rem 0.38rem 0.34rem;
   border-radius: 0.68rem;
   background: rgba(255, 255, 255, 0.74);
   border: 1px solid rgba(24, 50, 79, 0.08);
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__history-label {
-  font-size: 0.53rem;
+  font-size: 0.46rem;
   font-weight: 900;
   letter-spacing: 0.11em;
   text-transform: uppercase;
@@ -6402,9 +6402,9 @@ body.board-screen-shell.management-screen-shell .management-machine-card__histor
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__history-value {
-  font-size: 0.86rem;
+  font-size: 0.76rem;
   font-weight: 900;
-  line-height: 1.15;
+  line-height: 1.08;
   color: #18324f;
   word-break: break-word;
 }
@@ -6412,21 +6412,21 @@ body.board-screen-shell.management-screen-shell .management-machine-card__histor
 body.board-screen-shell.management-screen-shell .management-machine-card__history-times {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.31rem;
+  gap: 0.2rem;
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__history-time {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
-  padding: 0.37rem 0.44rem;
+  gap: 0.04rem;
+  padding: 0.24rem 0.3rem;
   border-radius: 0.58rem;
   background: rgba(237, 244, 251, 0.88);
   border: 1px solid rgba(13, 110, 253, 0.08);
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__history-time span {
-  font-size: 0.48rem;
+  font-size: 0.42rem;
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -6434,7 +6434,7 @@ body.board-screen-shell.management-screen-shell .management-machine-card__histor
 }
 
 body.board-screen-shell.management-screen-shell .management-machine-card__history-time strong {
-  font-size: 0.75rem;
+  font-size: 0.66rem;
   font-weight: 900;
   color: #18324f;
 }
