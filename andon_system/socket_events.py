@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import current_app
+from flask import current_app, request
 from flask_socketio import disconnect, emit, join_room, leave_room
 
 from .security import get_authorized_company_id
@@ -36,7 +36,16 @@ def register_socket_events(socketio):
             disconnect()
             return
         room = room_name(company_id, room_type)
-        join_room(room)
+        try:
+            join_room(room)
+        except ValueError:
+            current_app.logger.warning(
+                "Socket.IO join_room skipped for disconnected sid=%s namespace=%s room=%s",
+                getattr(request, "sid", None),
+                getattr(request, "namespace", "/"),
+                room,
+            )
+            return
         emit("joined_company_room", {"room": room, "company_id": company_id})
 
     @socketio.on("leave_company_room")
@@ -48,4 +57,13 @@ def register_socket_events(socketio):
         company_id = get_authorized_company_id()
         if not company_id:
             return
-        leave_room(room_name(company_id, room_type))
+        room = room_name(company_id, room_type)
+        try:
+            leave_room(room)
+        except ValueError:
+            current_app.logger.debug(
+                "Socket.IO leave_room skipped for disconnected sid=%s namespace=%s room=%s",
+                getattr(request, "sid", None),
+                getattr(request, "namespace", "/"),
+                room,
+            )

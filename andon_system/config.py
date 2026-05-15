@@ -27,6 +27,7 @@ class BaseConfig:
     SOCKETIO_ENABLED = os.getenv("SOCKETIO_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     SOCKETIO_MESSAGE_QUEUE = os.getenv("SOCKETIO_MESSAGE_QUEUE") or REDIS_URL
     SOCKETIO_ASYNC_MODE = os.getenv("SOCKETIO_ASYNC_MODE") or "threading"
+    SOCKETIO_ALLOW_MULTIWORKER = os.getenv("SOCKETIO_ALLOW_MULTIWORKER", "false").lower() in {"1", "true", "yes", "on"}
 
 
 class DevelopmentConfig(BaseConfig):

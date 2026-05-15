@@ -251,7 +251,6 @@ function cardTemplate(alert) {
   const draft = getInlineDraft(alert.id);
   const selectedResponderUserId = getInlineResponderUserId(alert.id);
   const users = isOpen ? getRelevantUsers(alert.machine, { id: alert.department?.id, name: alert.department?.name }) : [];
-  const canClose = Boolean(alert.responder_user_id || alert.responder_name_text);
   return `
     <article class="board-card h-100 board-alert-card ${statusClass(alert.status)} ${isOpen ? "board-alert-card--inline-open" : ""}" data-alert-id="${alert.id}">
       <div class="board-alert-card__top">
@@ -301,7 +300,7 @@ function cardTemplate(alert) {
             </div>` : ""}
           <div class="board-alert-card__action-title">Note</div>
           <textarea class="form-control board-alert-card__note-input" rows="2" placeholder="Add note" data-board-alert-note="true" data-board-alert-id="${alert.id}">${escapeHtml(draft.note)}</textarea>
-          <button type="button" class="btn btn-primary board-alert-card__close-btn" data-board-close="true" data-alert-id="${alert.id}" ${canClose ? "" : "disabled"}>Close</button>
+          <button type="button" class="btn btn-primary board-alert-card__close-btn" data-board-close="true" data-alert-id="${alert.id}">Close</button>
         </div>
       ` : ""}
       ${isOpen ? `
@@ -526,7 +525,6 @@ boardGrid.addEventListener("click", async (event) => {
     if (draft.note.trim()) {
       payload.append("note", draft.note.trim());
     }
-    closeButton.disabled = true;
     const response = await fetch(`/api/andon/alerts/${alertId}/resolve`, {
       method: "POST",
       body: payload,
@@ -535,7 +533,6 @@ boardGrid.addEventListener("click", async (event) => {
     });
     const data = await response.json();
     if (!data.success) {
-      closeButton.disabled = false;
       window.alert(data.error.message);
       return;
     }
