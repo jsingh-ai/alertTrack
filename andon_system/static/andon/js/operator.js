@@ -1,6 +1,7 @@
 const boardUrl = "/api/andon/operator-snapshot";
 const operatorMetadataUrl = "/api/andon/operator-metadata";
 const operatorViewStorageKey = "andon-operator-view";
+const defaultOperatorMachineGroup = "Press";
 
 const machineBoard = document.getElementById("machineBoard");
 const operatorViewToggle = document.querySelector(".operator-page-header__badge");
@@ -543,10 +544,12 @@ async function actOnActiveAlert() {
 function renderBoard() {
   const visibleMachines = getVisibleMachines();
   const detailed = isDetailedOperatorView();
+  const groupedCardSizing = !detailed;
   const boardKey = buildBoardKey(visibleMachines, detailed);
   machineBoard.dataset.machineCount = String(visibleMachines.length);
   machineBoard.dataset.viewMode = detailed ? "detailed" : "compact";
-  applyDetailedBoardDensity(visibleMachines.length, detailed);
+  machineBoard.dataset.groupCardSizing = groupedCardSizing ? "detailed" : "native";
+  applyDetailedBoardDensity(visibleMachines.length, detailed || groupedCardSizing);
   if (!visibleMachines.length) {
     machineBoard.innerHTML = renderEmptyBoard();
     machineBoard.dataset.boardKey = boardKey;
@@ -1357,15 +1360,20 @@ function onDocumentClick(event) {
 function restoreViewState() {
   try {
     const raw = window.localStorage.getItem(operatorViewStorageKey);
-    if (!raw) return;
+    if (!raw) {
+      state.view.machineGroup = defaultOperatorMachineGroup;
+      state.view.machineId = "";
+      state.view.locked = true;
+      return;
+    }
     const parsed = JSON.parse(raw);
     state.view.machineGroup = typeof parsed.machineGroup === "string" ? parsed.machineGroup : "";
     state.view.machineId = typeof parsed.machineId === "string" || typeof parsed.machineId === "number" ? String(parsed.machineId) : "";
     state.view.locked = Boolean(parsed.locked);
   } catch (_error) {
-    state.view.machineGroup = "";
+    state.view.machineGroup = defaultOperatorMachineGroup;
     state.view.machineId = "";
-    state.view.locked = false;
+    state.view.locked = true;
   }
 }
 
