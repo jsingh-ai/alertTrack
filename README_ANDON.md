@@ -22,7 +22,10 @@ DATABASE_URL="postgresql+psycopg://andon_user:password@localhost:5432/andon_db"
 ```bash
 python scripts/init_andon_db.py
 python scripts/seed_andon_data.py
+python scripts/seed_auth_users.py
 ```
+
+`scripts/seed_auth_users.py` creates or updates demo login accounts, applies passwords, ensures base machine groups exist, and adds multi-company memberships for admin/manager/operator examples.
 
 ### Windows PostgreSQL Setup
 

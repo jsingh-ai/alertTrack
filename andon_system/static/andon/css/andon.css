@@ -28,6 +28,14 @@
   --machine-modal-close-bg: rgba(193, 18, 31, 0.38);
   --machine-modal-close-border: rgba(193, 18, 31, 0.22);
   --machine-modal-close-color: #c1121f;
+  --andon-home-ink: #11233f;
+  --andon-home-subtle: #62748a;
+  --andon-home-line: rgba(17, 35, 63, 0.12);
+  --andon-home-panel: rgba(255, 255, 255, 0.88);
+  --andon-home-panel-strong: rgba(247, 250, 253, 0.96);
+  --andon-home-accent: #0f5f8c;
+  --andon-home-accent-strong: #093b63;
+  --andon-home-glow: #d87c2f;
 }
 
 body.andon-shell {
@@ -37,6 +45,278 @@ body.andon-shell {
     linear-gradient(180deg, #08101d 0%, var(--andon-bg) 100%);
   color: var(--andon-text);
   min-height: 100vh;
+}
+
+body.andon-home-shell {
+  font-family: "Manrope", sans-serif;
+  background:
+    radial-gradient(circle at 14% 16%, rgba(216, 124, 47, 0.2), transparent 24%),
+    radial-gradient(circle at 82% 18%, rgba(15, 95, 140, 0.18), transparent 22%),
+    linear-gradient(135deg, #eef3f7 0%, #dfe8ef 44%, #eef2f6 100%);
+  color: var(--andon-home-ink);
+  overflow-x: hidden;
+}
+
+.andon-home {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: clamp(1.25rem, 2.6vw, 2.5rem);
+}
+
+.andon-home__stage {
+  width: min(1160px, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(360px, 460px);
+  gap: clamp(1.25rem, 3vw, 2.5rem);
+  align-items: stretch;
+}
+
+.andon-home__brand-panel {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(1.75rem, 4vw, 3rem);
+  border-radius: 32px;
+  background:
+    linear-gradient(155deg, rgba(9, 59, 99, 0.96) 0%, rgba(14, 86, 128, 0.94) 46%, rgba(216, 124, 47, 0.92) 140%);
+  box-shadow: 0 28px 80px rgba(11, 35, 58, 0.2);
+  color: #f8fbfd;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  isolation: isolate;
+}
+
+.andon-home__brand-panel::before,
+.andon-home__brand-panel::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  opacity: 0.22;
+  z-index: -1;
+}
+
+.andon-home__brand-panel::before {
+  width: 360px;
+  height: 360px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.68) 0%, transparent 72%);
+  top: -140px;
+  right: -110px;
+}
+
+.andon-home__brand-panel::after {
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(255, 214, 176, 0.72) 0%, transparent 72%);
+  bottom: -110px;
+  left: -70px;
+}
+
+.andon-home__brand-mark {
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.andon-home__eyebrow {
+  margin: 1.4rem 0 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: rgba(248, 251, 253, 0.76);
+}
+
+.andon-home__title {
+  max-width: 12ch;
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: clamp(2.35rem, 4vw, 4.35rem);
+  line-height: 0.96;
+  letter-spacing: -0.05em;
+}
+
+.andon-home__summary {
+  max-width: 34rem;
+  margin: 1.15rem 0 0;
+  font-size: 1.02rem;
+  line-height: 1.7;
+  color: rgba(248, 251, 253, 0.82);
+}
+
+.andon-home__feature-list {
+  margin-top: 2.2rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.andon-home__feature {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 1.05rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(8px);
+}
+
+.andon-home__feature-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(248, 251, 253, 0.78);
+}
+
+.andon-home__feature-value {
+  text-align: right;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.andon-home__login-panel {
+  display: flex;
+  align-items: center;
+}
+
+.andon-home__login-card {
+  width: 100%;
+  padding: clamp(1.6rem, 3vw, 2.25rem);
+  border-radius: 28px;
+  background: linear-gradient(180deg, var(--andon-home-panel) 0%, var(--andon-home-panel-strong) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 28px 70px rgba(17, 35, 63, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.84);
+  color: var(--andon-home-ink);
+}
+
+.andon-home__login-head {
+  margin-bottom: 1.4rem;
+}
+
+.andon-home__login-card .andon-home__eyebrow {
+  margin: 0 0 0.7rem;
+  color: var(--andon-home-accent);
+}
+
+.andon-home__login-title {
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: clamp(1.8rem, 2.6vw, 2.4rem);
+  letter-spacing: -0.04em;
+  color: var(--andon-home-ink);
+}
+
+.andon-home__login-copy {
+  margin: 0.7rem 0 0;
+  color: var(--andon-home-subtle);
+  line-height: 1.65;
+}
+
+.andon-home__alerts .alert {
+  border-radius: 16px;
+  border-width: 1px;
+}
+
+.andon-home__form {
+  display: grid;
+  gap: 1rem;
+}
+
+.andon-home__field .form-label {
+  margin-bottom: 0.42rem;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--andon-home-subtle);
+}
+
+.andon-home__field .form-control {
+  min-height: 3.35rem;
+  border-radius: 18px;
+  border: 1px solid var(--andon-home-line);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--andon-home-ink);
+  padding-inline: 1rem;
+  font-size: 1rem;
+  box-shadow: inset 0 1px 2px rgba(17, 35, 63, 0.04);
+}
+
+.andon-home__field .form-control:focus {
+  border-color: rgba(15, 95, 140, 0.5);
+  box-shadow: 0 0 0 0.24rem rgba(15, 95, 140, 0.12);
+}
+
+.andon-home__submit {
+  min-height: 3.4rem;
+  margin-top: 0.3rem;
+  border: 0;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--andon-home-accent-strong) 0%, var(--andon-home-accent) 58%, var(--andon-home-glow) 132%);
+  color: #f8fbfd;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  box-shadow: 0 20px 38px rgba(15, 95, 140, 0.22);
+  transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease;
+}
+
+.andon-home__submit:hover,
+.andon-home__submit:focus-visible {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+  box-shadow: 0 24px 42px rgba(15, 95, 140, 0.26);
+  color: #f8fbfd;
+}
+
+.andon-home__footer-note {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(17, 35, 63, 0.08);
+  color: var(--andon-home-subtle);
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+@media (max-width: 991.98px) {
+  .andon-home__stage {
+    grid-template-columns: 1fr;
+  }
+
+  .andon-home__title {
+    max-width: 15ch;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .andon-home {
+    padding: 0.9rem;
+  }
+
+  .andon-home__brand-panel,
+  .andon-home__login-card {
+    border-radius: 24px;
+  }
+
+  .andon-home__feature {
+    flex-direction: column;
+  }
+
+  .andon-home__feature-value {
+    text-align: left;
+  }
 }
 
 .andon-nav {
