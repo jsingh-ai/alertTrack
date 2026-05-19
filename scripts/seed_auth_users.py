@@ -117,11 +117,17 @@ def _ensure_machine_groups():
 def _seed_auth_users():
     companies_by_slug = {company.slug: company for company in Company.query.filter_by(is_active=True).all()}
     for spec in SEEDED_USERS:
+        first_membership = spec["memberships"][0]
+        primary_company = companies_by_slug[first_membership["company_slug"]]
         user = User.query.filter_by(username=spec["username"]).one_or_none()
         if user is None:
-            user = User(username=spec["username"])
+            user = User(
+                username=spec["username"],
+                company_id=primary_company.id,
+                role=first_membership["role"],
+                is_active=True,
+            )
             db.session.add(user)
-            db.session.flush()
 
         user.display_name = spec["display_name"]
         user.email = spec["email"]
@@ -129,13 +135,11 @@ def _seed_auth_users():
         user.phone_number = spec["phone_number"]
         user.is_active = True
         user.set_password(spec["password"])
-
-        first_membership = spec["memberships"][0]
-        primary_company = companies_by_slug[first_membership["company_slug"]]
         user.company_id = primary_company.id
         user.role = first_membership["role"]
         user.department_id = None
         user.machine_group_id = None
+        db.session.flush()
 
         for membership_spec in spec["memberships"]:
             company = companies_by_slug[membership_spec["company_slug"]]
