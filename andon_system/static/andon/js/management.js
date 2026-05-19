@@ -162,7 +162,18 @@ function getDetailRange() {
   };
 }
 
-function loadSavedView() {
+async function loadSavedView() {
+  try {
+    const remote = await window.AndonPreferences?.load?.("management");
+    if (remote && Object.keys(remote).length) {
+      state.filters.machineGroup = remote.machineGroup || "";
+      state.filters.department = remote.department || "";
+      state.locked = typeof remote.locked === "boolean" ? remote.locked : false;
+      return;
+    }
+  } catch (_error) {
+    // Fall back to local storage if the preference endpoint is unavailable.
+  }
   try {
     const saved = JSON.parse(localStorage.getItem(managementViewStorageKey) || "{}");
     state.filters.machineGroup = saved.machineGroup || "";
@@ -181,6 +192,11 @@ function saveView() {
     department: state.filters.department,
     locked: state.locked,
   }));
+  window.AndonPreferences?.save?.("management", {
+    machineGroup: state.filters.machineGroup,
+    department: state.filters.department,
+    locked: state.locked,
+  });
 }
 
 async function loadBoardState() {
@@ -818,7 +834,7 @@ async function boot() {
     state.shiftRange.end = defaults.end;
     state.shiftRange.label = defaults.label;
   }
-  loadSavedView();
+  await loadSavedView();
   await refreshBoard();
   renderViewControls();
   syncTimers();

@@ -19,6 +19,28 @@ let reportRefreshTimeoutId = null;
 let reportLoadRequestId = 0;
 let reportsStaleWhileHidden = false;
 
+async function loadReportPreferences() {
+  try {
+    const saved = await window.AndonPreferences?.load?.("reports");
+    if (!saved || !Object.keys(saved).length) return;
+    if (saved.start && reportStart) reportStart.value = saved.start;
+    if (saved.end && reportEnd) reportEnd.value = saved.end;
+    if (typeof saved.machineGroup === "string") {
+      setSelectedMachineGroup(saved.machineGroup);
+    }
+  } catch (_error) {
+    // Ignore preference fetch errors and continue with defaults.
+  }
+}
+
+function saveReportPreferences() {
+  window.AndonPreferences?.save?.("reports", {
+    start: reportStart?.value || "",
+    end: reportEnd?.value || "",
+    machineGroup: getSelectedMachineGroup(),
+  });
+}
+
 function toQuery() {
   const params = new URLSearchParams();
   if (reportStart.value) params.set("start", datetimeLocalToIso(reportStart.value));
@@ -169,6 +191,7 @@ async function loadReports() {
   renderDepartmentChart(summary.by_department);
   renderHourChart(summary.calls_per_hour);
   renderTables(summary);
+  saveReportPreferences();
 }
 
 function scheduleReportsRefresh() {
@@ -455,7 +478,11 @@ if (reportEnd && !reportEnd.value) reportEnd.value = defaultEndDate;
 if (reportMachineGroupButtons) {
   setSelectedMachineGroup("");
 }
-loadReports();
+loadReportPreferences().finally(() => {
+  if (!reportStart.value) reportStart.value = defaultReportStartValue();
+  if (!reportEnd.value) reportEnd.value = defaultEndDate;
+  loadReports();
+});
 
 function openDetailModal(title, row, kind) {
   if (!reportDetailModal || !reportDetailModalTitle || !reportDetailModalBody) return;

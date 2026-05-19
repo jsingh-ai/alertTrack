@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, abort, jsonify, request
 
 from ..company_context import get_current_company_id
 from ..models.alert import (
@@ -13,7 +13,19 @@ from ..models.alert import (
 from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
-from ..models.user import User
+from ..models.machine_group import MachineGroup
+from ..models.user import UserCompanyAccess
+from ..security import (
+    PAGE_BOARD,
+    PAGE_MANAGEMENT,
+    PAGE_OPERATOR,
+    PAGE_REPORTS,
+    get_scope_filters,
+    get_view_preference,
+    require_authentication,
+    save_view_preference,
+    user_can_access_page,
+)
 from ..services.board_service import build_board_state, build_operator_metadata, build_operator_snapshot
 from ..extensions import db
 from ..services.alert_service import (
@@ -43,73 +55,117 @@ from ..services.realtime_service import emit_machine_updated
 api_bp = Blueprint("api", __name__, url_prefix="/api/andon")
 
 
+@api_bp.before_request
+def require_user_session():
+    require_authentication()
+
+
+def _require_any_page_access(*page_keys: str):
+    if any(user_can_access_page(page_key) for page_key in page_keys):
+        return
+    abort(403)
+
+
 @api_bp.get("/machines")
 def machines():
+    _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     company_id = get_current_company_id()
+    scope = get_scope_filters()
     query = Machine.query.filter_by(is_active=True)
     if company_id:
         query = query.filter(Machine.company_id == company_id)
+    if scope["department_id"] is not None:
+        query = query.filter(Machine.department_id == scope["department_id"])
+    if scope["machine_group_name"]:
+        query = query.filter(Machine.machine_type == scope["machine_group_name"])
     return jsonify({"success": True, "data": [machine.to_dict() for machine in query.order_by(Machine.name.asc()).all()]})
 
 
 @api_bp.get("/departments")
 def departments():
+    _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     company_id = get_current_company_id()
+    scope = get_scope_filters()
     query = Department.query.filter_by(is_active=True)
     if company_id:
         query = query.filter(Department.company_id == company_id)
+    if scope["department_id"] is not None:
+        query = query.filter(Department.id == scope["department_id"])
     return jsonify({"success": True, "data": [department.to_dict() for department in query.order_by(Department.name.asc()).all()]})
 
 
 @api_bp.get("/issue-categories")
 def issue_categories():
+    _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     company_id = get_current_company_id()
+    scope = get_scope_filters()
     query = IssueCategory.query.filter_by(is_active=True)
     if company_id:
         query = query.filter(IssueCategory.company_id == company_id)
+    if scope["department_id"] is not None:
+        query = query.filter(IssueCategory.department_id == scope["department_id"])
     return jsonify({"success": True, "data": [category.to_dict() for category in query.order_by(IssueCategory.name.asc()).all()]})
 
 
 @api_bp.get("/issue-problems")
 def issue_problems():
+    _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     category_id = request.args.get("category_id", type=int)
     query = IssueProblem.query.filter_by(is_active=True)
     company_id = get_current_company_id()
+    scope = get_scope_filters()
     if company_id:
         query = query.filter(IssueProblem.company_id == company_id)
     if category_id:
         query = query.filter_by(category_id=category_id)
+    if scope["department_id"] is not None:
+        query = query.join(IssueProblem.category).filter(IssueCategory.department_id == scope["department_id"])
     data = [problem.to_dict() for problem in query.order_by(IssueProblem.name.asc()).all()]
     return jsonify({"success": True, "data": data})
 
 
 @api_bp.get("/users")
 def users():
+    _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     company_id = get_current_company_id()
-    query = User.query.filter_by(is_active=True)
+    scope = get_scope_filters()
+    query = UserCompanyAccess.query.filter_by(is_active=True)
     if company_id:
-        query = query.filter(User.company_id == company_id)
-    data = [user.to_dict() for user in query.order_by(User.display_name.asc()).all()]
+        query = query.filter(UserCompanyAccess.company_id == company_id)
+    if scope["department_id"] is not None:
+        query = query.filter(UserCompanyAccess.department_id == scope["department_id"])
+    if scope["machine_group_name"]:
+        query = query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name == scope["machine_group_name"])
+    data = []
+    for access in query.order_by(UserCompanyAccess.id.asc()).all():
+        if access.user and access.user.is_active:
+            payload = access.user.to_dict()
+            payload.update(access.to_dict())
+            data.append(payload)
     return jsonify({"success": True, "data": data})
 
 
 @api_bp.get("/board-state")
 def board_state():
+    _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
     return jsonify({"success": True, "data": build_board_state()})
 
 
 @api_bp.get("/operator-snapshot")
 def operator_snapshot():
+    _require_any_page_access(PAGE_OPERATOR)
     return jsonify({"success": True, "data": build_operator_snapshot()})
 
 
 @api_bp.get("/operator-metadata")
 def operator_metadata():
+    _require_any_page_access(PAGE_OPERATOR)
     return jsonify({"success": True, "data": build_operator_metadata()})
 
 
 @api_bp.post("/alerts")
 def api_create_alert():
+    _require_any_page_access(PAGE_OPERATOR)
     try:
         alert = create_alert(_payload())
         return jsonify({"success": True, "data": alert.to_dict()}), 201
@@ -119,6 +175,7 @@ def api_create_alert():
 
 @api_bp.post("/alerts/<int:alert_id>/toggle-machine-active")
 def api_toggle_machine_from_alert(alert_id):
+    _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
     alert = get_alert(alert_id)
     alert.machine.is_active = not alert.machine.is_active
     db.session.commit()
@@ -132,6 +189,7 @@ def api_toggle_machine_from_alert(alert_id):
 
 @api_bp.get("/alerts")
 def api_list_alerts():
+    _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
     status = request.args.get("status")
     alerts = list_active_alerts(status=status)
     return jsonify({"success": True, "data": [alert.to_dict() for alert in alerts]})
@@ -139,6 +197,7 @@ def api_list_alerts():
 
 @api_bp.get("/alerts/<int:alert_id>")
 def api_get_alert(alert_id):
+    _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
     try:
         alert = get_alert(alert_id)
         return jsonify({"success": True, "data": alert.to_dict()})
@@ -148,6 +207,7 @@ def api_get_alert(alert_id):
 
 @api_bp.post("/alerts/<int:alert_id>/acknowledge")
 def api_acknowledge_alert(alert_id):
+    _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
     try:
         alert = acknowledge_alert(alert_id, _payload())
         return jsonify({"success": True, "data": alert.to_dict()})
@@ -157,6 +217,7 @@ def api_acknowledge_alert(alert_id):
 
 @api_bp.post("/alerts/<int:alert_id>/arrive")
 def api_arrive_alert(alert_id):
+    _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
     try:
         alert = mark_arrived(alert_id, _payload())
         return jsonify({"success": True, "data": alert.to_dict()})
@@ -166,6 +227,7 @@ def api_arrive_alert(alert_id):
 
 @api_bp.post("/alerts/<int:alert_id>/resolve")
 def api_resolve_alert(alert_id):
+    _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
     try:
         alert = resolve_alert(alert_id, _payload())
         return jsonify({"success": True, "data": alert.to_dict()})
@@ -175,6 +237,7 @@ def api_resolve_alert(alert_id):
 
 @api_bp.post("/alerts/<int:alert_id>/cancel")
 def api_cancel_alert(alert_id):
+    _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
     try:
         alert = cancel_alert(alert_id, _payload())
         return jsonify({"success": True, "data": alert.to_dict()})
@@ -184,6 +247,7 @@ def api_cancel_alert(alert_id):
 
 @api_bp.post("/alerts/<int:alert_id>/note")
 def api_add_note(alert_id):
+    _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
     try:
         alert = add_note(alert_id, _payload())
         return jsonify({"success": True, "data": alert.to_dict()})
@@ -193,47 +257,56 @@ def api_add_note(alert_id):
 
 @api_bp.get("/reports/summary")
 def api_report_summary():
+    _require_any_page_access(PAGE_REPORTS, PAGE_MANAGEMENT)
     return jsonify({"success": True, "data": build_report_summary(_filters())})
 
 
 @api_bp.get("/reports/machine-details")
 def api_report_machine_details():
+    _require_any_page_access(PAGE_REPORTS, PAGE_MANAGEMENT)
     return jsonify({"success": True, "data": build_machine_details(_filters())})
 
 
 @api_bp.get("/reports/problem-details")
 def api_report_problem_details():
+    _require_any_page_access(PAGE_REPORTS, PAGE_MANAGEMENT)
     return jsonify({"success": True, "data": build_problem_details(_filters())})
 
 
 @api_bp.get("/reports/by-machine")
 def api_report_by_machine():
+    _require_any_page_access(PAGE_REPORTS, PAGE_MANAGEMENT)
     return jsonify({"success": True, "data": build_by_machine(_filters())})
 
 
 @api_bp.get("/reports/by-department")
 def api_report_by_department():
+    _require_any_page_access(PAGE_REPORTS, PAGE_MANAGEMENT)
     return jsonify({"success": True, "data": build_by_department(_filters())})
 
 
 @api_bp.get("/reports/by-problem")
 def api_report_by_problem():
+    _require_any_page_access(PAGE_REPORTS, PAGE_MANAGEMENT)
     return jsonify({"success": True, "data": build_by_problem(_filters())})
 
 
 @api_bp.get("/reports/calls-per-hour")
 def api_report_calls_per_hour():
+    _require_any_page_access(PAGE_REPORTS, PAGE_MANAGEMENT)
     return jsonify({"success": True, "data": build_calls_per_hour(_filters())})
 
 
 @api_bp.post("/escalations/check")
 def api_check_escalations():
+    _require_any_page_access(PAGE_MANAGEMENT)
     escalated = check_escalations()
     return jsonify({"success": True, "data": escalated})
 
 
 @api_bp.post("/machines/<int:machine_id>/toggle-active")
 def api_toggle_machine_active(machine_id):
+    _require_any_page_access(PAGE_MANAGEMENT)
     company_id = get_current_company_id()
     machine = Machine.query.filter_by(id=machine_id, company_id=company_id).one_or_none() if company_id else Machine.query.get_or_404(machine_id)
     if machine is None:
@@ -252,6 +325,7 @@ def api_toggle_machine_active(machine_id):
 
 @api_bp.post("/machine-types/<string:machine_type>/toggle-active")
 def api_toggle_machine_type_active(machine_type):
+    _require_any_page_access(PAGE_MANAGEMENT)
     payload = _payload()
     desired = payload.get("is_active")
     company_id = get_current_company_id()
@@ -269,6 +343,17 @@ def api_toggle_machine_type_active(machine_type):
     invalidate_cache(company_id=company_id)
     emit_machine_updated(company_id, action="toggle_machine_type")
     return jsonify({"success": True, "data": {"machine_type": machine_type, "is_active": target_value, "count": len(machines)}})
+
+
+@api_bp.get("/preferences/<string:page_key>")
+def api_get_preference(page_key):
+    return jsonify({"success": True, "data": get_view_preference(page_key)})
+
+
+@api_bp.post("/preferences/<string:page_key>")
+def api_save_preference(page_key):
+    payload = request.get_json(silent=True) or {}
+    return jsonify({"success": True, "data": save_view_preference(page_key, payload)})
 
 
 def _payload():

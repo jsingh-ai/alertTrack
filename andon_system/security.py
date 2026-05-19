@@ -1,23 +1,37 @@
 from __future__ import annotations
 
+import json
 import secrets
 from hmac import compare_digest
 from urllib.parse import urlparse
 
-from flask import abort, current_app, has_request_context, request, session
+from flask import abort, g, has_request_context, request, session
+from sqlalchemy import or_
 
+from .extensions import db
+from .models.company import Company
+from .models.user import User, UserCompanyAccess, UserViewPreference
+
+USER_SESSION_KEY = "andon_user_id"
 ADMIN_SESSION_KEY = "andon_admin_authenticated"
 CSRF_SESSION_KEY = "andon_csrf_token"
 DEV_SECRET_KEY = "dev-andon-secret-key"
-MIN_ADMIN_PASSWORD_LENGTH = 12
-WEAK_ADMIN_PASSWORDS = {
-    "123",
-    "123456",
-    "password",
-    "admin",
-    "changeme",
-    "change-this-password",
-    "dev-admin-password",
+PAGE_HOME = "home"
+PAGE_OPERATOR = "operator"
+PAGE_BOARD = "board"
+PAGE_MANAGEMENT = "management"
+PAGE_REPORTS = "reports"
+PAGE_ADMIN = "admin"
+
+ROLE_PAGE_ACCESS = {
+    "Admin": {PAGE_HOME, PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT, PAGE_REPORTS, PAGE_ADMIN},
+    "Manager": {PAGE_HOME, PAGE_BOARD, PAGE_MANAGEMENT, PAGE_REPORTS},
+    "Operator": {PAGE_HOME, PAGE_OPERATOR},
+}
+ROLE_LANDING_PAGE = {
+    "Admin": "pages.management_page",
+    "Manager": "pages.board_page",
+    "Operator": "pages.operator_page",
 }
 
 
@@ -40,50 +54,178 @@ def validate_csrf_request() -> bool:
 def enforce_csrf() -> None:
     if request.method in {"GET", "HEAD", "OPTIONS", "TRACE"}:
         return
-    if request.blueprint == "admin" and not is_admin_authenticated():
-        return
     if not validate_csrf_request():
         abort(400, description="CSRF validation failed")
 
 
+def get_authenticated_user() -> User | None:
+    if not has_request_context():
+        return None
+    cached = getattr(g, "authenticated_user", None)
+    if cached is not None:
+        return cached
+    user_id = session.get(USER_SESSION_KEY)
+    user = User.query.filter_by(id=user_id).one_or_none() if user_id else None
+    g.authenticated_user = user
+    return user
+
+
+def is_authenticated() -> bool:
+    user = get_authenticated_user()
+    return bool(user and user.is_active)
+
+
+def login_user(user: User) -> None:
+    session[USER_SESSION_KEY] = user.id
+    session.pop(ADMIN_SESSION_KEY, None)
+    g.authenticated_user = user
+
+
+def logout_user() -> None:
+    session.pop(USER_SESSION_KEY, None)
+    session.pop(ADMIN_SESSION_KEY, None)
+    session.pop("andon_company_slug", None)
+    if has_request_context():
+        g.authenticated_user = None
+        g.current_user_membership = None
+        g.current_company = None
+        g.current_companies = None
+
+
+def authenticate_user(identity: str | None, password: str | None) -> User | None:
+    normalized_identity = str(identity or "").strip()
+    if not normalized_identity:
+        return None
+    user = User.query.filter(
+        or_(User.username == normalized_identity, User.email == normalized_identity)
+    ).one_or_none()
+    if not user or not user.is_active:
+        return None
+    if not user.check_password(password):
+        return None
+    return user
+
+
+def get_user_memberships(user: User | None = None, active_only: bool = True) -> list[UserCompanyAccess]:
+    current_user = user or get_authenticated_user()
+    if current_user is None:
+        return []
+    query = UserCompanyAccess.query.filter_by(user_id=current_user.id)
+    if active_only:
+        query = query.filter_by(is_active=True)
+    memberships = query.order_by(UserCompanyAccess.company_id.asc()).all()
+    return [membership for membership in memberships if membership.company and membership.company.is_active]
+
+
+def get_accessible_companies(user: User | None = None) -> list[Company]:
+    return [membership.company for membership in get_user_memberships(user=user) if membership.company]
+
+
+def get_default_membership(user: User | None = None) -> UserCompanyAccess | None:
+    memberships = get_user_memberships(user=user)
+    return memberships[0] if memberships else None
+
+
+def get_default_landing_endpoint(user: User | None = None, membership: UserCompanyAccess | None = None) -> str:
+    effective_membership = membership or get_default_membership(user)
+    if effective_membership is None:
+        return "pages.home_page"
+    return ROLE_LANDING_PAGE.get(effective_membership.role, "pages.home_page")
+
+
+def can_access_company(company: Company | None, user: User | None = None) -> bool:
+    if company is None:
+        return False
+    return any(item.id == company.id for item in get_accessible_companies(user=user))
+
+
+def get_current_membership(user: User | None = None, company: Company | None = None) -> UserCompanyAccess | None:
+    if not has_request_context():
+        return None
+    cached = getattr(g, "current_user_membership", None)
+    if cached is not None and user is None and company is None:
+        return cached
+    current_user = user or get_authenticated_user()
+    if current_user is None:
+        return None
+    target_company = company or getattr(g, "current_company", None)
+    if target_company is None:
+        from .company_context import get_current_company
+
+        target_company = get_current_company()
+    if target_company is None:
+        return None
+    membership = UserCompanyAccess.query.filter_by(
+        user_id=current_user.id,
+        company_id=target_company.id,
+        is_active=True,
+    ).one_or_none()
+    if user is None and company is None:
+        g.current_user_membership = membership
+    return membership
+
+
+def ensure_session_company(user: User | None = None) -> UserCompanyAccess | None:
+    current_user = user or get_authenticated_user()
+    if current_user is None:
+        return None
+    from .company_context import get_current_company, set_current_company_slug
+
+    current_company = get_current_company()
+    if current_company and can_access_company(current_company, user=current_user):
+        membership = get_current_membership(user=current_user, company=current_company)
+        if membership is not None:
+            return membership
+    default_membership = get_default_membership(user=current_user)
+    if default_membership and default_membership.company:
+        set_current_company_slug(default_membership.company.slug)
+        if has_request_context():
+            g.current_user_membership = default_membership
+        return default_membership
+    return None
+
+
+def require_authentication() -> User:
+    user = get_authenticated_user()
+    if user and user.is_active:
+        return user
+    abort(403)
+
+
+def user_can_access_page(page_key: str, membership: UserCompanyAccess | None = None) -> bool:
+    effective_membership = membership or get_current_membership()
+    if effective_membership is None:
+        return False
+    return page_key in ROLE_PAGE_ACCESS.get(effective_membership.role, set())
+
+
+def require_page_access(page_key: str) -> UserCompanyAccess:
+    require_authentication()
+    membership = ensure_session_company()
+    if membership is None or not user_can_access_page(page_key, membership):
+        abort(403)
+    return membership
+
+
 def is_admin_authenticated() -> bool:
-    return bool(session.get(ADMIN_SESSION_KEY))
+    membership = get_current_membership()
+    return bool(membership and membership.role == "Admin")
 
 
 def set_admin_authenticated(value: bool) -> None:
-    if value:
-        session[ADMIN_SESSION_KEY] = True
-    else:
-        session.pop(ADMIN_SESSION_KEY, None)
-
-
-def validate_admin_password(password: str | None) -> bool:
-    expected = current_app.config.get("ADMIN_PASSWORD")
-    if not expected:
-        return False
-    return compare_digest(str(password or ""), str(expected))
-
-
-def is_weak_admin_password(password: str | None) -> bool:
-    normalized = str(password or "").strip()
-    if len(normalized) < MIN_ADMIN_PASSWORD_LENGTH:
-        return True
-    return normalized.lower() in WEAK_ADMIN_PASSWORDS
+    session[ADMIN_SESSION_KEY] = bool(value)
 
 
 def validate_production_security_config(config: dict) -> None:
     secret_key = config.get("SECRET_KEY")
-    admin_password = config.get("ADMIN_PASSWORD")
     if not secret_key or str(secret_key).strip() == DEV_SECRET_KEY:
         raise RuntimeError("Production requires a non-default SECRET_KEY.")
-    if not admin_password or is_weak_admin_password(admin_password):
-        raise RuntimeError("Production requires a strong ANDON_ADMIN_PASSWORD.")
 
 
 def require_admin_authentication() -> None:
-    if is_admin_authenticated():
-        return
-    abort(403)
+    membership = require_page_access(PAGE_ADMIN)
+    if membership.role != "Admin":
+        abort(403)
 
 
 def is_safe_redirect_target(target: str | None) -> bool:
@@ -106,3 +248,72 @@ def get_authorized_company_id() -> int | None:
     company = get_current_company()
     request.andon_authorized_company = company
     return company.id if company else None
+
+
+def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
+    effective_membership = membership or get_current_membership()
+    if effective_membership is None:
+        return {"company_id": None, "department_id": None, "machine_group_name": None, "restricted": False}
+    if effective_membership.role == "Admin" or effective_membership.scope_mode == "all":
+        return {
+            "company_id": effective_membership.company_id,
+            "department_id": None,
+            "machine_group_name": None,
+            "restricted": False,
+        }
+    machine_group_name = effective_membership.machine_group.name if effective_membership.machine_group else None
+    return {
+        "company_id": effective_membership.company_id,
+        "department_id": effective_membership.department_id,
+        "machine_group_name": machine_group_name,
+        "restricted": True,
+    }
+
+
+def get_view_preference(page_key: str, company_id: int | None = None, user: User | None = None) -> dict:
+    current_user = user or get_authenticated_user()
+    if current_user is None:
+        return {}
+    resolved_company_id = company_id
+    if resolved_company_id is None:
+        membership = get_current_membership(user=current_user)
+        resolved_company_id = membership.company_id if membership else None
+    preference = UserViewPreference.query.filter_by(
+        user_id=current_user.id,
+        company_id=resolved_company_id,
+        page_key=page_key,
+    ).one_or_none()
+    if preference is None or not preference.preferences_json:
+        return {}
+    try:
+        return json.loads(preference.preferences_json)
+    except json.JSONDecodeError:
+        return {}
+
+
+def save_view_preference(page_key: str, payload: dict, company_id: int | None = None, user: User | None = None) -> dict:
+    current_user = user or get_authenticated_user()
+    if current_user is None:
+        abort(403)
+    resolved_company_id = company_id
+    if resolved_company_id is None:
+        membership = get_current_membership(user=current_user)
+        resolved_company_id = membership.company_id if membership else None
+    preference = UserViewPreference.query.filter_by(
+        user_id=current_user.id,
+        company_id=resolved_company_id,
+        page_key=page_key,
+    ).one_or_none()
+    serialized = json.dumps(payload or {})
+    if preference is None:
+        preference = UserViewPreference(
+            user_id=current_user.id,
+            company_id=resolved_company_id,
+            page_key=page_key,
+            preferences_json=serialized,
+        )
+        db.session.add(preference)
+    else:
+        preference.preferences_json = serialized
+    db.session.commit()
+    return payload or {}

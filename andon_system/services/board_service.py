@@ -9,7 +9,9 @@ from ..models.alert import ALERT_STATUSES_ACTIVE, EVENT_CREATED, AndonAlert, And
 from ..models.department import Department
 from ..models.issue import IssueCategory
 from ..models.machine import Machine
-from ..models.user import User
+from ..models.machine_group import MachineGroup
+from ..models.user import UserCompanyAccess
+from ..security import get_scope_filters
 from .cache_service import get_cached, set_cached
 from .radius_service import build_radius_status_map
 
@@ -161,17 +163,32 @@ def build_operator_metadata():
 
 
 def _load_board_context(company_id, include_alerts: bool):
+    scope = get_scope_filters()
     machine_query = Machine.query.options(joinedload(Machine.department))
     department_query = Department.query
     issue_query = IssueCategory.query.options(joinedload(IssueCategory.department), joinedload(IssueCategory.problems))
-    user_query = User.query.options(joinedload(User.department), joinedload(User.machine_group))
+    user_query = UserCompanyAccess.query.options(
+        joinedload(UserCompanyAccess.user),
+        joinedload(UserCompanyAccess.department),
+        joinedload(UserCompanyAccess.machine_group),
+    )
     alert_query = AndonAlert.query.filter(AndonAlert.status.in_(ALERT_STATUSES_ACTIVE))
     if company_id:
         machine_query = machine_query.filter(Machine.company_id == company_id)
         department_query = department_query.filter(Department.company_id == company_id)
         issue_query = issue_query.filter(IssueCategory.company_id == company_id)
-        user_query = user_query.filter(User.company_id == company_id)
+        user_query = user_query.filter(UserCompanyAccess.company_id == company_id)
         alert_query = alert_query.filter(AndonAlert.company_id == company_id)
+    if scope["department_id"] is not None:
+        machine_query = machine_query.filter(Machine.department_id == scope["department_id"])
+        department_query = department_query.filter(Department.id == scope["department_id"])
+        issue_query = issue_query.filter(IssueCategory.department_id == scope["department_id"])
+        user_query = user_query.filter(UserCompanyAccess.department_id == scope["department_id"])
+        alert_query = alert_query.filter(AndonAlert.department_id == scope["department_id"])
+    if scope["machine_group_name"]:
+        machine_query = machine_query.filter(Machine.machine_type == scope["machine_group_name"])
+        user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name == scope["machine_group_name"])
+        alert_query = alert_query.filter(AndonAlert.machine.has(Machine.machine_type == scope["machine_group_name"]))
 
     machines = machine_query.order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all()
     departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all()
@@ -184,10 +201,12 @@ def _load_board_context(company_id, include_alerts: bool):
         if category.department and category.department.is_active
     ]
     visible_users = [
-        user
-        for user in user_query.filter_by(is_active=True).order_by(User.display_name.asc()).all()
-        if (user.department is None or user.department.is_active)
-        and (user.machine_group is None or user.machine_group.is_active)
+        access.user
+        for access in user_query.filter_by(is_active=True).order_by(UserCompanyAccess.id.asc()).all()
+        if access.user
+        and access.user.is_active
+        and (access.department is None or access.department.is_active)
+        and (access.machine_group is None or access.machine_group.is_active)
     ]
     radius_status_by_machine = build_radius_status_map(visible_machines)
 

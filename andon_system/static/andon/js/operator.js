@@ -110,7 +110,7 @@ function handleVisibilityChange() {
 }
 
 async function boot() {
-  restoreViewState();
+  await restoreViewState();
   await loadBoardState();
   try {
     await loadOperatorMetadata();
@@ -1357,7 +1357,18 @@ function onDocumentClick(event) {
   }
 }
 
-function restoreViewState() {
+async function restoreViewState() {
+  try {
+    const remote = await window.AndonPreferences?.load?.("operator");
+    if (remote && Object.keys(remote).length) {
+      state.view.machineGroup = typeof remote.machineGroup === "string" ? remote.machineGroup : "";
+      state.view.machineId = typeof remote.machineId === "string" || typeof remote.machineId === "number" ? String(remote.machineId) : "";
+      state.view.locked = Boolean(remote.locked);
+      return;
+    }
+  } catch (_error) {
+    // Fall back to local storage when remote preferences are unavailable.
+  }
   try {
     const raw = window.localStorage.getItem(operatorViewStorageKey);
     if (!raw) {
@@ -1383,6 +1394,7 @@ function persistOperatorViewState() {
   } catch (_error) {
     // localStorage can be unavailable in locked-down kiosk browsers.
   }
+  window.AndonPreferences?.save?.("operator", state.view);
 }
 
 function normalizeViewState() {

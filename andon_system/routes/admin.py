@@ -11,7 +11,7 @@ from ..models.escalation import EscalationRule
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
-from ..models.user import USER_ROLES, User
+from ..models.user import USER_ROLES, USER_SCOPE_MODES, User, UserCompanyAccess
 from ..security import require_admin_authentication
 from ..services.cache_service import invalidate_cache
 from ..services.radius_service import resolve_radius_machine_id
@@ -86,6 +86,50 @@ def _machine_code_from_name(name: str, company_id: int | None) -> str:
         candidate = f"{base}-{suffix}"
         suffix += 1
     return candidate
+
+
+def _membership_payload(access: UserCompanyAccess):
+    user = access.user
+    return {
+        "id": user.id,
+        "display_name": user.display_name,
+        "username": user.username,
+        "work_id": user.employee_id,
+        "email": user.email,
+        "phone_number": user.phone_number,
+        "role": access.role,
+        "scope_mode": access.scope_mode,
+        "department_id": access.department_id,
+        "department_name": access.department.name if access.department else None,
+        "machine_group_id": access.machine_group_id,
+        "machine_group_name": access.machine_group.name if access.machine_group else None,
+        "is_active": access.is_active,
+        "has_password": bool(user.password_hash),
+    }
+
+
+def _resolve_membership_scope(company_id, role, scope_mode, machine_group_id, department_id):
+    if role not in USER_ROLES:
+        return None, None, _validation_error("Please select a valid role")
+    if scope_mode not in USER_SCOPE_MODES:
+        return None, None, _validation_error("Please select a valid scope")
+    if role == "Admin":
+        scope_mode = "all"
+    machine_group = MachineGroup.query.filter_by(id=machine_group_id, company_id=company_id).one_or_none() if machine_group_id is not None else None
+    department = Department.query.filter_by(id=department_id, company_id=company_id).one_or_none() if department_id is not None else None
+    if scope_mode == "restricted":
+        if machine_group_id is None or not machine_group:
+            return None, None, _validation_error("Please select a machine group")
+        if department_id is None or not department:
+            return None, None, _validation_error("Please select a department")
+    return machine_group, department, None
+
+
+def _validation_error(message: str):
+    if _is_ajax_request():
+        return jsonify({"ok": False, "message": message}), 400
+    flash(message, "warning")
+    return redirect(url_for("pages.admin_page"))
 
 
 @admin_bp.post("/department/create")
@@ -208,6 +252,10 @@ def delete_department(department_id):
 
     for user in User.query.filter_by(company_id=company_id, department_id=department.id).all():
         user.department_id = None
+    for access in UserCompanyAccess.query.filter_by(company_id=company_id, department_id=department.id).all():
+        access.department_id = None
+        if access.scope_mode == "restricted":
+            access.scope_mode = "all"
 
     db.session.delete(department)
     db.session.commit()
@@ -448,6 +496,10 @@ def delete_machine_group(group_id):
         db.session.delete(machine)
     for user in User.query.filter_by(company_id=company_id, machine_group_id=group.id).all():
         user.machine_group_id = None
+    for access in UserCompanyAccess.query.filter_by(company_id=company_id, machine_group_id=group.id).all():
+        access.machine_group_id = None
+        if access.scope_mode == "restricted":
+            access.scope_mode = "all"
     db.session.delete(group)
     db.session.commit()
     _invalidate_company_caches(company_id)
@@ -489,76 +541,74 @@ def toggle_machine_type(machine_type):
 def create_user():
     company_id = _company_id()
     display_name = (request.form.get("display_name") or "").strip()
+    username = (request.form.get("username") or "").strip() or None
     work_id = (request.form.get("work_id") or "").strip() or None
+    password = request.form.get("password") or ""
     role = (request.form.get("role") or USER_ROLES[0]).strip()
+    scope_mode = (request.form.get("scope_mode") or USER_SCOPE_MODES[0]).strip()
     machine_group_id = _int_or_none(request.form.get("machine_group_id"))
     department_id = _int_or_none(request.form.get("department_id"))
+    email = (request.form.get("email") or "").strip() or None
+    phone_number = (request.form.get("phone_number") or "").strip() or None
     if not display_name:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "User name is required"}), 400
-        flash("User name is required", "warning")
-        return redirect(url_for("pages.admin_page"))
-    if machine_group_id is None:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Please select a machine group"}), 400
-        flash("Please select a machine group", "warning")
-        return redirect(url_for("pages.admin_page"))
-    if department_id is None:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Please select a department"}), 400
-        flash("Please select a department", "warning")
-        return redirect(url_for("pages.admin_page"))
+        return _validation_error("User name is required")
+    if not username and not email:
+        return _validation_error("Username or email is required")
+    machine_group, department, error_response = _resolve_membership_scope(
+        company_id, role, scope_mode, machine_group_id, department_id
+    )
+    if error_response is not None:
+        return error_response
 
-    machine_group = MachineGroup.query.filter_by(id=machine_group_id, company_id=company_id).one_or_none()
-    department = Department.query.filter_by(id=department_id, company_id=company_id).one_or_none()
-    if not machine_group:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Please select a machine group"}), 400
-        flash("Please select a machine group", "warning")
-        return redirect(url_for("pages.admin_page"))
-    if not department:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Please select a department"}), 400
-        flash("Please select a department", "warning")
-        return redirect(url_for("pages.admin_page"))
-    if role not in USER_ROLES:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Please select a valid role"}), 400
-        flash("Please select a valid role", "warning")
-        return redirect(url_for("pages.admin_page"))
+    user = None
+    if username:
+        user = User.query.filter_by(username=username).one_or_none()
+    if user is None and email:
+        user = User.query.filter_by(email=email).one_or_none()
+    if user is None:
+        if not password.strip():
+            return _validation_error("Password is required for a new user")
+        user = User(
+            company_id=company_id,
+            employee_id=work_id,
+            display_name=display_name,
+            username=username,
+            role=role,
+            email=email,
+            phone_number=phone_number,
+            department_id=department.id if department else None,
+            machine_group_id=machine_group.id if machine_group else None,
+            is_active=True,
+        )
+        user.set_password(password.strip())
+        db.session.add(user)
+        db.session.flush()
+    else:
+        existing_access = UserCompanyAccess.query.filter_by(user_id=user.id, company_id=company_id).one_or_none()
+        if existing_access is not None:
+            return _validation_error("This user already has access to the selected company")
+        user.display_name = display_name
+        user.employee_id = work_id
+        user.username = username or user.username
+        user.email = email
+        user.phone_number = phone_number
+        if password.strip():
+            user.set_password(password.strip())
 
-    user = User(
+    access = UserCompanyAccess(
+        user_id=user.id,
         company_id=company_id,
-        employee_id=work_id,
-        display_name=display_name,
-        username=None,
         role=role,
-        email=request.form.get("email") or None,
-        phone_number=request.form.get("phone_number") or None,
-        department_id=department_id,
-        machine_group_id=machine_group_id,
+        scope_mode="all" if role == "Admin" else scope_mode,
+        department_id=department.id if department else None,
+        machine_group_id=machine_group.id if machine_group else None,
         is_active=True,
     )
-    db.session.add(user)
+    db.session.add(access)
     db.session.commit()
     _invalidate_company_caches(company_id)
     if _is_ajax_request():
-        return _json_response(
-            "User created",
-            user={
-                "id": user.id,
-                "display_name": user.display_name,
-                "work_id": user.employee_id,
-                "email": user.email,
-                "phone_number": user.phone_number,
-                "role": user.role,
-                "department_id": user.department_id,
-                "department_name": user.department.name if user.department else None,
-                "machine_group_id": user.machine_group_id,
-                "machine_group_name": user.machine_group.name if user.machine_group else None,
-                "is_active": user.is_active,
-            },
-        )
+        return _json_response("User created", user=_membership_payload(access))
     flash("User created", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -566,77 +616,55 @@ def create_user():
 @admin_bp.post("/user/<int:user_id>/update")
 def update_user(user_id):
     company_id = _company_id()
-    user = User.query.filter_by(id=user_id, company_id=company_id).one_or_none()
-    if not user:
+    user = User.query.filter_by(id=user_id).one_or_none()
+    access = UserCompanyAccess.query.filter_by(user_id=user_id, company_id=company_id).one_or_none()
+    if not user or not access:
         return _error_or_404("User not found")
     display_name = (request.form.get("display_name") or "").strip()
+    username = (request.form.get("username") or "").strip() or None
     work_id = (request.form.get("work_id") or "").strip() or None
-    role = (request.form.get("role") or user.role or USER_ROLES[0]).strip()
+    password = request.form.get("password") or ""
+    role = (request.form.get("role") or access.role or USER_ROLES[0]).strip()
+    scope_mode = (request.form.get("scope_mode") or access.scope_mode or USER_SCOPE_MODES[0]).strip()
     machine_group_id = _int_or_none(request.form.get("machine_group_id"))
     department_id = _int_or_none(request.form.get("department_id"))
     email = (request.form.get("email") or "").strip() or None
     phone_number = (request.form.get("phone_number") or "").strip() or None
 
     if not display_name:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "User name is required"}), 400
-        flash("User name is required", "warning")
-        return redirect(url_for("pages.admin_page"))
-    if machine_group_id is None:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Please select a machine group"}), 400
-        flash("Please select a machine group", "warning")
-        return redirect(url_for("pages.admin_page"))
-    if department_id is None:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Please select a department"}), 400
-        flash("Please select a department", "warning")
-        return redirect(url_for("pages.admin_page"))
-
-    machine_group = MachineGroup.query.filter_by(id=machine_group_id, company_id=company_id).one_or_none()
-    department = Department.query.filter_by(id=department_id, company_id=company_id).one_or_none()
-    if not machine_group:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Please select a machine group"}), 400
-        flash("Please select a machine group", "warning")
-        return redirect(url_for("pages.admin_page"))
-    if not department:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Please select a department"}), 400
-        flash("Please select a department", "warning")
-        return redirect(url_for("pages.admin_page"))
-    if role not in USER_ROLES:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Please select a valid role"}), 400
-        flash("Please select a valid role", "warning")
-        return redirect(url_for("pages.admin_page"))
+        return _validation_error("User name is required")
+    if not username and not email:
+        return _validation_error("Username or email is required")
+    duplicate_user = User.query.filter(User.id != user.id, User.username == username).one_or_none() if username else None
+    if duplicate_user is not None:
+        return _validation_error("Username is already in use")
+    duplicate_email = User.query.filter(User.id != user.id, User.email == email).one_or_none() if email else None
+    if duplicate_email is not None:
+        return _validation_error("Email is already in use")
+    machine_group, department, error_response = _resolve_membership_scope(
+        company_id, role, scope_mode, machine_group_id, department_id
+    )
+    if error_response is not None:
+        return error_response
 
     user.display_name = display_name
     user.employee_id = work_id
-    user.role = role
+    user.username = username
     user.email = email
     user.phone_number = phone_number
-    user.machine_group_id = machine_group.id
-    user.department_id = department.id
+    user.role = role
+    user.machine_group_id = machine_group.id if machine_group else None
+    user.department_id = department.id if department else None
+    if password.strip():
+        user.set_password(password.strip())
+    access.role = role
+    access.scope_mode = "all" if role == "Admin" else scope_mode
+    access.machine_group_id = machine_group.id if machine_group else None
+    access.department_id = department.id if department else None
     db.session.commit()
     _invalidate_company_caches(company_id)
     if _is_ajax_request():
-        return _json_response(
-            "User updated",
-            user={
-                "id": user.id,
-                "display_name": user.display_name,
-                "work_id": user.employee_id,
-                "email": user.email,
-                "phone_number": user.phone_number,
-                "role": user.role,
-                "department_id": user.department_id,
-                "department_name": user.department.name if user.department else None,
-                "machine_group_id": user.machine_group_id,
-                "machine_group_name": user.machine_group.name if user.machine_group else None,
-                "is_active": user.is_active,
-            },
-        )
+        return _json_response("User updated", user=_membership_payload(access))
     flash("User updated", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -644,28 +672,14 @@ def update_user(user_id):
 @admin_bp.post("/user/<int:user_id>/toggle")
 def toggle_user(user_id):
     company_id = _company_id()
-    user = User.query.filter_by(id=user_id, company_id=company_id).one_or_none()
-    if not user:
+    access = UserCompanyAccess.query.filter_by(user_id=user_id, company_id=company_id).one_or_none()
+    if not access or access.user is None:
         return _error_or_404("User not found")
-    user.is_active = not user.is_active
+    access.is_active = not access.is_active
     db.session.commit()
     _invalidate_company_caches(company_id)
     if _is_ajax_request():
-        return _json_response(
-            "User updated",
-            user={
-                "id": user.id,
-                "display_name": user.display_name,
-                "work_id": user.employee_id,
-                "email": user.email,
-                "phone_number": user.phone_number,
-                "department_id": user.department_id,
-                "department_name": user.department.name if user.department else None,
-                "machine_group_id": user.machine_group_id,
-                "machine_group_name": user.machine_group.name if user.machine_group else None,
-                "is_active": user.is_active,
-            },
-        )
+        return _json_response("User updated", user=_membership_payload(access))
     flash("User updated", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -673,8 +687,9 @@ def toggle_user(user_id):
 @admin_bp.post("/user/<int:user_id>/delete")
 def delete_user(user_id):
     company_id = _company_id()
-    user = User.query.filter_by(id=user_id, company_id=company_id).one_or_none()
-    if not user:
+    user = User.query.filter_by(id=user_id).one_or_none()
+    access = UserCompanyAccess.query.filter_by(user_id=user_id, company_id=company_id).one_or_none()
+    if not user or not access:
         return _error_or_404("User not found")
     for alert in AndonAlert.query.filter(
         AndonAlert.company_id == company_id,
@@ -691,7 +706,10 @@ def delete_user(user_id):
         .where(AndonAlertEvent.company_id == company_id, AndonAlertEvent.user_id == user.id)
         .values(user_id=None, user_name_text=None)
     )
-    db.session.delete(user)
+    db.session.delete(access)
+    remaining_access = UserCompanyAccess.query.filter_by(user_id=user.id).count()
+    if remaining_access <= 1:
+        user.is_active = False
     db.session.commit()
     _invalidate_company_caches(company_id)
     if _is_ajax_request():

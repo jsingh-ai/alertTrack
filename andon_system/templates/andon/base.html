@@ -44,18 +44,24 @@
         </button>
 
         <nav class="app-nav">
-        {% set nav_items = [
-            ("pages.management_page", "Management", "bi-clipboard-data"),
-            ("pages.operator_page", "Operator", "bi-house-door"),
-            ("pages.board_page", "Board", "bi-display"),
-            ("pages.reports_page", "Reports", "bi-graph-up"),
-            ("pages.admin_page", "Admin", "bi-gear"),
-        ] %}
+        {% set nav_items = [] %}
+        {% if current_membership %}
+          {% if current_membership.role == "Admin" or current_membership.role == "Manager" %}
+            {% set _ = nav_items.append(("pages.management_page", "Management", "bi-clipboard-data")) %}
+            {% set _ = nav_items.append(("pages.board_page", "Board", "bi-display")) %}
+            {% set _ = nav_items.append(("pages.reports_page", "Reports", "bi-graph-up")) %}
+          {% endif %}
+          {% if current_membership.role == "Admin" or current_membership.role == "Operator" %}
+            {% set _ = nav_items.append(("pages.operator_page", "Operator", "bi-house-door")) %}
+          {% endif %}
+          {% if current_membership.role == "Admin" %}
+            {% set _ = nav_items.append(("pages.admin_page", "Admin", "bi-gear")) %}
+          {% endif %}
+        {% endif %}
           {% for endpoint, label, icon in nav_items %}
             <a
               class="app-nav__link {% if request.endpoint == endpoint %}is-active{% endif %}"
               href="{{ url_for(endpoint) }}"
-              data-nav-link
             >
               <i class="bi {{ icon }}"></i>
               <span class="app-nav__label">{{ label }}</span>
@@ -66,12 +72,32 @@
         <div class="app-sidebar__footer">
           <div class="app-sidebar__meta">
             <div class="app-sidebar__meta-label">Live System</div>
+            {% if companies %}
+            <form method="post" action="{{ url_for('pages.select_company') }}">
+              <select class="form-select form-select-sm mt-2" name="company_slug" onchange="this.form.submit()">
+                {% for company in companies %}
+                <option value="{{ company.slug }}" {% if current_company and company.id == current_company.id %}selected{% endif %}>{{ company.name }}</option>
+                {% endfor %}
+              </select>
+            </form>
+            {% else %}
             <div class="app-sidebar__meta-value">{{ current_company.name if current_company else "No company selected" }}</div>
+            {% endif %}
+            {% if current_user %}
+            <div class="app-sidebar__meta-label mt-3">Signed In</div>
+            <div class="app-sidebar__meta-value">{{ current_user.display_name }}</div>
+            <div class="app-sidebar__meta-label">{{ current_membership.role if current_membership else "No Access" }}</div>
+            {% endif %}
           </div>
           <button class="btn btn-light app-theme-toggle" type="button" id="themeToggleBtn">
             <i class="bi bi-moon-stars" id="themeToggleIcon"></i>
             <span class="app-theme-toggle__label">Theme</span>
           </button>
+          {% if user_authenticated %}
+          <form method="post" action="{{ url_for('pages.logout_page') }}" class="mt-2">
+            <button class="btn btn-outline-light w-100" type="submit">Logout</button>
+          </form>
+          {% endif %}
         </div>
       </div>
     </aside>
@@ -178,26 +204,6 @@
         input.value = getCsrfToken();
       }
 
-      async function authenticateAdmin(password, nextUrl) {
-        const payload = new FormData();
-        payload.append("password", password);
-        payload.append("next", nextUrl);
-        const response = await fetch("{{ url_for('pages.admin_login') }}", {
-          method: "POST",
-          body: payload,
-          headers: {
-            "X-CSRF-Token": getCsrfToken(),
-            "Accept": "application/json",
-          },
-          credentials: "same-origin",
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || data.ok === false) {
-          throw new Error(data.message || "Authentication failed");
-        }
-        return data;
-      }
-
       themeToggleBtn?.addEventListener("click", toggleTheme);
       themeToggleBtnMobile?.addEventListener("click", toggleTheme);
       sidebarCollapseBtn?.addEventListener("click", () => {
@@ -206,25 +212,6 @@
       sidebarMobileOpen?.addEventListener("click", openMobileSidebar);
       sidebarMobileClose?.addEventListener("click", closeMobileSidebar);
       appSidebarOverlay?.addEventListener("click", closeMobileSidebar);
-
-      document.querySelectorAll("[data-nav-link]").forEach((link) => {
-        link.addEventListener("click", async (event) => {
-          const href = link.getAttribute("href") || "";
-          if (!href.includes("/andon/admin")) return;
-          if ({{ admin_authenticated|tojson }}) return;
-          event.preventDefault();
-          const password = window.prompt("Enter admin password");
-          if (password === null) {
-            return;
-          }
-          try {
-            const data = await authenticateAdmin(password, href);
-            window.location.href = data.redirect_to || href;
-          } catch (error) {
-            window.alert(error.message || "Authentication failed");
-          }
-        });
-      });
 
       setTheme(getTheme());
       setSidebarMode(getSidebarMode());
@@ -279,6 +266,27 @@
         },
         withCsrfHeaders(headers = {}) {
           return { ...headers, "X-CSRF-Token": getCsrfToken() };
+        },
+      };
+
+      window.AndonPreferences = {
+        async load(pageKey) {
+          const response = await fetch(`/api/andon/preferences/${encodeURIComponent(pageKey)}`, {
+            credentials: "same-origin",
+          });
+          const data = await response.json().catch(() => ({}));
+          return data.data || {};
+        },
+        async save(pageKey, payload) {
+          await fetch(`/api/andon/preferences/${encodeURIComponent(pageKey)}`, {
+            method: "POST",
+            headers: window.AndonSecurity.withCsrfHeaders({
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+            }),
+            credentials: "same-origin",
+            body: JSON.stringify(payload || {}),
+          });
         },
       };
 

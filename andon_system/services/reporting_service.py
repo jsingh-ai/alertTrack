@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload
 from ..company_context import get_current_company_id
 from ..models.alert import ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_CANCELLED, ALERT_STATUS_OPEN, ALERT_STATUS_RESOLVED, AndonAlert
 from ..models.machine import Machine
+from ..security import get_scope_filters
 from .cache_service import get_cached, set_cached
 
 REPORT_SUMMARY_CACHE_TTL_SECONDS = 15
@@ -90,6 +91,7 @@ def build_problem_details(filters: dict):
 
 def _filtered_alerts(filters):
     company_id = get_current_company_id()
+    scope = get_scope_filters()
     query = AndonAlert.query.options(
         joinedload(AndonAlert.machine).joinedload(Machine.department),
         joinedload(AndonAlert.department),
@@ -98,6 +100,10 @@ def _filtered_alerts(filters):
     )
     if company_id:
         query = query.filter(AndonAlert.company_id == company_id)
+    if scope["department_id"] is not None:
+        query = query.filter(AndonAlert.department_id == scope["department_id"])
+    if scope["machine_group_name"]:
+        query = query.filter(AndonAlert.machine.has(Machine.machine_type == scope["machine_group_name"]))
 
     start = _parse_dt(filters.get("start"))
     end = _parse_dt(filters.get("end"))

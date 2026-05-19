@@ -6,7 +6,7 @@ from .escalation import EscalationRule
 from .issue import IssueCategory, IssueProblem
 from .machine import Machine
 from .machine_group import MachineGroup
-from .user import User
+from .user import User, UserCompanyAccess, UserViewPreference
 
 __all__ = [
     "Department",
@@ -14,6 +14,8 @@ __all__ = [
     "Machine",
     "MachineGroup",
     "User",
+    "UserCompanyAccess",
+    "UserViewPreference",
     "IssueCategory",
     "IssueProblem",
     "AndonAlert",

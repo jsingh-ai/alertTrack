@@ -8,6 +8,7 @@ from flask import g, has_request_context, session
 
 from .extensions import db
 from .models.company import Company
+from .security import can_access_company, get_accessible_companies, is_authenticated
 
 DEFAULT_COMPANY_SLUG = "starpak"
 DEFAULT_COMPANIES = [
@@ -26,6 +27,10 @@ def get_companies():
         cached = getattr(g, "current_companies", None)
         if cached is not None:
             return cached
+        if is_authenticated():
+            companies = get_accessible_companies()
+            g.current_companies = companies
+            return companies
     if not _companies_table_exists():
         companies = DEFAULT_COMPANIES
         if has_request_context():
@@ -75,6 +80,9 @@ def get_current_company():
             company = Company.query.filter_by(is_active=True).order_by(Company.name.asc()).first()
         except OperationalError:
             company = None
+    if has_request_context() and is_authenticated() and company is not None and not can_access_company(company):
+        memberships = get_accessible_companies()
+        company = memberships[0] if memberships else None
     if company is None:
         company = next((item for item in DEFAULT_COMPANIES if item.slug == DEFAULT_COMPANY_SLUG), DEFAULT_COMPANIES[2])
 
@@ -101,6 +109,8 @@ def set_current_company_slug(slug: str | None):
     if company is None:
         company = fallback
     if company is None:
+        return None
+    if has_request_context() and is_authenticated() and not can_access_company(company):
         return None
     if has_request_context():
         session["andon_company_slug"] = company.slug

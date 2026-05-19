@@ -26,8 +26,9 @@ from ..models.alert import (
 from ..models.escalation import EscalationRule
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
-from ..models.user import User
+from ..models.user import User, UserCompanyAccess
 from ..models.department import Department
+from ..security import get_scope_filters
 from .cache_service import invalidate_cache
 from .realtime_service import emit_alert_created, emit_alert_updated
 
@@ -61,9 +62,14 @@ def _ensure_aware(value):
 
 def list_active_alerts(status: str | None = None):
     company_id = get_current_company_id()
+    scope = get_scope_filters()
     query = AndonAlert.query
     if company_id:
         query = query.filter(AndonAlert.company_id == company_id)
+    if scope["department_id"] is not None:
+        query = query.filter(AndonAlert.department_id == scope["department_id"])
+    if scope["machine_group_name"]:
+        query = query.filter(AndonAlert.machine.has(Machine.machine_type == scope["machine_group_name"]))
     if status == "active":
         query = query.filter(AndonAlert.status.in_([ALERT_STATUS_OPEN, ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED]))
     elif status:
@@ -73,9 +79,14 @@ def list_active_alerts(status: str | None = None):
 
 def get_alert(alert_id: int):
     company_id = get_current_company_id()
+    scope = get_scope_filters()
     query = AndonAlert.query.filter(AndonAlert.id == alert_id)
     if company_id:
         query = query.filter(AndonAlert.company_id == company_id)
+    if scope["department_id"] is not None:
+        query = query.filter(AndonAlert.department_id == scope["department_id"])
+    if scope["machine_group_name"]:
+        query = query.filter(AndonAlert.machine.has(Machine.machine_type == scope["machine_group_name"]))
     alert = query.one_or_none()
     if not alert:
         raise AlertServiceError("Alert not found")
@@ -84,6 +95,7 @@ def get_alert(alert_id: int):
 
 def create_alert(payload: dict):
     company_id = get_current_company_id()
+    scope = get_scope_filters()
     machine_query = Machine.query.filter(Machine.id == payload.get("machine_id"))
     if company_id:
         machine_query = machine_query.filter(Machine.company_id == company_id)
@@ -111,6 +123,10 @@ def create_alert(payload: dict):
         raise AlertServiceError("Valid machine_id is required")
     if company_id and machine.company_id != company_id:
         raise AlertServiceError("Machine does not belong to the selected company")
+    if scope["department_id"] is not None and machine.department_id != scope["department_id"]:
+        raise AlertServiceError("Machine is outside your assigned department scope", status_code=403)
+    if scope["machine_group_name"] and machine.machine_type != scope["machine_group_name"]:
+        raise AlertServiceError("Machine is outside your assigned machine group scope", status_code=403)
     # Keep the friendly conflict path even though the database also enforces
     # one active alert per machine now.
     existing_alert = _get_active_alert_for_machine(machine.id, company_id)
@@ -354,9 +370,14 @@ def _resolve_user(user_id):
         return None
     company_id = get_current_company_id()
     query = User.query.filter(User.id == user_id)
+    user = query.one_or_none()
+    if user is None:
+        return None
     if company_id:
-        query = query.filter(User.company_id == company_id)
-    return query.one_or_none()
+        access = UserCompanyAccess.query.filter_by(user_id=user.id, company_id=company_id, is_active=True).one_or_none()
+        if access is None:
+            return None
+    return user
 
 
 def _add_event(alert, event_type, user=None, user_name_text=None, message=None, metadata=None):

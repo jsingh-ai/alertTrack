@@ -263,10 +263,18 @@
         <div class="admin-section-header mb-3">
           <p class="eyebrow mb-1">Configuration</p>
           <h2 class="h4 mb-0">Users</h2>
-          <p class="text-secondary small mb-0">Users are linked to a machine group and a department. The dropdowns use the live records already in the database.</p>
+          <p class="text-secondary small mb-0">Users are global accounts. This table manages the selected company's role and scope for each account.</p>
         </div>
         <form class="row g-2 mb-3 js-ajax-form" method="post" action="{{ url_for('admin.create_user') }}" id="userCreateForm" data-kind="user-create">
           <div class="col-md-2">
+            <label class="form-label">Username</label>
+            <input class="form-control" name="username" placeholder="username">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Password</label>
+            <input class="form-control" name="password" type="password" placeholder="Required for new account">
+          </div>
+          <div class="col-md-1">
             <label class="form-label">Work ID</label>
             <input class="form-control" name="work_id" placeholder="Work ID">
           </div>
@@ -278,7 +286,7 @@
             <label class="form-label">Email</label>
             <input class="form-control" name="email" type="email" placeholder="name@company.com">
           </div>
-          <div class="col-md-2">
+          <div class="col-md-1">
             <label class="form-label">Phone</label>
             <input class="form-control" name="phone_number" placeholder="Phone number">
           </div>
@@ -291,9 +299,17 @@
             </select>
           </div>
           <div class="col-md-1">
+            <label class="form-label">Scope</label>
+            <select class="form-select" name="scope_mode" id="userScopeModeSelect" required>
+              {% for scope_mode in user_scope_modes %}
+                <option value="{{ scope_mode }}">{{ scope_mode|title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-1">
             <label class="form-label">Group</label>
-            <select class="form-select" name="machine_group_id" id="userMachineGroupSelect" required>
-              <option value="">Select</option>
+            <select class="form-select" name="machine_group_id" id="userMachineGroupSelect">
+              <option value="">All</option>
               {% for group in machine_groups %}
                 <option value="{{ group.id }}">{{ group.name }}</option>
               {% endfor %}
@@ -301,8 +317,8 @@
           </div>
           <div class="col-md-1">
             <label class="form-label">Dept</label>
-            <select class="form-select" name="department_id" id="userDepartmentSelect" required>
-              <option value="">Select</option>
+            <select class="form-select" name="department_id" id="userDepartmentSelect">
+              <option value="">All</option>
               {% for department in departments %}
                 <option value="{{ department.id }}">{{ department.name }}</option>
               {% endfor %}
@@ -314,10 +330,16 @@
         </form>
         <div class="table-responsive">
           <table class="table table-sm table-dark table-striped align-middle">
-            <thead><tr><th>Work ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Group</th><th>Department</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Username</th><th>Password</th><th>Work ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Scope</th><th>Group</th><th>Department</th><th>Status</th><th></th></tr></thead>
             <tbody id="userTableBody">
               {% for user in users %}
-              <tr id="user-row-{{ user.id }}" data-user-id="{{ user.id }}" data-user-role="{{ user.role or '' }}" data-user-machine-group-id="{{ user.machine_group_id or '' }}" data-user-department-id="{{ user.department_id or '' }}">
+              <tr id="user-row-{{ user.id }}" data-user-id="{{ user.id }}" data-user-role="{{ user.role or '' }}" data-user-scope-mode="{{ user.scope_mode or '' }}" data-user-machine-group-id="{{ user.machine_group_id or '' }}" data-user-department-id="{{ user.department_id or '' }}">
+                <td>
+                  <input class="form-control form-control-sm js-user-field" data-user-field="username" name="username" value="{{ user.username or '' }}" placeholder="username">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm js-user-field" data-user-field="password" name="password" type="password" placeholder="{% if user.has_password %}Leave blank{% else %}Set password{% endif %}">
+                </td>
                 <td>
                   <input class="form-control form-control-sm js-user-field" data-user-field="work_id" name="work_id" value="{{ user.employee_id or '' }}" placeholder="Work ID">
                 </td>
@@ -338,16 +360,23 @@
                   </select>
                 </td>
                 <td>
-                  <select class="form-select form-select-sm js-user-field" data-user-field="machine_group_id" name="machine_group_id" required>
-                    <option value="">Select</option>
+                  <select class="form-select form-select-sm js-user-field" data-user-field="scope_mode" name="scope_mode" required>
+                    {% for scope_mode in user_scope_modes %}
+                      <option value="{{ scope_mode }}" {% if user.scope_mode == scope_mode %}selected{% endif %}>{{ scope_mode|title }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+                <td>
+                  <select class="form-select form-select-sm js-user-field" data-user-field="machine_group_id" name="machine_group_id">
+                    <option value="">All</option>
                     {% for group in machine_groups %}
                       <option value="{{ group.id }}" {% if user.machine_group_id == group.id %}selected{% endif %}>{{ group.name }}</option>
                     {% endfor %}
                   </select>
                 </td>
                 <td>
-                  <select class="form-select form-select-sm js-user-field" data-user-field="department_id" name="department_id" required>
-                    <option value="">Select</option>
+                  <select class="form-select form-select-sm js-user-field" data-user-field="department_id" name="department_id">
+                    <option value="">All</option>
                     {% for department in departments %}
                       <option value="{{ department.id }}" {% if user.department_id == department.id %}selected{% endif %}>{{ department.name }}</option>
                     {% endfor %}
@@ -411,6 +440,7 @@
   const userTableBody = document.getElementById("userTableBody");
   const userCreateForm = document.getElementById("userCreateForm");
   const userRoleSelect = document.getElementById("userRoleSelect");
+  const userScopeModeSelect = document.getElementById("userScopeModeSelect");
   const userMachineGroupSelect = document.getElementById("userMachineGroupSelect");
   const userDepartmentSelect = document.getElementById("userDepartmentSelect");
   const machineGroupFilterChip = document.getElementById("machineGroupFilterChip");
@@ -428,7 +458,7 @@
   const adminDeleteModal = adminDeleteModalElement && window.bootstrap ? new bootstrap.Modal(adminDeleteModalElement) : null;
   const csrfHeaders = (headers = {}) => window.AndonSecurity?.withCsrfHeaders(headers) || headers;
   let pendingDeleteForm = null;
-  if (!filter || !issueTableBody || !departmentTableBody || !issueForm || !machineGroupTableBody || !machineTableBody || !machineGroupSelect || !escalationRuleTableBody || !userTableBody || !userCreateForm || !userRoleSelect || !userMachineGroupSelect || !userDepartmentSelect) return;
+  if (!filter || !issueTableBody || !departmentTableBody || !issueForm || !machineGroupTableBody || !machineTableBody || !machineGroupSelect || !escalationRuleTableBody || !userTableBody || !userCreateForm || !userRoleSelect || !userScopeModeSelect || !userMachineGroupSelect || !userDepartmentSelect) return;
   function notifyAndonRefresh() {
     window.AndonRefreshBus?.notify();
   }
@@ -743,7 +773,9 @@
 
   function userRowHtml(user) {
     return `
-      <tr id="user-row-${user.id}" data-user-id="${user.id}" data-user-role="${escapeHtml(user.role || "")}" data-user-machine-group-id="${user.machine_group_id || ""}" data-user-department-id="${user.department_id || ""}">
+      <tr id="user-row-${user.id}" data-user-id="${user.id}" data-user-role="${escapeHtml(user.role || "")}" data-user-scope-mode="${escapeHtml(user.scope_mode || "")}" data-user-machine-group-id="${user.machine_group_id || ""}" data-user-department-id="${user.department_id || ""}">
+        <td><input class="form-control form-control-sm js-user-field" data-user-field="username" name="username" value="${escapeHtml(user.username || "")}" placeholder="username"></td>
+        <td><input class="form-control form-control-sm js-user-field" data-user-field="password" name="password" type="password" placeholder="${user.has_password ? "Leave blank" : "Set password"}"></td>
         <td><input class="form-control form-control-sm js-user-field" data-user-field="work_id" name="work_id" value="${escapeHtml(user.work_id || "")}" placeholder="Work ID"></td>
         <td><input class="form-control form-control-sm js-user-field" data-user-field="display_name" name="display_name" value="${escapeHtml(user.display_name)}" placeholder="Display name" required></td>
         <td><input class="form-control form-control-sm js-user-field" data-user-field="email" name="email" type="email" value="${escapeHtml(user.email || "")}" placeholder="name@company.com"></td>
@@ -751,6 +783,11 @@
         <td>
           <select class="form-select form-select-sm js-user-field" data-user-field="role" name="role" required>
             ${buildUserSelectOptions(userRoleSelect, user.role)}
+          </select>
+        </td>
+        <td>
+          <select class="form-select form-select-sm js-user-field" data-user-field="scope_mode" name="scope_mode" required>
+            ${buildUserSelectOptions(userScopeModeSelect, user.scope_mode)}
           </select>
         </td>
         <td>
@@ -853,13 +890,17 @@
   function updateUserRow(user) {
     const row = document.getElementById(`user-row-${user.id}`);
     if (!row) return;
+    row.dataset.userScopeMode = user.scope_mode || "";
     row.dataset.userMachineGroupId = user.machine_group_id || "";
     row.dataset.userDepartmentId = user.department_id || "";
+    row.querySelector('[name="username"]').value = user.username || "";
+    row.querySelector('[name="password"]').value = "";
     row.querySelector('[name="work_id"]').value = user.work_id || "";
     row.querySelector('[name="display_name"]').value = user.display_name || "";
     row.querySelector('[name="email"]').value = user.email || "";
     row.querySelector('[name="phone_number"]').value = user.phone_number || "";
     row.querySelector('[name="role"]').value = user.role || "";
+    row.querySelector('[name="scope_mode"]').value = user.scope_mode || "";
     row.querySelector('[name="machine_group_id"]').value = user.machine_group_id || "";
     row.querySelector('[name="department_id"]').value = user.department_id || "";
     row.querySelector(".user-status").textContent = user.is_active ? "Active" : "Inactive";
@@ -889,11 +930,14 @@
     const userId = row.dataset.userId;
     if (!userId) return;
     const payload = new FormData();
+    payload.append("username", row.querySelector('[name="username"]')?.value || "");
+    payload.append("password", row.querySelector('[name="password"]')?.value || "");
     payload.append("work_id", row.querySelector('[name="work_id"]')?.value || "");
     payload.append("display_name", row.querySelector('[name="display_name"]')?.value || "");
     payload.append("email", row.querySelector('[name="email"]')?.value || "");
     payload.append("phone_number", row.querySelector('[name="phone_number"]')?.value || "");
     payload.append("role", row.querySelector('[name="role"]')?.value || "");
+    payload.append("scope_mode", row.querySelector('[name="scope_mode"]')?.value || "");
     payload.append("machine_group_id", row.querySelector('[name="machine_group_id"]')?.value || "");
     payload.append("department_id", row.querySelector('[name="department_id"]')?.value || "");
     const response = await fetch(`/andon/admin/user/${userId}/update`, {
@@ -1147,6 +1191,7 @@
         appendUserRow(payload.user);
         form.reset();
         userRoleSelect.value = "Operator";
+        userScopeModeSelect.value = "restricted";
         notifyAndonRefresh();
       } else if (form.dataset.kind === "user-toggle" && payload.user) {
         updateUserRow(payload.user);

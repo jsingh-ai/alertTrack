@@ -2,12 +2,23 @@ import os
 import shlex
 
 from flask import Flask, g
+from sqlalchemy import inspect, text
 
 from .company_context import get_companies, get_current_company
 from .config import config_by_name
 from .extensions import db, migrate, socketio
 from .routes import register_blueprints
-from .security import enforce_csrf, generate_csrf_token, is_admin_authenticated, validate_production_security_config
+from .security import (
+    enforce_csrf,
+    ensure_session_company,
+    generate_csrf_token,
+    get_accessible_companies,
+    get_authenticated_user,
+    get_current_membership,
+    is_admin_authenticated,
+    is_authenticated,
+    validate_production_security_config,
+)
 
 
 def _detect_gunicorn_worker_count() -> int:
@@ -57,6 +68,75 @@ def _validate_socketio_runtime_config(config: dict) -> None:
     )
 
 
+def _ensure_auth_schema() -> None:
+    inspector = inspect(db.engine)
+    if "users" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("users")}
+    statements = []
+    if "password_hash" not in existing_columns:
+        statements.append("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)")
+    if "last_login_at" not in existing_columns:
+        statements.append("ALTER TABLE users ADD COLUMN last_login_at TIMESTAMPTZ")
+
+    for statement in statements:
+        db.session.execute(text(statement))
+
+    dialect_name = db.engine.dialect.name
+    if dialect_name == "postgresql":
+        db.session.execute(text("UPDATE users SET role = 'Manager' WHERE role = 'Supervisor'"))
+        db.session.execute(text("ALTER TABLE users DROP CONSTRAINT IF EXISTS ck_users_role_allowed"))
+        db.session.execute(
+            text(
+                "ALTER TABLE users "
+                "ADD CONSTRAINT ck_users_role_allowed "
+                "CHECK (role IN ('Admin', 'Manager', 'Operator'))"
+            )
+        )
+
+    from .models.user import UserCompanyAccess, UserViewPreference
+
+    UserCompanyAccess.__table__.create(bind=db.engine, checkfirst=True)
+    UserViewPreference.__table__.create(bind=db.engine, checkfirst=True)
+    db.session.flush()
+
+    users = db.session.execute(
+        text(
+            "SELECT id, company_id, role, department_id, machine_group_id, is_active "
+            "FROM users"
+        )
+    ).mappings().all()
+    for row in users:
+        legacy_role = row["role"] if row["role"] in {"Admin", "Manager", "Operator"} else "Manager"
+        access_exists = db.session.execute(
+            text(
+                "SELECT 1 FROM user_company_access "
+                "WHERE user_id = :user_id AND company_id = :company_id"
+            ),
+            {"user_id": row["id"], "company_id": row["company_id"]},
+        ).scalar()
+        if access_exists:
+            continue
+        db.session.execute(
+            text(
+                "INSERT INTO user_company_access "
+                "(user_id, company_id, role, scope_mode, department_id, machine_group_id, is_active) "
+                "VALUES (:user_id, :company_id, :role, :scope_mode, :department_id, :machine_group_id, :is_active)"
+            ),
+            {
+                "user_id": row["id"],
+                "company_id": row["company_id"],
+                "role": legacy_role,
+                "scope_mode": "all" if legacy_role == "Admin" else "restricted",
+                "department_id": row["department_id"],
+                "machine_group_id": row["machine_group_id"],
+                "is_active": row["is_active"],
+            },
+        )
+    db.session.commit()
+
+
 def create_app(config_name: str | None = None) -> Flask:
     app = Flask(
         __name__,
@@ -100,14 +180,19 @@ def create_app(config_name: str | None = None) -> Flask:
     @app.context_processor
     def inject_globals():
         current_company = get_current_company()
+        current_user = get_authenticated_user()
+        current_membership = get_current_membership()
         return {
             "app_name": "ProcessGuard AI - Live Alert System",
             "app_brand": "ProcessGuard AI",
             "app_subtitle": "Live Alert System",
             "current_company": current_company,
-            "companies": get_companies(),
+            "companies": get_accessible_companies() if is_authenticated() else get_companies(),
+            "current_user": current_user,
+            "current_membership": current_membership,
             "socketio_enabled": socketio is not None and app.config.get("SOCKETIO_ENABLED"),
             "admin_authenticated": is_admin_authenticated(),
+            "user_authenticated": is_authenticated(),
             "csrf_token": generate_csrf_token(),
         }
 
@@ -115,10 +200,13 @@ def create_app(config_name: str | None = None) -> Flask:
     def load_current_company():
         enforce_csrf()
         g.current_company = get_current_company()
+        if is_authenticated():
+            ensure_session_company()
 
     with app.app_context():
         if app.config.get("ANDON_AUTO_SCHEMA_MAINTENANCE"):
             db.create_all()
+        _ensure_auth_schema()
         app.logger.debug("Andon app initialized")
 
     return app

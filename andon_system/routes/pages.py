@@ -1,18 +1,34 @@
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from flask import Blueprint, flash, redirect, render_template, request, url_for
+from sqlalchemy.orm import joinedload
+
 from ..company_context import get_current_company, set_current_company_slug
+from ..extensions import db
 from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
-from ..models.user import USER_ROLES, User
+from ..models.user import USER_ROLES, USER_SCOPE_MODES, UserCompanyAccess
 from ..security import (
-    is_admin_authenticated,
+    PAGE_ADMIN,
+    PAGE_BOARD,
+    PAGE_MANAGEMENT,
+    PAGE_OPERATOR,
+    PAGE_REPORTS,
+    authenticate_user,
+    ensure_session_company,
+    get_authenticated_user,
+    get_current_membership,
+    get_default_landing_endpoint,
+    get_scope_filters,
+    is_authenticated,
     is_safe_redirect_target,
-    set_admin_authenticated,
-    validate_admin_password,
+    login_user,
+    logout_user,
+    require_admin_authentication,
+    require_page_access,
 )
 from ..services.escalation_service import FIXED_ESCALATION_PHASES, ensure_fixed_escalation_rules
 
@@ -50,59 +66,95 @@ def _management_shift_window(now: datetime | None = None):
     }
 
 
+def _landing_redirect():
+    return redirect(url_for(get_default_landing_endpoint()))
+
+
+def _require_page_or_redirect(page_key: str):
+    if not is_authenticated():
+        flash("Please sign in to continue.", "warning")
+        return redirect(url_for("pages.home_page"))
+    try:
+        require_page_access(page_key)
+    except Exception:
+        flash("You do not have access to that page.", "warning")
+        return _landing_redirect()
+    return None
+
+
 @pages_bp.route("/andon")
 def landing_page():
-    return redirect(url_for("pages.operator_page"))
+    if is_authenticated():
+        ensure_session_company()
+        return _landing_redirect()
+    return redirect(url_for("pages.home_page"))
+
+
+@pages_bp.get("/andon/home")
+def home_page():
+    if is_authenticated():
+        ensure_session_company()
+        return _landing_redirect()
+    return render_template("andon/home.html")
+
+
+@pages_bp.post("/andon/login")
+def login_page():
+    identity = request.form.get("identity")
+    password = request.form.get("password")
+    next_url = request.form.get("next")
+    user = authenticate_user(identity, password)
+    if user is None:
+        flash("Invalid username/email or password.", "warning")
+        return redirect(url_for("pages.home_page"))
+    login_user(user)
+    membership = ensure_session_company(user)
+    if membership is None:
+        logout_user()
+        flash("This account does not have any active company access.", "warning")
+        return redirect(url_for("pages.home_page"))
+    user.last_login_at = datetime.now(timezone.utc)
+    db.session.commit()
+    if next_url and is_safe_redirect_target(next_url):
+        return redirect(next_url)
+    return redirect(url_for(get_default_landing_endpoint(user, membership)))
+
+
+@pages_bp.post("/andon/logout")
+def logout_page():
+    logout_user()
+    flash("Signed out.", "success")
+    return redirect(url_for("pages.home_page"))
 
 
 @pages_bp.post("/andon/company/select")
 def select_company():
+    if not is_authenticated():
+        return redirect(url_for("pages.home_page"))
     slug = request.form.get("company_slug")
-    set_current_company_slug(slug)
-    return redirect(request.referrer or url_for("pages.operator_page"))
-
-
-@pages_bp.post("/andon/admin/login")
-def admin_login():
-    password = request.form.get("password")
-    next_url = request.form.get("next") or url_for("pages.admin_page")
-    if not is_safe_redirect_target(next_url):
-        next_url = url_for("pages.admin_page")
-    if not validate_admin_password(password):
-        if request.accept_mimetypes.best == "application/json":
-            return jsonify({"ok": False, "message": "Invalid admin password"}), 403
-        flash("Invalid admin password", "warning")
-        return redirect(url_for("pages.operator_page"))
-    set_admin_authenticated(True)
-    if request.accept_mimetypes.best == "application/json":
-        return jsonify({"ok": True, "redirect_to": next_url})
-    return redirect(next_url)
-
-
-@pages_bp.post("/andon/admin/logout")
-def admin_logout():
-    set_admin_authenticated(False)
-    if request.accept_mimetypes.best == "application/json":
-        return jsonify({"ok": True, "redirect_to": url_for("pages.operator_page")})
-    return redirect(url_for("pages.operator_page"))
+    company = set_current_company_slug(slug)
+    if company is None:
+        flash("You do not have access to that company.", "warning")
+    return _landing_redirect()
 
 
 @pages_bp.route("/andon/operator")
 def operator_page():
-    company = get_current_company()
-    return render_template(
-        "andon/operator.html",
-        current_company=company,
-    )
+    redirect_response = _require_page_or_redirect(PAGE_OPERATOR)
+    if redirect_response is not None:
+        return redirect_response
+    return render_template("andon/operator.html", current_company=get_current_company())
 
 
 @pages_bp.route("/andon/management")
 def management_page():
-    company = get_current_company()
+    redirect_response = _require_page_or_redirect(PAGE_MANAGEMENT)
+    if redirect_response is not None:
+        return redirect_response
     shift_window = _management_shift_window()
     return render_template(
         "andon/management.html",
-        current_company=company,
+        current_company=get_current_company(),
         management_shift_start=shift_window["start"],
         management_shift_end=shift_window["end"],
         management_shift_label=shift_window["label"],
@@ -111,24 +163,29 @@ def management_page():
 
 @pages_bp.route("/andon/board")
 def board_page():
+    redirect_response = _require_page_or_redirect(PAGE_BOARD)
+    if redirect_response is not None:
+        return redirect_response
     return render_template("andon/board.html", current_company=get_current_company())
 
 
 @pages_bp.route("/andon/reports")
 def reports_page():
+    redirect_response = _require_page_or_redirect(PAGE_REPORTS)
+    if redirect_response is not None:
+        return redirect_response
     company = get_current_company()
-    machine_groups = [
-        row.machine_type
-        for row in (
-            Machine.query.with_entities(Machine.machine_type)
-            .filter(Machine.company_id == company.id, Machine.machine_type.isnot(None), Machine.machine_type != "")
-            .distinct()
-            .order_by(Machine.machine_type.asc())
-            .all()
-            if company
-            else []
-        )
-    ]
+    scope = get_scope_filters()
+    query = Machine.query.with_entities(Machine.machine_type).filter(
+        Machine.company_id == company.id,
+        Machine.machine_type.isnot(None),
+        Machine.machine_type != "",
+    )
+    if scope["department_id"] is not None:
+        query = query.filter(Machine.department_id == scope["department_id"])
+    if scope["machine_group_name"]:
+        query = query.filter(Machine.machine_type == scope["machine_group_name"])
+    machine_groups = [row.machine_type for row in query.distinct().order_by(Machine.machine_type.asc()).all()] if company else []
     return render_template(
         "andon/reports.html",
         current_company=company,
@@ -138,14 +195,47 @@ def reports_page():
 
 @pages_bp.route("/andon/admin")
 def admin_page():
-    if not is_admin_authenticated():
-        flash("Admin authentication required", "warning")
-        return redirect(url_for("pages.operator_page"))
+    if not is_authenticated():
+        flash("Please sign in to continue.", "warning")
+        return redirect(url_for("pages.home_page"))
+    try:
+        require_admin_authentication()
+    except Exception:
+        flash("Admin access required.", "warning")
+        return _landing_redirect()
     company = get_current_company()
     company_id = company.id if company else None
     escalation_rules_map = ensure_fixed_escalation_rules()
     machines = Machine.query.filter_by(company_id=company_id).order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all() if company_id else []
-    users = User.query.filter_by(company_id=company_id).order_by(User.display_name.asc()).all() if company_id else []
+    access_rows = (
+        UserCompanyAccess.query.options(
+            joinedload(UserCompanyAccess.user),
+            joinedload(UserCompanyAccess.department),
+            joinedload(UserCompanyAccess.machine_group),
+        )
+        .filter_by(company_id=company_id)
+        .order_by(UserCompanyAccess.is_active.desc(), UserCompanyAccess.role.asc(), UserCompanyAccess.id.asc())
+        .all()
+        if company_id
+        else []
+    )
+    users = []
+    for access in access_rows:
+        if access.user is None:
+            continue
+        user_payload = access.user.to_dict()
+        user_payload.update(
+            {
+                "role": access.role,
+                "scope_mode": access.scope_mode,
+                "department_id": access.department_id,
+                "department_name": access.department.name if access.department else None,
+                "machine_group_id": access.machine_group_id,
+                "machine_group_name": access.machine_group.name if access.machine_group else None,
+                "is_active": access.is_active,
+            }
+        )
+        users.append(user_payload)
     machine_groups = []
     for group in MachineGroup.query.filter_by(company_id=company_id).order_by(MachineGroup.name.asc()).all() if company_id else []:
         grouped_machines = [machine for machine in machines if machine.machine_type == group.name]
@@ -190,5 +280,6 @@ def admin_page():
         escalation_rules=[escalation_rules_map[level] for level in sorted(escalation_rules_map.keys())],
         escalation_phase_labels=FIXED_ESCALATION_PHASES,
         user_roles=USER_ROLES,
+        user_scope_modes=USER_SCOPE_MODES,
         current_company=company,
     )

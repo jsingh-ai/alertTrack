@@ -65,7 +65,18 @@ function formatElapsedSeconds(totalSeconds) {
   return `${String(mins).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-function loadSavedView() {
+async function loadSavedView() {
+  try {
+    const remote = await window.AndonPreferences?.load?.("board");
+    if (remote && Object.keys(remote).length) {
+      state.filters.machineGroup = remote.machineGroup || lockedMachineGroup;
+      state.filters.department = remote.department || "";
+      state.locked = typeof remote.locked === "boolean" ? remote.locked : true;
+      return;
+    }
+  } catch (_error) {
+    // Fall back to localStorage.
+  }
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) || "{}");
     state.filters.machineGroup = saved.machineGroup || lockedMachineGroup;
@@ -84,6 +95,11 @@ function saveView() {
     department: state.filters.department,
     locked: state.locked,
   }));
+  window.AndonPreferences?.save?.("board", {
+    machineGroup: state.filters.machineGroup,
+    department: state.filters.department,
+    locked: state.locked,
+  });
 }
 
 function groupAlerts(alerts) {
@@ -572,15 +588,19 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-loadSavedView();
-refreshBoard();
-startBoardTimerLoop();
-document.addEventListener("visibilitychange", handleBoardVisibilityChange);
-window.AndonRefreshBus?.onRefresh(scheduleBoardRefresh);
-window.AndonRealtime?.onEvent((event) => {
-  if (["board_refresh", "alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
-    scheduleBoardRefresh();
-  }
-});
-window.AndonRealtime?.onStatus((status) => setBoardFallbackPolling(!status.connected));
-setBoardFallbackPolling(!window.AndonRealtime?.connected);
+async function initBoard() {
+  await loadSavedView();
+  await refreshBoard();
+  startBoardTimerLoop();
+  document.addEventListener("visibilitychange", handleBoardVisibilityChange);
+  window.AndonRefreshBus?.onRefresh(scheduleBoardRefresh);
+  window.AndonRealtime?.onEvent((event) => {
+    if (["board_refresh", "alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
+      scheduleBoardRefresh();
+    }
+  });
+  window.AndonRealtime?.onStatus((status) => setBoardFallbackPolling(!status.connected));
+  setBoardFallbackPolling(!window.AndonRealtime?.connected);
+}
+
+initBoard();
