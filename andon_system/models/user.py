@@ -196,7 +196,7 @@ class UserBoard(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     user = db.relationship("User", lazy="joined")
-    company = db.relationship("Company", lazy="joined")
+    company = db.relationship("Company", back_populates="user_boards", lazy="joined")
     items = db.relationship(
         "UserBoardItem",
         back_populates="board",

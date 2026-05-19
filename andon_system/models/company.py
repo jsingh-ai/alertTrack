@@ -19,7 +19,7 @@ class Company(db.Model):
     users = db.relationship("User", back_populates="company", lazy="selectin")
     user_access = db.relationship("UserCompanyAccess", lazy="selectin")
     user_view_preferences = db.relationship("UserViewPreference", lazy="selectin")
-    user_boards = db.relationship("UserBoard", lazy="selectin")
+    user_boards = db.relationship("UserBoard", back_populates="company", lazy="selectin")
     issue_categories = db.relationship("IssueCategory", back_populates="company", lazy="selectin")
     issue_problems = db.relationship("IssueProblem", back_populates="company", lazy="selectin")
     alerts = db.relationship("AndonAlert", back_populates="company", lazy="selectin")
