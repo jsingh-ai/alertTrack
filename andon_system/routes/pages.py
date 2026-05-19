@@ -227,6 +227,26 @@ def management_page():
     )
 
 
+@pages_bp.route("/andon/custom-boards")
+def custom_boards_page():
+    if not is_authenticated():
+        flash("Please sign in to continue.", "warning")
+        return redirect(url_for("pages.home_page"))
+    try:
+        require_admin_authentication()
+    except Exception:
+        flash("Admin access required.", "warning")
+        return _landing_redirect()
+    shift_window = _management_shift_window()
+    return render_template(
+        "andon/custom_boards.html",
+        current_company=get_current_company(),
+        management_shift_start=shift_window["start"],
+        management_shift_end=shift_window["end"],
+        management_shift_label=shift_window["label"],
+    )
+
+
 @pages_bp.route("/andon/board")
 def board_page():
     redirect_response = _require_page_or_redirect(PAGE_BOARD)

@@ -1242,6 +1242,19 @@ body.board-screen-shell.management-screen-shell .management-page-shell.is-focus-
   color: #fff;
 }
 
+.management-header-action--load {
+  background: linear-gradient(180deg, #7c3aed 0%, #6d28d9 100%);
+  color: #f5f3ff;
+  border-color: rgba(124, 58, 237, 0.52);
+  box-shadow: 0 10px 20px rgba(124, 58, 237, 0.2);
+}
+
+.management-header-action--load:hover,
+.management-header-action--load:focus-visible {
+  background: linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%);
+  color: #fff;
+}
+
 @keyframes management-busy-spin {
   to {
     transform: rotate(360deg);

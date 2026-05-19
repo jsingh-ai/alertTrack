@@ -209,7 +209,7 @@ function renderBoard() {
   const board = getActiveBoard();
   if (!board) {
     boardTitle.textContent = "No saved board";
-    boardGrid.innerHTML = '<div class="board-builder-empty"><div class="h4 mb-2">No board has been built yet.</div><div class="small text-secondary">Open Management to create and save a board.</div></div>';
+    boardGrid.innerHTML = '<div class="board-builder-empty"><div class="h4 mb-2">No board has been built yet.</div><div class="small text-secondary">Open Custom Boards to create and save a board.</div></div>';
     renderStatusDock([], "No board selected");
     return;
   }
@@ -217,7 +217,7 @@ function renderBoard() {
   const machines = (board.items || []).map((item) => getMachineById(item.machine_id)).filter(Boolean);
   boardGrid.innerHTML = machines.length
     ? machines.map((machine) => renderTile(machine, board)).join("")
-    : '<div class="board-builder-empty"><div class="h4 mb-2">This board is empty.</div><div class="small text-secondary">Open Management to add machines to the board.</div></div>';
+    : '<div class="board-builder-empty"><div class="h4 mb-2">This board is empty.</div><div class="small text-secondary">Open Custom Boards to add machines to the board.</div></div>';
   renderStatusDock(machines, board.name);
 }
 

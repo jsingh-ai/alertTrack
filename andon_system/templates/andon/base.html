@@ -55,6 +55,7 @@
             {% set _ = nav_items.append(("pages.operator_page", "Operator", "bi-house-door")) %}
           {% endif %}
           {% if current_membership.role == "Admin" %}
+            {% set _ = nav_items.append(("pages.custom_boards_page", "Custom Boards", "bi-layout-text-window-reverse")) %}
             {% set _ = nav_items.append(("pages.admin_page", "Admin", "bi-gear")) %}
           {% endif %}
         {% endif %}

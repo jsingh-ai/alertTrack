@@ -1,169 +1,42 @@
 {% extends "andon/base.html" %}
 {% block body_class %}board-screen-shell management-screen-shell{% endblock %}
 {% block content %}
-<div class="container-fluid board-page-shell management-page-shell" id="managementPageShell">
-  {% set page_title = "Management Boards" %}
-  {% set page_subtitle = "Build layouts when needed, then run in clean board view mode." %}
-  {% set page_action_html %}
-    <div class="management-header-actions">
-      <button class="btn management-header-action management-header-action--create" type="button" id="headerCreateBoardBtn">Create New Board</button>
-      <button class="btn management-header-action management-header-action--edit" type="button" id="headerEditBoardBtn">Edit Board</button>
-    </div>
-  {% endset %}
+<div class="container-fluid board-page-shell management-page-shell" id="managementOverviewShell">
+  {% set page_title = "Management" %}
+  {% set page_subtitle = "Operational overview by machine group with quick filtering." %}
+  {% set page_action_html = '<button class="btn btn-outline-light" type="button" id="managementFiltersBtn"><i class="bi bi-funnel me-1"></i>Filters</button>' %}
   {% include "andon/_page_header.html" %}
 
-  <div class="board-builder-shell">
-    <section class="card andon-panel board-builder-toolbar">
-      <div class="card-body">
-        <div class="board-builder-toolbar__meta">
-          <div class="board-builder-toolbar__title-wrap">
-            <div class="board-builder-toolbar__title">Build Flow</div>
-            <div class="board-builder-toolbar__copy">Create or load a board, drag machines into canvas, preview, then save.</div>
-            <div class="board-builder-toolbar__mode" id="boardModeBanner">Mode: Build</div>
-          </div>
-          <div class="board-builder-steps" id="boardBuilderSteps">
-            <span class="board-builder-step" data-step="1">1. Board</span>
-            <span class="board-builder-step" data-step="2">2. Add Machines</span>
-            <span class="board-builder-step" data-step="3">3. Preview</span>
-            <span class="board-builder-step" data-step="4">4. Save</span>
-          </div>
+  <section class="card andon-panel mb-2 d-none" id="managementFiltersPanel">
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-12 col-md-4">
+          <label class="form-label" for="managementGroupFilter">Machine Group</label>
+          <select class="form-select" id="managementGroupFilter"></select>
         </div>
-        <div class="board-builder-toolbar__row">
-          <div class="board-builder-toolbar__field board-builder-toolbar__field--select" id="savedBoardsField">
-            <label class="form-label" for="boardSelector">Saved Boards</label>
-            <select class="form-select" id="boardSelector"></select>
-          </div>
-          <div class="board-builder-toolbar__field board-builder-toolbar__field--name" id="boardNameField">
-            <label class="form-label" id="boardNameLabel" for="boardNameInput">Board Name</label>
-            <input class="form-control" id="boardNameInput" placeholder="Board name">
-          </div>
-          <div class="board-builder-toolbar__actions">
-            <button class="btn btn-primary" type="button" id="createBoardBtn">Create New Board</button>
-            <button class="btn btn-outline-light" type="button" id="loadBoardBtn">Load Another Board</button>
-            <button class="btn btn-success" type="button" id="updateBoardBtn">Update Board</button>
-            <button class="btn btn-outline-light" type="button" id="previewBoardBtn">Board View</button>
-            <button class="btn btn-outline-danger" type="button" id="deleteBoardBtn">Delete</button>
-          </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label" for="managementSearchFilter">Search</label>
+          <input class="form-control" id="managementSearchFilter" placeholder="Search machine name">
         </div>
-      </div>
-    </section>
-
-    <div id="managementStatusDock" class="operator-status-dock" aria-live="polite"></div>
-
-    <div id="boardBuilderEditLayout" class="board-builder-layout">
-      <aside id="boardBuilderSources" class="board-builder-sources">
-        <div class="card andon-panel board-builder-panel">
-          <div class="card-body">
-            <div class="board-builder-panel__heading">Board Modules</div>
-            <div class="board-builder-toolbar__modules board-builder-toolbar__modules--panel">
-              <label class="board-module-toggle"><input type="checkbox" id="modulePerformance" checked> <span>Performance</span></label>
-              <label class="board-module-toggle"><input type="checkbox" id="moduleHistory" checked> <span>Recent History</span></label>
-              <label class="board-module-toggle"><input type="checkbox" id="moduleRadius" checked> <span>Radius</span></label>
-            </div>
-          </div>
-        </div>
-        <div class="card andon-panel board-builder-panel">
-          <div class="card-body">
-            <div class="board-builder-panel__heading">
-              <span>Machine Sources</span>
-              <span class="board-builder-panel__count"><span id="groupSourceCount">0</span> groups · <span id="machineSourceCount">0</span> machines</span>
-            </div>
-            <div class="board-builder-subheading">Machine Groups</div>
-            <div id="groupDropSource" class="board-builder-chip-list"></div>
-            <div class="board-builder-subheading board-builder-subheading--machines">Machines</div>
-            <div class="board-builder-search-wrap">
-              <input class="form-control board-builder-search-input" id="machineSearchInput" placeholder="Search machine name, group, or department">
-            </div>
-            <div id="machineDropSource" class="board-builder-machine-list"></div>
-          </div>
-        </div>
-      </aside>
-
-      <section class="board-builder-canvas-shell">
-        <div class="card andon-panel board-builder-panel board-builder-panel--canvas">
-          <div class="card-body">
-            <div class="board-builder-panel__heading">
-              <span>Canvas</span>
-              <span class="board-builder-panel__count" id="canvasMachineCount">0</span>
-            </div>
-            <div class="board-builder-canvas__hint">Drop machines or machine groups here. Drag cards to reorder.</div>
-            <div id="boardBuilderCanvas" class="board-builder-canvas" data-drop-zone="board-items"></div>
-          </div>
-        </div>
-      </section>
-    </div>
-
-    <section id="boardBuilderPreviewShell" class="card andon-panel board-live-shell d-none">
-      <div class="card-body">
-        <div class="board-live-shell__header">
-          <div>
-            <div class="board-live-shell__eyebrow">Board View</div>
-            <div class="board-live-shell__title" id="previewBoardTitle">Live Board View</div>
-          </div>
-        </div>
-        <div id="previewBoardGrid" class="board-live-grid"></div>
-      </div>
-    </section>
-  </div>
-</div>
-<div id="managementToastDock" class="management-toast-dock" aria-live="polite" aria-atomic="true"></div>
-<div id="managementBusyOverlay" class="management-busy-overlay" hidden aria-live="polite" aria-busy="true">
-  <div class="management-busy-overlay__card">
-    <div class="management-busy-overlay__spinner" aria-hidden="true"></div>
-    <div class="management-busy-overlay__text" id="managementBusyText">Working...</div>
-  </div>
-</div>
-
-<div class="modal fade management-detail-modal" id="managementDetailModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
-    <div class="modal-content machine-modal management-detail-modal__content">
-      <div class="modal-header machine-modal__header">
-        <div class="machine-modal__title-group">
-          <p class="eyebrow mb-1">Press Summary</p>
-          <h2 class="modal-title h3 mb-0" id="managementDetailModalTitle">Press Summary</h2>
-          <div class="management-detail-modal__subtitle" id="managementDetailModalSubtitle">Current shift</div>
-        </div>
-        <button class="btn-close machine-modal__close" data-bs-dismiss="modal" type="button" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div class="management-detail-modal__filters">
-          <div class="management-detail-modal__range">
-            <div class="management-detail-modal__field">
-              <label class="form-label small text-uppercase text-secondary mb-0" for="managementDetailStart">Start</label>
-              <input type="datetime-local" class="form-control" id="managementDetailStart" step="1">
-            </div>
-            <div class="management-detail-modal__field">
-              <label class="form-label small text-uppercase text-secondary mb-0" for="managementDetailEnd">End</label>
-              <input type="datetime-local" class="form-control" id="managementDetailEnd" step="1">
-            </div>
-            <div class="management-detail-modal__field management-detail-modal__field--action">
-              <button class="btn btn-primary w-100" id="managementDetailRefresh" type="button">Refresh</button>
-            </div>
-          </div>
-        </div>
-        <div class="management-detail-modal__summary" id="managementDetailSummary"></div>
-        <div class="table-responsive management-detail-modal__table-wrap">
-          <table class="table report-data-table table-sm mb-0 management-detail-modal__table">
-            <thead>
-              <tr>
-                <th>Department</th>
-                <th>Issue</th>
-                <th>Operator</th>
-                <th>Made</th>
-                <th>Finished</th>
-                <th>Ack Time</th>
-                <th>Fix Time</th>
-                <th>Total Time</th>
-              </tr>
-            </thead>
-            <tbody id="managementDetailTableBody">
-              <tr><td colspan="8" class="text-secondary">Select a machine to view the shift summary.</td></tr>
-            </tbody>
-          </table>
+        <div class="col-12 col-md-4">
+          <button class="btn btn-outline-light w-100" type="button" id="managementClearFiltersBtn">Clear Filters</button>
         </div>
       </div>
     </div>
-  </div>
+  </section>
+
+  <div id="managementStatusDock" class="operator-status-dock" aria-live="polite"></div>
+  <section class="card andon-panel board-live-shell">
+    <div class="card-body">
+      <div class="board-live-shell__header">
+        <div>
+          <div class="board-live-shell__eyebrow">Machine Group View</div>
+          <div class="board-live-shell__title" id="managementOverviewTitle">Loading...</div>
+        </div>
+      </div>
+      <div id="managementOverviewGrid" class="board-live-grid"></div>
+    </div>
+  </section>
 </div>
 
 <script>
