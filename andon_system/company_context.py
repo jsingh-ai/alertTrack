@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 
 from sqlalchemy import inspect
 from sqlalchemy.exc import OperationalError
-from flask import g, has_request_context, session
+from flask import current_app, g, has_request_context, session
 
 from .extensions import db
 from .models.company import Company
@@ -22,14 +23,29 @@ DEFAULT_COMPANIES = [
 _COMPANIES_TABLE_EXISTS: bool | None = None
 
 
+def _perf_enabled() -> bool:
+    return has_request_context() and bool(current_app.config.get("ANDON_PERF_LOGS"))
+
+
+def _perf_log(event: str, started_at: float, **extra) -> None:
+    if not _perf_enabled():
+        return
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    suffix = " ".join(f"{key}={value}" for key, value in extra.items())
+    current_app.logger.debug("PERF %s duration_ms=%.1f %s", event, duration_ms, suffix)
+
+
 def get_companies():
+    started_at = time.perf_counter()
     if has_request_context():
         cached = getattr(g, "current_companies", None)
         if cached is not None:
+            _perf_log("get_companies(cache)", started_at, count=len(cached))
             return cached
         if is_authenticated():
             companies = get_accessible_companies()
             g.current_companies = companies
+            _perf_log("get_companies(auth_memberships)", started_at, count=len(companies))
             return companies
     if not _companies_table_exists():
         companies = DEFAULT_COMPANIES
@@ -43,13 +59,16 @@ def get_companies():
     companies = companies or DEFAULT_COMPANIES
     if has_request_context():
         g.current_companies = companies
+    _perf_log("get_companies(db_or_default)", started_at, count=len(companies))
     return companies
 
 
 def get_current_company():
+    started_at = time.perf_counter()
     if has_request_context():
         company = getattr(g, "current_company", None)
         if company is not None:
+            _perf_log("get_current_company(cache)", started_at, slug=getattr(company, "slug", None))
             return company
     if not _companies_table_exists():
         if has_request_context():
@@ -59,6 +78,7 @@ def get_current_company():
         company = next((company for company in DEFAULT_COMPANIES if company.slug == slug), DEFAULT_COMPANIES[2])
         if has_request_context():
             g.current_company = company
+        _perf_log("get_current_company(default_no_table)", started_at, slug=getattr(company, "slug", None))
         return company
 
     company = None
@@ -90,6 +110,7 @@ def get_current_company():
         g.current_company = company
         if company is not None:
             session["andon_company_slug"] = company.slug
+    _perf_log("get_current_company(db_or_default)", started_at, slug=getattr(company, "slug", None))
     return company
 
 

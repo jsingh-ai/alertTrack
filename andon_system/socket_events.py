@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from flask import current_app, request
 from flask_socketio import disconnect, emit, join_room, leave_room
 
@@ -16,15 +18,26 @@ def register_socket_events(socketio):
 
     @socketio.on("connect")
     def on_connect():
-        current_app.logger.debug("Socket.IO client connected")
+        current_app.logger.debug(
+            "Socket.IO client connected sid=%s ip=%s namespace=%s",
+            getattr(request, "sid", None),
+            request.remote_addr,
+            getattr(request, "namespace", "/"),
+        )
         emit("connected", {"success": True})
 
     @socketio.on("disconnect")
     def on_disconnect():
-        current_app.logger.debug("Socket.IO client disconnected")
+        current_app.logger.debug(
+            "Socket.IO client disconnected sid=%s ip=%s namespace=%s",
+            getattr(request, "sid", None),
+            request.remote_addr,
+            getattr(request, "namespace", "/"),
+        )
 
     @socketio.on("join_company_room")
     def on_join_company_room(payload=None):
+        started_at = time.perf_counter()
         data = payload or {}
         room_type = data.get("room") or BOARD_ROOM
         if room_type not in VALID_ROOMS:
@@ -46,6 +59,14 @@ def register_socket_events(socketio):
                 room,
             )
             return
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        current_app.logger.debug(
+            "PERF socket_join sid=%s room=%s company_id=%s duration_ms=%.1f",
+            getattr(request, "sid", None),
+            room_type,
+            company_id,
+            duration_ms,
+        )
         emit("joined_company_room", {"room": room, "company_id": company_id})
 
     @socketio.on("leave_company_room")

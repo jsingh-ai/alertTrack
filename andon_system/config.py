@@ -28,11 +28,13 @@ class BaseConfig:
     SOCKETIO_MESSAGE_QUEUE = os.getenv("SOCKETIO_MESSAGE_QUEUE") or REDIS_URL
     SOCKETIO_ASYNC_MODE = os.getenv("SOCKETIO_ASYNC_MODE") or "threading"
     SOCKETIO_ALLOW_MULTIWORKER = os.getenv("SOCKETIO_ALLOW_MULTIWORKER", "false").lower() in {"1", "true", "yes", "on"}
+    ANDON_PERF_LOGS = os.getenv("ANDON_PERF_LOGS", "false").lower() in {"1", "true", "yes", "on"}
 
 
 class DevelopmentConfig(BaseConfig):
     DEBUG = True
     ANDON_AUTO_SCHEMA_MAINTENANCE = True
+    ANDON_PERF_LOGS = True
 
 
 class TestingConfig(BaseConfig):

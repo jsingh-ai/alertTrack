@@ -1,7 +1,8 @@
 import os
 import shlex
+import time
 
-from flask import Flask, g
+from flask import Flask, g, has_request_context, request
 from sqlalchemy import inspect, text
 
 from .company_context import get_companies, get_current_company
@@ -200,10 +201,33 @@ def create_app(config_name: str | None = None) -> Flask:
 
     @app.before_request
     def load_current_company():
+        if has_request_context():
+            g.request_started_at = time.perf_counter()
         enforce_csrf()
         g.current_company = get_current_company()
         if is_authenticated():
             ensure_session_company()
+
+    @app.after_request
+    def log_request_timing(response):
+        if not app.config.get("ANDON_PERF_LOGS"):
+            return response
+        started_at = getattr(g, "request_started_at", None)
+        if started_at is None:
+            return response
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        # Always log dynamic app routes; static routes only when noticeably slow.
+        should_log = (not request.path.startswith("/static/")) or duration_ms >= 200
+        if should_log:
+            app.logger.debug(
+                "PERF request method=%s path=%s status=%s duration_ms=%.1f remote=%s",
+                request.method,
+                request.path,
+                response.status_code,
+                duration_ms,
+                request.remote_addr,
+            )
+        return response
 
     with app.app_context():
         if app.config.get("ANDON_AUTO_SCHEMA_MAINTENANCE"):

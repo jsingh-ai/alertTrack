@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 from hmac import compare_digest
 from urllib.parse import urlparse
 
-from flask import abort, g, has_request_context, request, session
+from flask import abort, current_app, g, has_request_context, request, session
 from sqlalchemy import or_
 
 from .extensions import db
@@ -35,6 +36,18 @@ ROLE_LANDING_PAGE = {
 }
 
 
+def _perf_enabled() -> bool:
+    return has_request_context() and bool(current_app.config.get("ANDON_PERF_LOGS"))
+
+
+def _perf_log(event: str, started_at: float, **extra) -> None:
+    if not _perf_enabled():
+        return
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    suffix = " ".join(f"{key}={value}" for key, value in extra.items())
+    current_app.logger.debug("PERF %s duration_ms=%.1f %s", event, duration_ms, suffix)
+
+
 def generate_csrf_token() -> str:
     token = session.get(CSRF_SESSION_KEY)
     if not token:
@@ -59,14 +72,17 @@ def enforce_csrf() -> None:
 
 
 def get_authenticated_user() -> User | None:
+    started_at = time.perf_counter()
     if not has_request_context():
         return None
     cached = getattr(g, "authenticated_user", None)
     if cached is not None:
+        _perf_log("get_authenticated_user(cache)", started_at, user_id=getattr(cached, "id", None))
         return cached
     user_id = session.get(USER_SESSION_KEY)
     user = User.query.filter_by(id=user_id).one_or_none() if user_id else None
     g.authenticated_user = user
+    _perf_log("get_authenticated_user(db)", started_at, user_id=user_id, found=bool(user))
     return user
 
 
@@ -107,14 +123,18 @@ def authenticate_user(identity: str | None, password: str | None) -> User | None
 
 
 def get_user_memberships(user: User | None = None, active_only: bool = True) -> list[UserCompanyAccess]:
+    started_at = time.perf_counter()
     current_user = user or get_authenticated_user()
     if current_user is None:
+        _perf_log("get_user_memberships(skip_no_user)", started_at)
         return []
     query = UserCompanyAccess.query.filter_by(user_id=current_user.id)
     if active_only:
         query = query.filter_by(is_active=True)
     memberships = query.order_by(UserCompanyAccess.company_id.asc()).all()
-    return [membership for membership in memberships if membership.company and membership.company.is_active]
+    filtered = [membership for membership in memberships if membership.company and membership.company.is_active]
+    _perf_log("get_user_memberships(db)", started_at, total=len(memberships), active=len(filtered))
+    return filtered
 
 
 def get_accessible_companies(user: User | None = None) -> list[Company]:
@@ -140,13 +160,16 @@ def can_access_company(company: Company | None, user: User | None = None) -> boo
 
 
 def get_current_membership(user: User | None = None, company: Company | None = None) -> UserCompanyAccess | None:
+    started_at = time.perf_counter()
     if not has_request_context():
         return None
     cached = getattr(g, "current_user_membership", None)
     if cached is not None and user is None and company is None:
+        _perf_log("get_current_membership(cache)", started_at, found=True)
         return cached
     current_user = user or get_authenticated_user()
     if current_user is None:
+        _perf_log("get_current_membership(skip_no_user)", started_at)
         return None
     target_company = company or getattr(g, "current_company", None)
     if target_company is None:
@@ -154,6 +177,7 @@ def get_current_membership(user: User | None = None, company: Company | None = N
 
         target_company = get_current_company()
     if target_company is None:
+        _perf_log("get_current_membership(skip_no_company)", started_at)
         return None
     membership = UserCompanyAccess.query.filter_by(
         user_id=current_user.id,
@@ -162,12 +186,15 @@ def get_current_membership(user: User | None = None, company: Company | None = N
     ).one_or_none()
     if user is None and company is None:
         g.current_user_membership = membership
+    _perf_log("get_current_membership(db)", started_at, company_id=target_company.id, found=bool(membership))
     return membership
 
 
 def ensure_session_company(user: User | None = None) -> UserCompanyAccess | None:
+    started_at = time.perf_counter()
     current_user = user or get_authenticated_user()
     if current_user is None:
+        _perf_log("ensure_session_company(skip_no_user)", started_at)
         return None
     from .company_context import get_current_company, set_current_company_slug
 
@@ -175,13 +202,16 @@ def ensure_session_company(user: User | None = None) -> UserCompanyAccess | None
     if current_company and can_access_company(current_company, user=current_user):
         membership = get_current_membership(user=current_user, company=current_company)
         if membership is not None:
+            _perf_log("ensure_session_company(current_ok)", started_at, company_slug=current_company.slug)
             return membership
     default_membership = get_default_membership(user=current_user)
     if default_membership and default_membership.company:
         set_current_company_slug(default_membership.company.slug)
         if has_request_context():
             g.current_user_membership = default_membership
+        _perf_log("ensure_session_company(default_set)", started_at, company_slug=default_membership.company.slug)
         return default_membership
+    _perf_log("ensure_session_company(no_membership)", started_at)
     return None
 
 
