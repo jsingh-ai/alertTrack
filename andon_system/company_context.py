@@ -81,6 +81,20 @@ def get_current_company():
         _perf_log("get_current_company(default_no_table)", started_at, slug=getattr(company, "slug", None))
         return company
 
+    # For authenticated users, prefer membership-resolved companies first.
+    # This avoids additional Company table lookups on every request.
+    if has_request_context() and is_authenticated():
+        memberships = get_accessible_companies()
+        if memberships:
+            session_slug = session.get("andon_company_slug")
+            company = next((item for item in memberships if item.slug == session_slug), None)
+            if company is None:
+                company = next((item for item in memberships if item.slug == DEFAULT_COMPANY_SLUG), memberships[0])
+            g.current_company = company
+            session["andon_company_slug"] = company.slug
+            _perf_log("get_current_company(memberships)", started_at, slug=getattr(company, "slug", None), count=len(memberships))
+            return company
+
     company = None
     requested_slug = None
     if has_request_context():
@@ -125,6 +139,14 @@ def get_current_company_id():
 def set_current_company_slug(slug: str | None):
     if not slug:
         return None
+    if has_request_context() and is_authenticated():
+        memberships = get_accessible_companies()
+        company = next((item for item in memberships if item.slug == slug), None)
+        if company is None:
+            return None
+        session["andon_company_slug"] = company.slug
+        g.current_company = company
+        return company
     fallback = next((company for company in DEFAULT_COMPANIES if company.slug == slug), None)
     try:
         company = Company.query.filter_by(slug=slug, is_active=True).one_or_none()

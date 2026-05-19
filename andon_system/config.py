@@ -15,7 +15,7 @@ class BaseConfig:
     PRESS_RADIUS_DATABASE_URL = os.getenv("PRESS_RADIUS_DATABASE_URL")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
-        "pool_pre_ping": True,
+        "pool_pre_ping": os.getenv("SQLALCHEMY_POOL_PRE_PING", "true").lower() in {"1", "true", "yes", "on"},
         "pool_recycle": int(os.getenv("SQLALCHEMY_POOL_RECYCLE", "300")),
     }
     JSON_SORT_KEYS = False
@@ -35,6 +35,10 @@ class DevelopmentConfig(BaseConfig):
     DEBUG = True
     ANDON_AUTO_SCHEMA_MAINTENANCE = True
     ANDON_PERF_LOGS = True
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        **BaseConfig.SQLALCHEMY_ENGINE_OPTIONS,
+        "pool_pre_ping": False,
+    }
 
 
 class TestingConfig(BaseConfig):
