@@ -4,6 +4,7 @@
 <div class="container-fluid board-page-shell management-page-shell" id="managementPageShell">
   {% set page_title = "Management Boards" %}
   {% set page_subtitle = "Build layouts when needed, then run in clean board view mode." %}
+  {% set page_action_html = '<button class="btn btn-outline-light" type="button" id="headerEditBoardBtn">Edit Board</button>' %}
   {% include "andon/_page_header.html" %}
 
   <div class="board-builder-shell">
@@ -13,6 +14,7 @@
           <div class="board-builder-toolbar__title-wrap">
             <div class="board-builder-toolbar__title">Build Flow</div>
             <div class="board-builder-toolbar__copy">Create or load a board, drag machines into canvas, preview, then save.</div>
+            <div class="board-builder-toolbar__mode" id="boardModeBanner">Mode: Build</div>
           </div>
           <div class="board-builder-steps" id="boardBuilderSteps">
             <span class="board-builder-step" data-step="1">1. Board</span>
@@ -27,7 +29,7 @@
             <select class="form-select" id="boardSelector"></select>
           </div>
           <div class="board-builder-toolbar__field board-builder-toolbar__field--name">
-            <label class="form-label" for="boardNameInput">Board Name</label>
+            <label class="form-label" id="boardNameLabel" for="boardNameInput">Board Name</label>
             <input class="form-control" id="boardNameInput" placeholder="Board name">
           </div>
           <div class="board-builder-toolbar__actions">

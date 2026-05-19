@@ -29,6 +29,9 @@ const previewBoardGrid = document.getElementById("previewBoardGrid");
 const managementToastDock = document.getElementById("managementToastDock");
 const managementStatusDock = document.getElementById("managementStatusDock");
 const managementPageShell = document.getElementById("managementPageShell");
+const headerEditBoardBtn = document.getElementById("headerEditBoardBtn");
+const boardModeBanner = document.getElementById("boardModeBanner");
+const boardNameLabel = document.getElementById("boardNameLabel");
 const boardBuilderSteps = document.getElementById("boardBuilderSteps");
 const groupSourceCount = document.getElementById("groupSourceCount");
 const machineSourceCount = document.getElementById("machineSourceCount");
@@ -270,6 +273,20 @@ function radiusValue(value) {
   return escapeHtml(value || "N/A");
 }
 
+function getMachineHealthState(machine) {
+  if (!machine?.is_active) {
+    return { heroClass: "status-off", label: "Offline" };
+  }
+  const alertStatus = String(machine?.active_alert?.status || "").toUpperCase();
+  if (alertStatus === "OPEN") {
+    return { heroClass: "status-open", label: "Alert Open" };
+  }
+  if (alertStatus === "ACKNOWLEDGED" || alertStatus === "ARRIVED") {
+    return { heroClass: "status-acknowledged", label: "Being Worked" };
+  }
+  return { heroClass: "status-healthy", label: "Healthy" };
+}
+
 function renderRadiusGroup(machine) {
   const radius = machine?.radius || null;
   return `
@@ -296,6 +313,7 @@ function renderRadiusGroup(machine) {
 function renderBoardTile(machine, board, item, editable = true) {
   const stats = getMachineStats(machine.id);
   const active = machine.active_alert;
+  const health = getMachineHealthState(machine);
   const lastClosed = stats.latestClosed;
   const issue = active ? String(active.problem_name || active.category_name || "Unassigned").trim() : "";
   const responder = active ? String(active.responder_name_text || "").trim() : "";
@@ -310,13 +328,13 @@ function renderBoardTile(machine, board, item, editable = true) {
       draggable="${editable ? "true" : "false"}"
     >
       ${editable ? `<button class="board-builder-tile__remove" type="button" data-remove-board-item="${item.id}" aria-label="Remove ${escapeHtml(machine.name)}">×</button>` : ""}
-      <div class="management-machine-card__hero management-machine-card__hero--${machine.active_alert ? "status-open" : "status-healthy"}">
+      <div class="management-machine-card__hero management-machine-card__hero--${health.heroClass}">
         <div class="management-machine-card__title-row">
           <div class="management-machine-card__title">${escapeHtml(machine.name)}</div>
           <span class="board-builder-tile__meta">${escapeHtml(machine.machine_type || "Unassigned")}</span>
         </div>
         <div class="management-machine-card__hero-status">
-          <span class="management-machine-card__hero-text">${escapeHtml(machine.department_name || "Unassigned")}</span>
+          <span class="management-machine-card__hero-text">${escapeHtml(health.label)}</span>
         </div>
       </div>
       ${board.show_performance ? `
@@ -455,10 +473,19 @@ function renderBoardSelector() {
   modulePerformance.checked = Boolean(activeBoard?.show_performance);
   moduleHistory.checked = Boolean(activeBoard?.show_recent_history);
   moduleRadius.checked = Boolean(activeBoard?.show_radius);
-  if (createBoardBtn) createBoardBtn.textContent = isDraftBoard(activeBoard) ? "Save Board" : "New Board";
+  if (createBoardBtn) createBoardBtn.textContent = isDraftBoard(activeBoard) ? "Create Board" : "Create New Board";
+  if (createBoardBtn) {
+    createBoardBtn.classList.toggle("btn-primary", isDraftBoard(activeBoard));
+    createBoardBtn.classList.toggle("btn-warning", !isDraftBoard(activeBoard));
+  }
   if (saveBoardNameBtn) saveBoardNameBtn.disabled = !activeBoard || isDraftBoard(activeBoard);
   if (deleteBoardBtn) deleteBoardBtn.disabled = !activeBoard || isDraftBoard(activeBoard);
-  if (previewBoardBtn) previewBoardBtn.disabled = !activeBoard;
+  if (previewBoardBtn) {
+    previewBoardBtn.disabled = !activeBoard;
+    previewBoardBtn.textContent = isDraftBoard(activeBoard) ? "Preview Draft" : "Back to Board View";
+    previewBoardBtn.classList.toggle("btn-outline-info", !isDraftBoard(activeBoard));
+    previewBoardBtn.classList.toggle("btn-outline-light", isDraftBoard(activeBoard));
+  }
   if (previewSaveBtn) {
     previewSaveBtn.textContent = isDraftBoard(activeBoard) ? "Save Board" : "Board Saved";
     previewSaveBtn.disabled = !isDraftBoard(activeBoard);
@@ -466,6 +493,18 @@ function renderBoardSelector() {
   const activeCount = (activeBoard?.items || []).length;
   if (canvasMachineCount) {
     canvasMachineCount.textContent = String(activeCount);
+  }
+  if (boardNameLabel) {
+    boardNameLabel.textContent = isDraftBoard(activeBoard) ? "New Board Name" : "Edit Board Name";
+  }
+  if (boardModeBanner) {
+    if (state.viewMode === "display") {
+      boardModeBanner.textContent = `Mode: Board View${activeBoard?.name ? ` · ${activeBoard.name}` : ""}`;
+    } else if (isDraftBoard(activeBoard)) {
+      boardModeBanner.textContent = "Mode: Create New Board";
+    } else {
+      boardModeBanner.textContent = `Mode: Edit Existing Board · ${activeBoard?.name || "Board"}`;
+    }
   }
   setMutatingState(isMutating);
 }
@@ -612,6 +651,7 @@ function renderPreview() {
   if (!activeBoard) {
     previewBoardTitle.textContent = "Board Preview";
     previewBoardGrid.innerHTML = '<div class="board-builder-empty"><div class="h4 mb-2">No board selected.</div><div class="small text-secondary">Go back to edit mode and build a board first.</div></div>';
+    renderStatusDock([]);
     return;
   }
   const machines = (activeBoard.items || []).map((item) => getMachineById(item.machine_id)).filter(Boolean);
@@ -619,6 +659,7 @@ function renderPreview() {
   previewBoardGrid.innerHTML = machines.length
     ? machines.map((machine) => renderPreviewTile(machine, activeBoard)).join("")
     : '<div class="board-builder-empty"><div class="h4 mb-2">This board is empty.</div><div class="small text-secondary">Go back to edit mode and drag machines into the canvas.</div></div>';
+  renderStatusDock(machines);
   if (activeBoardNeedsShiftStats(activeBoard)) {
     ensureShiftStatsLoaded().catch(() => {});
   }
@@ -635,7 +676,8 @@ function renderCurrentView() {
   createBoardBtn.classList.toggle("d-none", isPreview);
   saveBoardNameBtn?.classList.toggle("d-none", isPreview);
   deleteBoardBtn.classList.toggle("d-none", isPreview);
-  managementStatusDock?.classList.toggle("d-none", isPreview);
+  managementStatusDock?.classList.toggle("d-none", !isPreview);
+  headerEditBoardBtn?.classList.toggle("d-none", !isPreview);
   document.querySelector(".board-builder-toolbar")?.classList.toggle("d-none", isPreview);
   if (isPreview) {
     renderPreview();
@@ -1064,12 +1106,21 @@ function wireEvents() {
   previewBoardBtn?.addEventListener("click", () => {
     state.viewMode = "display";
     renderCurrentView();
+    renderBoardSelector();
     updateFlowSteps();
     showToast("Board view enabled.", "info", "View", 1500);
   });
   previewEditBtn?.addEventListener("click", () => {
     state.viewMode = "edit";
     renderCurrentView();
+    renderBoardSelector();
+    updateFlowSteps();
+    showToast("Build mode enabled.", "info", "Builder", 1500);
+  });
+  headerEditBoardBtn?.addEventListener("click", () => {
+    state.viewMode = "edit";
+    renderCurrentView();
+    renderBoardSelector();
     updateFlowSteps();
     showToast("Build mode enabled.", "info", "Builder", 1500);
   });
