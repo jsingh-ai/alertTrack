@@ -16,8 +16,8 @@
     <section class="andon-home__stage">
       <div class="andon-home__brand-panel">
         <div class="andon-home__brand-mark">PG</div>
-        <p class="andon-home__eyebrow">Manufacturing Workflow Platform</p>
-        <p class="andon-home__eyebrow">ProcessGuard AI</p>
+        <p class="andon-home__eyebrow andon-home__eyebrow--brand">ProcessGuard AI</p>
+        <p class="andon-home__eyebrow andon-home__eyebrow--platform">Manufacturing Workflow Platform</p>
         <h1 class="andon-home__title">A sharper front door for live operations.</h1>
         <p class="andon-home__summary">
           Monitor alerts, switch companies, and land each user in the view that matches their role and scope.
@@ -71,5 +71,26 @@
       </div>
     </section>
   </main>
+  {% if workspace_companies %}
+  <div class="andon-home__workspace-overlay" role="dialog" aria-modal="true" aria-label="Choose workspace">
+    <div class="andon-home__workspace-modal">
+      <p class="andon-home__eyebrow andon-home__workspace-eyebrow">Workspace Selection</p>
+      <h2 class="andon-home__workspace-title">Choose your workspace</h2>
+      <p class="andon-home__workspace-copy">Select the company to enter before opening your dashboard.</p>
+      <div class="andon-home__workspace-list">
+        {% for company in workspace_companies %}
+        <form method="post" action="{{ url_for('pages.workspace_select_submit') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="company_id" value="{{ company.id }}">
+          <button class="andon-home__workspace-option" type="submit">
+            <span>{{ company.name }}</span>
+            <span>Enter</span>
+          </button>
+        </form>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
 </body>
 </html>

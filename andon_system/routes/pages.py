@@ -1,10 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from sqlalchemy.orm import joinedload
-
-from flask import session
 
 from ..company_context import get_current_company, set_current_company_id, set_current_company_slug
 from ..extensions import db
@@ -37,6 +35,7 @@ from ..services.escalation_service import FIXED_ESCALATION_PHASES, ensure_fixed_
 
 pages_bp = Blueprint("pages", __name__)
 MANAGEMENT_TIMEZONE = ZoneInfo("America/Chicago")
+WORKSPACE_PROMPT_SESSION_KEY = "andon_workspace_prompt"
 
 
 def _management_shift_window(now: datetime | None = None):
@@ -96,6 +95,10 @@ def landing_page():
 @pages_bp.get("/andon/home")
 def home_page():
     if is_authenticated():
+        memberships = get_user_memberships(active_only=True)
+        if len(memberships) > 1 and session.get(WORKSPACE_PROMPT_SESSION_KEY):
+            companies = [membership.company for membership in memberships if membership.company]
+            return render_template("andon/home.html", workspace_companies=companies)
         ensure_session_company()
         return _landing_redirect()
     return render_template("andon/home.html")
@@ -120,11 +123,13 @@ def login_page():
     db.session.commit()
     membership = memberships[0]
     if len(memberships) == 1:
+        session.pop(WORKSPACE_PROMPT_SESSION_KEY, None)
         set_current_company_id(membership.company_id)
     else:
+        session[WORKSPACE_PROMPT_SESSION_KEY] = True
         if next_url and is_safe_redirect_target(next_url):
             session["andon_workspace_next"] = next_url
-        return redirect(url_for("pages.workspace_select_page"))
+        return redirect(url_for("pages.home_page"))
     if next_url and is_safe_redirect_target(next_url):
         return redirect(next_url)
     return redirect(url_for(get_default_landing_endpoint(user, membership)))
@@ -135,16 +140,8 @@ def workspace_select_page():
     if not is_authenticated():
         flash("Please sign in to continue.", "warning")
         return redirect(url_for("pages.home_page"))
-    memberships = get_user_memberships(active_only=True)
-    if not memberships:
-        logout_user()
-        flash("This account does not have any active company access.", "warning")
-        return redirect(url_for("pages.home_page"))
-    if len(memberships) == 1:
-        set_current_company_id(memberships[0].company_id)
-        return _landing_redirect()
-    companies = [membership.company for membership in memberships if membership.company]
-    return render_template("andon/workspace_select.html", companies=companies)
+    session[WORKSPACE_PROMPT_SESSION_KEY] = True
+    return redirect(url_for("pages.home_page"))
 
 
 @pages_bp.post("/andon/workspace/select")
@@ -156,7 +153,9 @@ def workspace_select_submit():
     company = set_current_company_id(company_id)
     if company is None:
         flash("You do not have access to that company.", "warning")
-        return redirect(url_for("pages.workspace_select_page"))
+        session[WORKSPACE_PROMPT_SESSION_KEY] = True
+        return redirect(url_for("pages.home_page"))
+    session.pop(WORKSPACE_PROMPT_SESSION_KEY, None)
     membership = ensure_session_company()
     next_url = session.pop("andon_workspace_next", None)
     if next_url and is_safe_redirect_target(next_url):
