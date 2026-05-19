@@ -203,6 +203,9 @@ def create_app(config_name: str | None = None) -> Flask:
     def load_current_company():
         if has_request_context():
             g.request_started_at = time.perf_counter()
+        # Static assets and Socket.IO handshakes should not pay auth/company lookup cost.
+        if request.path.startswith("/static/") or request.path.startswith("/socket.io/"):
+            return
         enforce_csrf()
         g.current_company = get_current_company()
         if is_authenticated():

@@ -128,11 +128,23 @@ def get_user_memberships(user: User | None = None, active_only: bool = True) -> 
     if current_user is None:
         _perf_log("get_user_memberships(skip_no_user)", started_at)
         return []
+    if has_request_context() and user is None:
+        cache = getattr(g, "user_memberships_cache", None)
+        if cache is None:
+            cache = {}
+            g.user_memberships_cache = cache
+        cache_key = ("self", bool(active_only))
+        if cache_key in cache:
+            memberships = cache[cache_key]
+            _perf_log("get_user_memberships(cache)", started_at, total=len(memberships), active=len(memberships))
+            return memberships
     query = UserCompanyAccess.query.filter_by(user_id=current_user.id)
     if active_only:
         query = query.filter_by(is_active=True)
     memberships = query.order_by(UserCompanyAccess.company_id.asc()).all()
     filtered = [membership for membership in memberships if membership.company and membership.company.is_active]
+    if has_request_context() and user is None:
+        g.user_memberships_cache[("self", bool(active_only))] = filtered
     _perf_log("get_user_memberships(db)", started_at, total=len(memberships), active=len(filtered))
     return filtered
 
@@ -179,14 +191,11 @@ def get_current_membership(user: User | None = None, company: Company | None = N
     if target_company is None:
         _perf_log("get_current_membership(skip_no_company)", started_at)
         return None
-    membership = UserCompanyAccess.query.filter_by(
-        user_id=current_user.id,
-        company_id=target_company.id,
-        is_active=True,
-    ).one_or_none()
+    memberships = get_user_memberships(user=current_user, active_only=True)
+    membership = next((item for item in memberships if item.company_id == target_company.id), None)
     if user is None and company is None:
         g.current_user_membership = membership
-    _perf_log("get_current_membership(db)", started_at, company_id=target_company.id, found=bool(membership))
+    _perf_log("get_current_membership(memberships)", started_at, company_id=target_company.id, found=bool(membership))
     return membership
 
 
@@ -198,13 +207,20 @@ def ensure_session_company(user: User | None = None) -> UserCompanyAccess | None
         return None
     from .company_context import get_current_company, set_current_company_slug
 
+    memberships = get_user_memberships(user=current_user, active_only=True)
+    if not memberships:
+        _perf_log("ensure_session_company(no_memberships)", started_at)
+        return None
     current_company = get_current_company()
-    if current_company and can_access_company(current_company, user=current_user):
-        membership = get_current_membership(user=current_user, company=current_company)
-        if membership is not None:
-            _perf_log("ensure_session_company(current_ok)", started_at, company_slug=current_company.slug)
-            return membership
-    default_membership = get_default_membership(user=current_user)
+    membership = None
+    if current_company is not None:
+        membership = next((item for item in memberships if item.company_id == current_company.id), None)
+    if membership is not None:
+        if has_request_context():
+            g.current_user_membership = membership
+        _perf_log("ensure_session_company(current_ok)", started_at, company_slug=current_company.slug)
+        return membership
+    default_membership = memberships[0]
     if default_membership and default_membership.company:
         set_current_company_slug(default_membership.company.slug)
         if has_request_context():

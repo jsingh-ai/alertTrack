@@ -82,15 +82,17 @@ def get_current_company():
         return company
 
     company = None
+    requested_slug = None
     if has_request_context():
         slug = session.get("andon_company_slug")
+        requested_slug = slug
         if slug:
             try:
                 company = Company.query.filter_by(slug=slug, is_active=True).one_or_none()
             except OperationalError:
                 company = None
 
-    if company is None:
+    if company is None and requested_slug != DEFAULT_COMPANY_SLUG:
         try:
             company = Company.query.filter_by(slug=DEFAULT_COMPANY_SLUG, is_active=True).one_or_none()
         except OperationalError:
@@ -100,9 +102,10 @@ def get_current_company():
             company = Company.query.filter_by(is_active=True).order_by(Company.name.asc()).first()
         except OperationalError:
             company = None
-    if has_request_context() and is_authenticated() and company is not None and not can_access_company(company):
+    if has_request_context() and is_authenticated():
         memberships = get_accessible_companies()
-        company = memberships[0] if memberships else None
+        if memberships and (company is None or all(item.id != company.id for item in memberships)):
+            company = memberships[0]
     if company is None:
         company = next((item for item in DEFAULT_COMPANIES if item.slug == DEFAULT_COMPANY_SLUG), DEFAULT_COMPANIES[2])
 
