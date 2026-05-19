@@ -115,7 +115,7 @@ class UserCompanyAccess(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     user = db.relationship("User", back_populates="company_access", lazy="joined")
-    company = db.relationship("Company", lazy="joined")
+    company = db.relationship("Company", back_populates="user_access", lazy="joined")
     department = db.relationship("Department", lazy="joined")
     machine_group = db.relationship("MachineGroup", lazy="joined")
 
@@ -162,7 +162,7 @@ class UserViewPreference(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     user = db.relationship("User", back_populates="view_preferences", lazy="joined")
-    company = db.relationship("Company", lazy="joined")
+    company = db.relationship("Company", back_populates="user_view_preferences", lazy="joined")
 
     def to_dict(self):
         return {
