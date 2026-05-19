@@ -29,6 +29,13 @@ const previewBoardGrid = document.getElementById("previewBoardGrid");
 const managementToastDock = document.getElementById("managementToastDock");
 const managementStatusDock = document.getElementById("managementStatusDock");
 const managementPageShell = document.getElementById("managementPageShell");
+const boardBuilderSteps = document.getElementById("boardBuilderSteps");
+const groupSourceCount = document.getElementById("groupSourceCount");
+const machineSourceCount = document.getElementById("machineSourceCount");
+const canvasMachineCount = document.getElementById("canvasMachineCount");
+const machineSearchInput = document.getElementById("machineSearchInput");
+const managementBusyOverlay = document.getElementById("managementBusyOverlay");
+const managementBusyText = document.getElementById("managementBusyText");
 const managementDetailModalEl = document.getElementById("managementDetailModal");
 const managementDetailModalTitle = document.getElementById("managementDetailModalTitle");
 const managementDetailModalSubtitle = document.getElementById("managementDetailModalSubtitle");
@@ -55,6 +62,7 @@ const state = {
   shiftStatsByMachineId: {},
   shiftStatsLoadedRangeKey: null,
   shiftStatsLoadingPromise: null,
+  machineSearchTerm: "",
 };
 
 let activeDetailMachine = null;
@@ -62,6 +70,7 @@ let detailRequestId = 0;
 let nextDraftItemId = 1;
 let isMutating = false;
 let toastId = 0;
+let renderQueued = false;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -130,14 +139,25 @@ function setMutatingState(next) {
   previewBoardBtn.disabled = isMutating || !getActiveBoard();
   previewSaveBtn.disabled = isMutating || !isDraftBoard(getActiveBoard());
   boardSelector.disabled = isMutating;
+  if (machineSearchInput) {
+    machineSearchInput.disabled = isMutating;
+  }
 }
 
-async function withMutation(task) {
+function setBusyOverlay(visible, message = "Working...") {
+  if (!managementBusyOverlay || !managementBusyText) return;
+  managementBusyText.textContent = message;
+  managementBusyOverlay.hidden = !visible;
+}
+
+async function withMutation(task, busyMessage = "Saving board changes...") {
   if (isMutating) return;
   setMutatingState(true);
+  setBusyOverlay(true, busyMessage);
   try {
     return await task();
   } finally {
+    setBusyOverlay(false);
     setMutatingState(false);
   }
 }
@@ -185,7 +205,45 @@ function getBoardMachineIds(board = getActiveBoard()) {
 
 function getAvailableMachines() {
   const excludedIds = getBoardMachineIds();
-  return (state.boardState.machines || []).filter((machine) => !excludedIds.has(Number(machine.id)));
+  const search = state.machineSearchTerm.trim().toLowerCase();
+  return (state.boardState.machines || [])
+    .filter((machine) => !excludedIds.has(Number(machine.id)))
+    .filter((machine) => {
+      if (!search) return true;
+      const haystack = `${machine.name || ""} ${machine.machine_type || ""} ${machine.department_name || ""}`.toLowerCase();
+      return haystack.includes(search);
+    });
+}
+
+function updateFlowSteps() {
+  if (!boardBuilderSteps) return;
+  const activeBoard = getActiveBoard();
+  const machineCount = (activeBoard?.items || []).length;
+  const isPreview = state.viewMode === "preview";
+  const isDraft = isDraftBoard(activeBoard);
+  const completed = [
+    Boolean(activeBoard),
+    machineCount > 0,
+    isPreview,
+    !isDraft && machineCount > 0,
+  ];
+  boardBuilderSteps.querySelectorAll(".board-builder-step").forEach((stepNode, index) => {
+    const done = completed[index];
+    stepNode.classList.toggle("is-complete", done);
+    stepNode.classList.toggle("is-active", !done && index === completed.findIndex((flag) => !flag));
+  });
+}
+
+function queueRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  window.requestAnimationFrame(() => {
+    renderQueued = false;
+    renderBoardSelector();
+    renderSourceLists();
+    renderCurrentView();
+    updateFlowSteps();
+  });
 }
 
 function getMachineStats(machineId) {
@@ -401,12 +459,22 @@ function renderBoardSelector() {
   previewBoardBtn.disabled = !activeBoard;
   previewSaveBtn.textContent = isDraftBoard(activeBoard) ? "Save Board" : "Board Saved";
   previewSaveBtn.disabled = !isDraftBoard(activeBoard);
+  const activeCount = (activeBoard?.items || []).length;
+  if (canvasMachineCount) {
+    canvasMachineCount.textContent = String(activeCount);
+  }
   setMutatingState(isMutating);
 }
 
 function renderSourceLists() {
   const machines = [...getAvailableMachines()].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { numeric: true }));
   const groups = [...new Set(machines.map((machine) => machine.machine_type).filter(Boolean))];
+  if (groupSourceCount) {
+    groupSourceCount.textContent = String(groups.length);
+  }
+  if (machineSourceCount) {
+    machineSourceCount.textContent = String(machines.length);
+  }
 
   groupDropSource.innerHTML = groups.length
     ? groups.map((group) => `
@@ -421,7 +489,7 @@ function renderSourceLists() {
         <span class="board-builder-machine__name">${escapeHtml(machine.name)}</span>
         <span class="board-builder-machine__meta">${escapeHtml(machine.machine_type || "Unassigned")} · ${escapeHtml(machine.department_name || "Unassigned")}</span>
       </button>`).join("")
-    : '<div class="small text-secondary">Every available machine is already on the canvas.</div>';
+    : `<div class="small text-secondary">${state.machineSearchTerm ? "No machines match this search." : "Every available machine is already on the canvas."}</div>`;
 }
 
 function renderStatusDock(machines) {
@@ -575,9 +643,7 @@ function setActiveBoard(boardId) {
   if (String(boardId) === DRAFT_BOARD_ID) {
     ensureDraftBoard();
     state.activeBoardId = DRAFT_BOARD_ID;
-    renderBoardSelector();
-    renderSourceLists();
-    renderCurrentView();
+    queueRender();
     return;
   }
   state.activeBoardId = Number(boardId);
@@ -591,9 +657,7 @@ function updateDraftBoard(patch) {
   const draftBoard = ensureDraftBoard();
   Object.assign(draftBoard, patch);
   state.activeBoardId = DRAFT_BOARD_ID;
-  renderBoardSelector();
-  renderSourceLists();
-  renderCurrentView();
+  queueRender();
 }
 
 async function createOrSaveBoard() {
@@ -602,9 +666,7 @@ async function createOrSaveBoard() {
     if (!isDraftBoard(activeBoard)) {
       ensureDraftBoard();
       state.activeBoardId = DRAFT_BOARD_ID;
-      renderBoardSelector();
-      renderSourceLists();
-      renderCurrentView();
+      queueRender();
       return;
     }
     const draftBoard = ensureDraftBoard();
@@ -624,20 +686,16 @@ async function createOrSaveBoard() {
     upsertBoard(board);
     state.draftBoard = createDraftBoard();
     state.activeBoardId = board.id;
-    renderBoardSelector();
-    renderSourceLists();
-    renderCurrentView();
+    queueRender();
     showToast(`Saved board "${board.name}".`, "success", "Saved");
-  });
+  }, "Saving board...");
 }
 
 async function activateBoard(boardId) {
   const localBoard = state.boards.find((item) => Number(item.id) === Number(boardId));
   if (localBoard) {
     state.activeBoardId = localBoard.id;
-    renderBoardSelector();
-    renderSourceLists();
-    renderCurrentView();
+    queueRender();
   }
   await withMutation(async () => {
     const board = await fetchJson(`${boardsUrl}/${boardId}/activate`, {
@@ -648,11 +706,9 @@ async function activateBoard(boardId) {
     upsertBoard(board);
     state.activeBoardId = board.id;
     autoCollapseSourcesForBoard(board);
-    renderBoardSelector();
-    renderSourceLists();
-    renderCurrentView();
+    queueRender();
     showToast(`Loaded board "${board.name}".`, "success", "Loaded", 2000);
-  });
+  }, "Loading board...");
 }
 
 async function patchActiveBoard(payload) {
@@ -685,11 +741,9 @@ async function patchActiveBoard(payload) {
     });
     upsertBoard(board);
     state.activeBoardId = board.id;
-    renderBoardSelector();
-    renderSourceLists();
-    renderCurrentView();
+    queueRender();
     showToast("Board updated.", "success", "Saved", 1800);
-  });
+  }, "Updating board settings...");
 }
 
 async function deleteActiveBoard() {
@@ -709,11 +763,9 @@ async function deleteActiveBoard() {
       ensureDraftBoard();
       state.activeBoardId = DRAFT_BOARD_ID;
     }
-    renderBoardSelector();
-    renderSourceLists();
-    renderCurrentView();
+    queueRender();
     showToast("Board deleted.", "success", "Deleted", 1800);
-  });
+  }, "Deleting board...");
 }
 
 function addMachineToDraft(machineId) {
@@ -722,8 +774,7 @@ function addMachineToDraft(machineId) {
   board.items.push({ id: `draft-${nextDraftItemId++}`, machine_id: Number(machineId), position: board.items.length });
   normalizeItemPositions(board);
   autoCollapseSourcesForBoard(board);
-  renderSourceLists();
-  renderCurrentView();
+  queueRender();
   showToast("Machine added to draft board.", "success", "Builder", 1400);
 }
 
@@ -749,8 +800,7 @@ function bulkAddToDraft(sourceType, sourceValue) {
   }
   normalizeItemPositions(board);
   autoCollapseSourcesForBoard(board);
-  renderSourceLists();
-  renderCurrentView();
+  queueRender();
   const addedCount = board.items.length - startLength;
   if (addedCount > 0) {
     showToast(`Added ${addedCount} machines to draft board.`, "success", "Builder", 1600);
@@ -773,10 +823,9 @@ async function addMachineToBoard(machineId) {
     });
     upsertBoard(board);
     autoCollapseSourcesForBoard(board);
-    renderSourceLists();
-    renderCurrentView();
+    queueRender();
     showToast("Machine added to board.", "success", "Builder", 1400);
-  });
+  }, "Adding machine...");
 }
 
 async function bulkAddToBoard(sourceType, sourceValue) {
@@ -795,10 +844,9 @@ async function bulkAddToBoard(sourceType, sourceValue) {
     });
     upsertBoard(board);
     autoCollapseSourcesForBoard(board);
-    renderSourceLists();
-    renderCurrentView();
+    queueRender();
     showToast("Machine group added to board.", "success", "Builder", 1600);
-  });
+  }, "Adding machine group...");
 }
 
 async function removeBoardItem(itemId) {
@@ -807,8 +855,7 @@ async function removeBoardItem(itemId) {
   if (isDraftBoard(activeBoard)) {
     activeBoard.items = activeBoard.items.filter((item) => String(item.id) !== String(itemId));
     normalizeItemPositions(activeBoard);
-    renderSourceLists();
-    renderCurrentView();
+    queueRender();
     showToast("Machine removed from draft board.", "info", "Builder", 1400);
     return;
   }
@@ -819,10 +866,9 @@ async function removeBoardItem(itemId) {
       credentials: "same-origin",
     });
     upsertBoard(board);
-    renderSourceLists();
-    renderCurrentView();
+    queueRender();
     showToast("Machine removed from board.", "info", "Builder", 1400);
-  });
+  }, "Removing machine...");
 }
 
 async function reorderBoardItems(itemIds) {
@@ -832,7 +878,7 @@ async function reorderBoardItems(itemIds) {
     const itemsById = Object.fromEntries(activeBoard.items.map((item) => [String(item.id), item]));
     activeBoard.items = itemIds.map((itemId) => itemsById[String(itemId)]).filter(Boolean);
     normalizeItemPositions(activeBoard);
-    renderCurrentView();
+    queueRender();
     return;
   }
   await withMutation(async () => {
@@ -843,8 +889,8 @@ async function reorderBoardItems(itemIds) {
       body: JSON.stringify({ item_ids: itemIds }),
     });
     upsertBoard(board);
-    renderCurrentView();
-  });
+    queueRender();
+  }, "Reordering...");
 }
 
 function getDraggedPayload(target) {
@@ -894,11 +940,19 @@ function wireDragAndDrop() {
     event.dataTransfer.setData("application/json", JSON.stringify(payload));
   });
   document.addEventListener("dragover", (event) => {
-    if (event.target.closest("[data-drop-zone='board-items'], [data-board-item-id]")) {
+    const dropNode = event.target.closest("[data-drop-zone='board-items'], [data-board-item-id]");
+    if (dropNode) {
       event.preventDefault();
+      boardBuilderCanvas?.classList.add("is-drop-active");
+    }
+  });
+  document.addEventListener("dragleave", (event) => {
+    if (!event.relatedTarget || !boardBuilderCanvas?.contains(event.relatedTarget)) {
+      boardBuilderCanvas?.classList.remove("is-drop-active");
     }
   });
   document.addEventListener("drop", async (event) => {
+    boardBuilderCanvas?.classList.remove("is-drop-active");
     const zone = event.target.closest("[data-drop-zone='board-items'], [data-board-item-id]");
     if (!zone) return;
     event.preventDefault();
@@ -972,11 +1026,13 @@ function wireEvents() {
   previewBoardBtn?.addEventListener("click", () => {
     state.viewMode = "preview";
     renderCurrentView();
+    updateFlowSteps();
     showToast("Preview mode enabled.", "info", "Preview", 1500);
   });
   previewEditBtn?.addEventListener("click", () => {
     state.viewMode = "edit";
     renderCurrentView();
+    updateFlowSteps();
     showToast("Edit mode enabled.", "info", "Preview", 1500);
   });
   previewSaveBtn?.addEventListener("click", () => runSafely(() => createOrSaveBoard(), "Unable to save board"));
@@ -991,6 +1047,10 @@ function wireEvents() {
       return;
     }
     runSafely(() => activateBoard(boardSelector.value), "Unable to load board");
+  });
+  machineSearchInput?.addEventListener("input", () => {
+    state.machineSearchTerm = machineSearchInput.value || "";
+    queueRender();
   });
   boardNameInput?.addEventListener("input", () => {
     const activeBoard = getActiveBoard();
@@ -1040,16 +1100,17 @@ function wireEvents() {
 async function boot() {
   wireDragAndDrop();
   wireEvents();
+  setBusyOverlay(true, "Preparing board builder...");
   await Promise.all([loadBoardState(), loadBoards()]);
+  setBusyOverlay(false);
   setSourcesCollapsed(false, { silent: true });
   setFocusMode(false, { silent: true });
-  renderBoardSelector();
-  renderSourceLists();
-  renderCurrentView();
+  queueRender();
   showToast("Board builder ready.", "success", "Ready", 1400);
 }
 
 boot().catch((error) => {
+  setBusyOverlay(false);
   boardBuilderCanvas.innerHTML = `<div class="board-builder-empty text-danger">${escapeHtml(error.message || "Unable to load board builder")}</div>`;
   reportError(error, "Unable to load board builder");
 });

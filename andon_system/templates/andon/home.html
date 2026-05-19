@@ -92,5 +92,36 @@
     </div>
   </div>
   {% endif %}
+  <div class="andon-home__busy-overlay" id="homeBusyOverlay" hidden aria-live="polite" aria-busy="true">
+    <div class="andon-home__busy-card">
+      <div class="andon-home__busy-spinner" aria-hidden="true"></div>
+      <p class="andon-home__busy-text" id="homeBusyText">Working...</p>
+    </div>
+  </div>
+  <script>
+    (function () {
+      const overlay = document.getElementById("homeBusyOverlay");
+      const textNode = document.getElementById("homeBusyText");
+      if (!overlay || !textNode) return;
+
+      function showBusy(message) {
+        textNode.textContent = message;
+        overlay.hidden = false;
+      }
+
+      const loginForm = document.querySelector(".andon-home__form");
+      if (loginForm) {
+        loginForm.addEventListener("submit", function () {
+          showBusy("Checking credentials and populating your workspaces...");
+        });
+      }
+
+      document.querySelectorAll(".andon-home__workspace-list form").forEach(function (form) {
+        form.addEventListener("submit", function () {
+          showBusy("Entering workspace...");
+        });
+      });
+    })();
+  </script>
 </body>
 </html>

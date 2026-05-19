@@ -9,6 +9,18 @@
   <div class="board-builder-shell">
     <section class="card andon-panel board-builder-toolbar">
       <div class="card-body">
+        <div class="board-builder-toolbar__meta">
+          <div class="board-builder-toolbar__title-wrap">
+            <div class="board-builder-toolbar__title">Build Flow</div>
+            <div class="board-builder-toolbar__copy">Create or load a board, drag machines into canvas, preview, then save.</div>
+          </div>
+          <div class="board-builder-steps" id="boardBuilderSteps">
+            <span class="board-builder-step" data-step="1">1. Board</span>
+            <span class="board-builder-step" data-step="2">2. Add Machines</span>
+            <span class="board-builder-step" data-step="3">3. Preview</span>
+            <span class="board-builder-step" data-step="4">4. Save</span>
+          </div>
+        </div>
         <div class="board-builder-toolbar__row">
           <div class="board-builder-toolbar__field board-builder-toolbar__field--select">
             <label class="form-label" for="boardSelector">Saved Boards</label>
@@ -49,7 +61,10 @@
         </div>
         <div class="card andon-panel board-builder-panel">
           <div class="card-body">
-            <div class="board-builder-panel__heading">Machine Groups</div>
+            <div class="board-builder-panel__heading">
+              <span>Machine Groups</span>
+              <span class="board-builder-panel__count" id="groupSourceCount">0</span>
+            </div>
             <div id="groupDropSource" class="board-builder-chip-list"></div>
           </div>
         </div>
@@ -65,7 +80,13 @@
         </div>
         <div class="card andon-panel board-builder-panel">
           <div class="card-body">
-            <div class="board-builder-panel__heading">Machines</div>
+            <div class="board-builder-panel__heading">
+              <span>Machines</span>
+              <span class="board-builder-panel__count" id="machineSourceCount">0</span>
+            </div>
+            <div class="board-builder-search-wrap">
+              <input class="form-control board-builder-search-input" id="machineSearchInput" placeholder="Search machine name, group, or department">
+            </div>
             <div id="machineDropSource" class="board-builder-machine-list"></div>
           </div>
         </div>
@@ -74,7 +95,11 @@
       <section class="board-builder-canvas-shell">
         <div class="card andon-panel board-builder-panel board-builder-panel--canvas">
           <div class="card-body">
-            <div class="board-builder-panel__heading">Canvas</div>
+            <div class="board-builder-panel__heading">
+              <span>Canvas</span>
+              <span class="board-builder-panel__count" id="canvasMachineCount">0</span>
+            </div>
+            <div class="board-builder-canvas__hint">Drop machines or machine groups here. Drag cards to reorder.</div>
             <div id="boardBuilderCanvas" class="board-builder-canvas" data-drop-zone="board-items"></div>
           </div>
         </div>
@@ -95,6 +120,12 @@
   </div>
 </div>
 <div id="managementToastDock" class="management-toast-dock" aria-live="polite" aria-atomic="true"></div>
+<div id="managementBusyOverlay" class="management-busy-overlay" hidden aria-live="polite" aria-busy="true">
+  <div class="management-busy-overlay__card">
+    <div class="management-busy-overlay__spinner" aria-hidden="true"></div>
+    <div class="management-busy-overlay__text" id="managementBusyText">Working...</div>
+  </div>
+</div>
 
 <div class="modal fade management-detail-modal" id="managementDetailModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
