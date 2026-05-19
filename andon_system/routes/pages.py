@@ -4,7 +4,9 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from sqlalchemy.orm import joinedload
 
-from ..company_context import get_current_company, set_current_company_slug
+from flask import session
+
+from ..company_context import get_current_company, set_current_company_id, set_current_company_slug
 from ..extensions import db
 from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
@@ -23,6 +25,7 @@ from ..security import (
     get_current_membership,
     get_default_landing_endpoint,
     get_scope_filters,
+    get_user_memberships,
     is_authenticated,
     is_safe_redirect_target,
     login_user,
@@ -108,16 +111,57 @@ def login_page():
         flash("Invalid username/email or password.", "warning")
         return redirect(url_for("pages.home_page"))
     login_user(user)
-    membership = ensure_session_company(user)
-    if membership is None:
+    memberships = get_user_memberships(user=user, active_only=True)
+    if not memberships:
         logout_user()
         flash("This account does not have any active company access.", "warning")
         return redirect(url_for("pages.home_page"))
     user.last_login_at = datetime.now(timezone.utc)
     db.session.commit()
+    membership = memberships[0]
+    if len(memberships) == 1:
+        set_current_company_id(membership.company_id)
+    else:
+        if next_url and is_safe_redirect_target(next_url):
+            session["andon_workspace_next"] = next_url
+        return redirect(url_for("pages.workspace_select_page"))
     if next_url and is_safe_redirect_target(next_url):
         return redirect(next_url)
     return redirect(url_for(get_default_landing_endpoint(user, membership)))
+
+
+@pages_bp.get("/andon/workspace/select")
+def workspace_select_page():
+    if not is_authenticated():
+        flash("Please sign in to continue.", "warning")
+        return redirect(url_for("pages.home_page"))
+    memberships = get_user_memberships(active_only=True)
+    if not memberships:
+        logout_user()
+        flash("This account does not have any active company access.", "warning")
+        return redirect(url_for("pages.home_page"))
+    if len(memberships) == 1:
+        set_current_company_id(memberships[0].company_id)
+        return _landing_redirect()
+    companies = [membership.company for membership in memberships if membership.company]
+    return render_template("andon/workspace_select.html", companies=companies)
+
+
+@pages_bp.post("/andon/workspace/select")
+def workspace_select_submit():
+    if not is_authenticated():
+        flash("Please sign in to continue.", "warning")
+        return redirect(url_for("pages.home_page"))
+    company_id = request.form.get("company_id")
+    company = set_current_company_id(company_id)
+    if company is None:
+        flash("You do not have access to that company.", "warning")
+        return redirect(url_for("pages.workspace_select_page"))
+    membership = ensure_session_company()
+    next_url = session.pop("andon_workspace_next", None)
+    if next_url and is_safe_redirect_target(next_url):
+        return redirect(next_url)
+    return redirect(url_for(get_default_landing_endpoint(get_authenticated_user(), membership)))
 
 
 @pages_bp.post("/andon/logout")
@@ -131,9 +175,12 @@ def logout_page():
 def select_company():
     if not is_authenticated():
         return redirect(url_for("pages.home_page"))
+    company_id = request.form.get("company_id")
     slug = request.form.get("company_slug")
     next_url = request.form.get("next") or request.referrer
-    company = set_current_company_slug(slug)
+    company = set_current_company_id(company_id) if company_id else None
+    if company is None and slug:
+        company = set_current_company_slug(slug)
     if company is None:
         flash("You do not have access to that company.", "warning")
         return _landing_redirect()

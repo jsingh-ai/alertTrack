@@ -11,6 +11,8 @@ from .extensions import db
 from .models.company import Company
 from .security import can_access_company, get_accessible_companies, is_authenticated
 
+CURRENT_COMPANY_ID_SESSION_KEY = "andon_company_id"
+CURRENT_COMPANY_SLUG_SESSION_KEY = "andon_company_slug"
 DEFAULT_COMPANY_SLUG = "starpak"
 DEFAULT_COMPANIES = [
     SimpleNamespace(id=1, name="Five Star", slug="five-star", is_active=True),
@@ -42,6 +44,11 @@ def get_companies():
         if cached is not None:
             _perf_log("get_companies(cache)", started_at, count=len(cached))
             return cached
+        if not is_authenticated():
+            companies = DEFAULT_COMPANIES
+            g.current_companies = companies
+            _perf_log("get_companies(default_unauth)", started_at, count=len(companies))
+            return companies
         if is_authenticated():
             companies = get_accessible_companies()
             g.current_companies = companies
@@ -70,12 +77,41 @@ def get_current_company():
         if company is not None:
             _perf_log("get_current_company(cache)", started_at, slug=getattr(company, "slug", None))
             return company
+        if not is_authenticated():
+            company_id = session.get(CURRENT_COMPANY_ID_SESSION_KEY)
+            slug = session.get(CURRENT_COMPANY_SLUG_SESSION_KEY) or DEFAULT_COMPANY_SLUG
+            company = None
+            if company_id is not None:
+                try:
+                    normalized_id = int(company_id)
+                except (TypeError, ValueError):
+                    normalized_id = None
+                if normalized_id is not None:
+                    company = next((item for item in DEFAULT_COMPANIES if item.id == normalized_id), None)
+            if company is None:
+                company = next((item for item in DEFAULT_COMPANIES if item.slug == slug), DEFAULT_COMPANIES[2])
+            g.current_company = company
+            session[CURRENT_COMPANY_ID_SESSION_KEY] = company.id
+            session[CURRENT_COMPANY_SLUG_SESSION_KEY] = company.slug
+            _perf_log("get_current_company(default_unauth)", started_at, slug=getattr(company, "slug", None))
+            return company
     if not _companies_table_exists():
         if has_request_context():
-            slug = session.get("andon_company_slug") or DEFAULT_COMPANY_SLUG
+            company_id = session.get(CURRENT_COMPANY_ID_SESSION_KEY)
+            slug = session.get(CURRENT_COMPANY_SLUG_SESSION_KEY) or DEFAULT_COMPANY_SLUG
         else:
+            company_id = None
             slug = DEFAULT_COMPANY_SLUG
-        company = next((company for company in DEFAULT_COMPANIES if company.slug == slug), DEFAULT_COMPANIES[2])
+        company = None
+        if company_id is not None:
+            try:
+                normalized_id = int(company_id)
+            except (TypeError, ValueError):
+                normalized_id = None
+            if normalized_id is not None:
+                company = next((item for item in DEFAULT_COMPANIES if item.id == normalized_id), None)
+        if company is None:
+            company = next((item for item in DEFAULT_COMPANIES if item.slug == slug), DEFAULT_COMPANIES[2])
         if has_request_context():
             g.current_company = company
         _perf_log("get_current_company(default_no_table)", started_at, slug=getattr(company, "slug", None))
@@ -86,21 +122,44 @@ def get_current_company():
     if has_request_context() and is_authenticated():
         memberships = get_accessible_companies()
         if memberships:
-            session_slug = session.get("andon_company_slug")
-            company = next((item for item in memberships if item.slug == session_slug), None)
+            session_company_id = session.get(CURRENT_COMPANY_ID_SESSION_KEY)
+            session_slug = session.get(CURRENT_COMPANY_SLUG_SESSION_KEY)
+            company = None
+            if session_company_id is not None:
+                try:
+                    normalized_id = int(session_company_id)
+                except (TypeError, ValueError):
+                    normalized_id = None
+                if normalized_id is not None:
+                    company = next((item for item in memberships if item.id == normalized_id), None)
+            if company is None:
+                company = next((item for item in memberships if item.slug == session_slug), None)
             if company is None:
                 company = next((item for item in memberships if item.slug == DEFAULT_COMPANY_SLUG), memberships[0])
             g.current_company = company
-            session["andon_company_slug"] = company.slug
+            session[CURRENT_COMPANY_ID_SESSION_KEY] = company.id
+            session[CURRENT_COMPANY_SLUG_SESSION_KEY] = company.slug
             _perf_log("get_current_company(memberships)", started_at, slug=getattr(company, "slug", None), count=len(memberships))
             return company
 
     company = None
     requested_slug = None
+    requested_company_id = None
     if has_request_context():
-        slug = session.get("andon_company_slug")
+        slug = session.get(CURRENT_COMPANY_SLUG_SESSION_KEY)
+        requested_company_id = session.get(CURRENT_COMPANY_ID_SESSION_KEY)
         requested_slug = slug
-        if slug:
+        if requested_company_id is not None:
+            try:
+                normalized_id = int(requested_company_id)
+            except (TypeError, ValueError):
+                normalized_id = None
+            if normalized_id is not None:
+                try:
+                    company = Company.query.filter_by(id=normalized_id, is_active=True).one_or_none()
+                except OperationalError:
+                    company = None
+        if company is None and slug:
             try:
                 company = Company.query.filter_by(slug=slug, is_active=True).one_or_none()
             except OperationalError:
@@ -126,7 +185,8 @@ def get_current_company():
     if has_request_context():
         g.current_company = company
         if company is not None:
-            session["andon_company_slug"] = company.slug
+            session[CURRENT_COMPANY_ID_SESSION_KEY] = company.id
+            session[CURRENT_COMPANY_SLUG_SESSION_KEY] = company.slug
     _perf_log("get_current_company(db_or_default)", started_at, slug=getattr(company, "slug", None))
     return company
 
@@ -144,7 +204,8 @@ def set_current_company_slug(slug: str | None):
         company = next((item for item in memberships if item.slug == slug), None)
         if company is None:
             return None
-        session["andon_company_slug"] = company.slug
+        session[CURRENT_COMPANY_ID_SESSION_KEY] = company.id
+        session[CURRENT_COMPANY_SLUG_SESSION_KEY] = company.slug
         g.current_company = company
         return company
     fallback = next((company for company in DEFAULT_COMPANIES if company.slug == slug), None)
@@ -159,9 +220,36 @@ def set_current_company_slug(slug: str | None):
     if has_request_context() and is_authenticated() and not can_access_company(company):
         return None
     if has_request_context():
-        session["andon_company_slug"] = company.slug
+        session[CURRENT_COMPANY_ID_SESSION_KEY] = company.id
+        session[CURRENT_COMPANY_SLUG_SESSION_KEY] = company.slug
         g.current_company = company
     return company
+
+
+def set_current_company_id(company_id: int | str | None):
+    if company_id in {None, ""}:
+        return None
+    try:
+        normalized_id = int(company_id)
+    except (TypeError, ValueError):
+        return None
+    if has_request_context() and is_authenticated():
+        memberships = get_accessible_companies()
+        company = next((item for item in memberships if item.id == normalized_id), None)
+        if company is None:
+            return None
+        session[CURRENT_COMPANY_ID_SESSION_KEY] = company.id
+        session[CURRENT_COMPANY_SLUG_SESSION_KEY] = company.slug
+        g.current_company = company
+        return company
+    fallback = next((item for item in DEFAULT_COMPANIES if item.id == normalized_id), None)
+    if fallback is None:
+        return None
+    if has_request_context():
+        session[CURRENT_COMPANY_ID_SESSION_KEY] = fallback.id
+        session[CURRENT_COMPANY_SLUG_SESSION_KEY] = fallback.slug
+        g.current_company = fallback
+    return fallback
 
 
 def ensure_default_companies():

@@ -1,0 +1,26 @@
+{% extends "andon/base.html" %}
+{% block body_class %}board-screen-shell{% endblock %}
+{% block content %}
+<div class="container-fluid board-page-shell">
+  {% set page_title = "Choose Workspace" %}
+  {% set page_subtitle = "Select the company workspace you want to enter." %}
+  {% include "andon/_page_header.html" %}
+  <div class="card andon-panel">
+    <div class="card-body">
+      <div class="row g-3">
+        {% for company in companies %}
+        <div class="col-12 col-md-6 col-lg-4">
+          <form method="post" action="{{ url_for('pages.workspace_select_submit') }}" class="h-100">
+            <input type="hidden" name="company_id" value="{{ company.id }}">
+            <button class="btn btn-outline-light w-100 h-100 text-start p-3" type="submit">
+              <div class="fw-semibold">{{ company.name }}</div>
+              <div class="small text-secondary mt-1">Enter this workspace</div>
+            </button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -14,6 +14,8 @@ from .models.company import Company
 from .models.user import User, UserCompanyAccess, UserViewPreference
 
 USER_SESSION_KEY = "andon_user_id"
+COMPANY_SESSION_KEY = "andon_company_id"
+WORKSPACE_NEXT_SESSION_KEY = "andon_workspace_next"
 ADMIN_SESSION_KEY = "andon_admin_authenticated"
 CSRF_SESSION_KEY = "andon_csrf_token"
 DEV_SECRET_KEY = "dev-andon-secret-key"
@@ -100,6 +102,8 @@ def login_user(user: User) -> None:
 def logout_user() -> None:
     session.pop(USER_SESSION_KEY, None)
     session.pop(ADMIN_SESSION_KEY, None)
+    session.pop(COMPANY_SESSION_KEY, None)
+    session.pop(WORKSPACE_NEXT_SESSION_KEY, None)
     session.pop("andon_company_slug", None)
     if has_request_context():
         g.authenticated_user = None
