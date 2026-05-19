@@ -71,6 +71,7 @@ let nextDraftItemId = 1;
 let isMutating = false;
 let toastId = 0;
 let renderQueued = false;
+let modulePatchTimer = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -132,13 +133,13 @@ function isDraftBoard(board) {
 
 function setMutatingState(next) {
   isMutating = Boolean(next);
-  createBoardBtn.disabled = isMutating || !getActiveBoard();
-  saveBoardNameBtn.disabled = isMutating || !getActiveBoard() || isDraftBoard(getActiveBoard());
-  deleteBoardBtn.disabled = isMutating || !getActiveBoard() || isDraftBoard(getActiveBoard());
-  focusModeBtn.disabled = isMutating;
-  previewBoardBtn.disabled = isMutating || !getActiveBoard();
-  previewSaveBtn.disabled = isMutating || !isDraftBoard(getActiveBoard());
-  boardSelector.disabled = isMutating;
+  if (createBoardBtn) createBoardBtn.disabled = isMutating || !getActiveBoard();
+  if (saveBoardNameBtn) saveBoardNameBtn.disabled = isMutating || !getActiveBoard() || isDraftBoard(getActiveBoard());
+  if (deleteBoardBtn) deleteBoardBtn.disabled = isMutating || !getActiveBoard() || isDraftBoard(getActiveBoard());
+  if (focusModeBtn) focusModeBtn.disabled = isMutating;
+  if (previewBoardBtn) previewBoardBtn.disabled = isMutating || !getActiveBoard();
+  if (previewSaveBtn) previewSaveBtn.disabled = isMutating || !isDraftBoard(getActiveBoard());
+  if (boardSelector) boardSelector.disabled = isMutating;
   if (machineSearchInput) {
     machineSearchInput.disabled = isMutating;
   }
@@ -150,19 +151,24 @@ function setBusyOverlay(visible, message = "Working...") {
   managementBusyOverlay.hidden = !visible;
 }
 
-async function withMutation(task, busyMessage = "Saving board changes...") {
+async function withMutation(task, busyMessage = "Saving board changes...", options = {}) {
   if (isMutating) return;
+  const background = Boolean(options.background);
   setMutatingState(true);
-  setBusyOverlay(true, busyMessage);
+  if (!background) {
+    setBusyOverlay(true, busyMessage);
+  }
   try {
     return await task();
   } finally {
-    setBusyOverlay(false);
+    if (!background) {
+      setBusyOverlay(false);
+    }
     setMutatingState(false);
   }
 }
 
-function showToast(message, level = "info", title = "Board Builder", timeoutMs = 2800) {
+function showToast(message, level = "info", title = "Boards", timeoutMs = 2800) {
   if (!managementToastDock) return;
   const id = ++toastId;
   const toast = document.createElement("div");
@@ -219,7 +225,7 @@ function updateFlowSteps() {
   if (!boardBuilderSteps) return;
   const activeBoard = getActiveBoard();
   const machineCount = (activeBoard?.items || []).length;
-  const isPreview = state.viewMode === "preview";
+  const isPreview = state.viewMode === "display";
   const isDraft = isDraftBoard(activeBoard);
   const completed = [
     Boolean(activeBoard),
@@ -411,11 +417,7 @@ function setFocusMode(nextFocusMode, options = {}) {
 }
 
 function autoCollapseSourcesForBoard(board = getActiveBoard()) {
-  if (state.sourcesCollapsed || state.viewMode !== "edit") return;
-  const itemCount = (board?.items || []).length;
-  if (itemCount >= 1) {
-    setSourcesCollapsed(true, { silent: true });
-  }
+  return board;
 }
 
 async function fetchJson(url, options = {}) {
@@ -453,12 +455,14 @@ function renderBoardSelector() {
   modulePerformance.checked = Boolean(activeBoard?.show_performance);
   moduleHistory.checked = Boolean(activeBoard?.show_recent_history);
   moduleRadius.checked = Boolean(activeBoard?.show_radius);
-  createBoardBtn.textContent = isDraftBoard(activeBoard) ? "Save Board" : "New Board";
-  saveBoardNameBtn.disabled = !activeBoard || isDraftBoard(activeBoard);
-  deleteBoardBtn.disabled = !activeBoard || isDraftBoard(activeBoard);
-  previewBoardBtn.disabled = !activeBoard;
-  previewSaveBtn.textContent = isDraftBoard(activeBoard) ? "Save Board" : "Board Saved";
-  previewSaveBtn.disabled = !isDraftBoard(activeBoard);
+  if (createBoardBtn) createBoardBtn.textContent = isDraftBoard(activeBoard) ? "Save Board" : "New Board";
+  if (saveBoardNameBtn) saveBoardNameBtn.disabled = !activeBoard || isDraftBoard(activeBoard);
+  if (deleteBoardBtn) deleteBoardBtn.disabled = !activeBoard || isDraftBoard(activeBoard);
+  if (previewBoardBtn) previewBoardBtn.disabled = !activeBoard;
+  if (previewSaveBtn) {
+    previewSaveBtn.textContent = isDraftBoard(activeBoard) ? "Save Board" : "Board Saved";
+    previewSaveBtn.disabled = !isDraftBoard(activeBoard);
+  }
   const activeCount = (activeBoard?.items || []).length;
   if (canvasMachineCount) {
     canvasMachineCount.textContent = String(activeCount);
@@ -500,7 +504,7 @@ function renderStatusDock(machines) {
   managementStatusDock.innerHTML = `
     <div class="operator-status-dock__panel ${openAlerts === 0 && workingAlerts === 0 ? "operator-status-dock__panel--steady" : "operator-status-dock__panel--busy"}">
       <div class="operator-status-dock__headline">
-        <div class="operator-status-dock__title">Board Builder</div>
+        <div class="operator-status-dock__title">Build Mode</div>
         <div class="operator-status-dock__subcopy">${escapeHtml(getActiveBoard()?.name || "New Board")} · ${total} machines</div>
       </div>
       <div class="operator-status-dock__stats">
@@ -621,16 +625,18 @@ function renderPreview() {
 }
 
 function renderCurrentView() {
-  const isPreview = state.viewMode === "preview";
+  const isPreview = state.viewMode === "display";
   managementPageShell?.classList.toggle("is-focus-mode", state.focusMode && !isPreview);
   boardBuilderEditLayout.classList.toggle("d-none", isPreview);
   boardBuilderPreviewShell.classList.toggle("d-none", !isPreview);
   previewModeBar.classList.toggle("d-none", !isPreview);
   previewBoardBtn.classList.toggle("d-none", isPreview);
-  focusModeBtn.classList.toggle("d-none", isPreview);
+  focusModeBtn?.classList.toggle("d-none", isPreview);
   createBoardBtn.classList.toggle("d-none", isPreview);
-  saveBoardNameBtn.classList.toggle("d-none", isPreview);
+  saveBoardNameBtn?.classList.toggle("d-none", isPreview);
   deleteBoardBtn.classList.toggle("d-none", isPreview);
+  managementStatusDock?.classList.toggle("d-none", isPreview);
+  document.querySelector(".board-builder-toolbar")?.classList.toggle("d-none", isPreview);
   if (isPreview) {
     renderPreview();
     return;
@@ -643,6 +649,7 @@ function setActiveBoard(boardId) {
   if (String(boardId) === DRAFT_BOARD_ID) {
     ensureDraftBoard();
     state.activeBoardId = DRAFT_BOARD_ID;
+    state.viewMode = "edit";
     queueRender();
     return;
   }
@@ -657,6 +664,7 @@ function updateDraftBoard(patch) {
   const draftBoard = ensureDraftBoard();
   Object.assign(draftBoard, patch);
   state.activeBoardId = DRAFT_BOARD_ID;
+  state.viewMode = "edit";
   queueRender();
 }
 
@@ -686,6 +694,7 @@ async function createOrSaveBoard() {
     upsertBoard(board);
     state.draftBoard = createDraftBoard();
     state.activeBoardId = board.id;
+    state.viewMode = "display";
     queueRender();
     showToast(`Saved board "${board.name}".`, "success", "Saved");
   }, "Saving board...");
@@ -705,13 +714,14 @@ async function activateBoard(boardId) {
     });
     upsertBoard(board);
     state.activeBoardId = board.id;
+    state.viewMode = "display";
     autoCollapseSourcesForBoard(board);
     queueRender();
     showToast(`Loaded board "${board.name}".`, "success", "Loaded", 2000);
   }, "Loading board...");
 }
 
-async function patchActiveBoard(payload) {
+async function patchActiveBoard(payload, options = {}) {
   const activeBoard = getActiveBoard();
   if (!activeBoard) return;
   if (isDraftBoard(activeBoard)) {
@@ -742,8 +752,36 @@ async function patchActiveBoard(payload) {
     upsertBoard(board);
     state.activeBoardId = board.id;
     queueRender();
-    showToast("Board updated.", "success", "Saved", 1800);
-  }, "Updating board settings...");
+    if (options.toast !== false) {
+      showToast("Board updated.", "success", "Saved", 1800);
+    }
+  }, "Updating board settings...", { background: Boolean(options.background) });
+}
+
+function scheduleModulePatch() {
+  const activeBoard = getActiveBoard();
+  if (!activeBoard) return;
+  activeBoard.show_performance = modulePerformance.checked;
+  activeBoard.show_recent_history = moduleHistory.checked;
+  activeBoard.show_radius = moduleRadius.checked;
+  queueRender();
+  if (modulePatchTimer) {
+    window.clearTimeout(modulePatchTimer);
+  }
+  modulePatchTimer = window.setTimeout(() => {
+    runSafely(
+      () =>
+        patchActiveBoard(
+          {
+            show_performance: modulePerformance.checked,
+            show_recent_history: moduleHistory.checked,
+            show_radius: moduleRadius.checked,
+          },
+          { background: true, toast: false },
+        ),
+      "Unable to update board modules",
+    );
+  }, 180);
 }
 
 async function deleteActiveBoard() {
@@ -1024,16 +1062,16 @@ function wireEvents() {
     renderCurrentView();
   });
   previewBoardBtn?.addEventListener("click", () => {
-    state.viewMode = "preview";
+    state.viewMode = "display";
     renderCurrentView();
     updateFlowSteps();
-    showToast("Preview mode enabled.", "info", "Preview", 1500);
+    showToast("Board view enabled.", "info", "View", 1500);
   });
   previewEditBtn?.addEventListener("click", () => {
     state.viewMode = "edit";
     renderCurrentView();
     updateFlowSteps();
-    showToast("Edit mode enabled.", "info", "Preview", 1500);
+    showToast("Build mode enabled.", "info", "Builder", 1500);
   });
   previewSaveBtn?.addEventListener("click", () => runSafely(() => createOrSaveBoard(), "Unable to save board"));
   deleteBoardBtn?.addEventListener("click", () => runSafely(() => deleteActiveBoard(), "Unable to delete board"));
@@ -1070,11 +1108,7 @@ function wireEvents() {
     runSafely(() => patchActiveBoard({ name: boardNameInput.value }), "Unable to rename board");
   });
   [modulePerformance, moduleHistory, moduleRadius].forEach((input) => {
-    input?.addEventListener("change", () => runSafely(() => patchActiveBoard({
-      show_performance: modulePerformance.checked,
-      show_recent_history: moduleHistory.checked,
-      show_radius: moduleRadius.checked,
-    }), "Unable to update board modules"));
+    input?.addEventListener("change", scheduleModulePatch);
   });
   boardBuilderCanvas?.addEventListener("click", (event) => {
     const removeButton = event.target.closest("[data-remove-board-item]");
@@ -1105,8 +1139,9 @@ async function boot() {
   setBusyOverlay(false);
   setSourcesCollapsed(false, { silent: true });
   setFocusMode(false, { silent: true });
+  state.viewMode = state.boards.length > 0 ? "display" : "edit";
   queueRender();
-  showToast("Board builder ready.", "success", "Ready", 1400);
+  showToast(state.boards.length > 0 ? "Board view loaded." : "Build mode ready.", "success", "Ready", 1400);
 }
 
 boot().catch((error) => {

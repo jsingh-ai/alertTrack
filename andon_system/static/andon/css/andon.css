@@ -948,6 +948,21 @@ body.board-screen-shell.management-screen-shell .management-page-shell.is-focus-
   margin-bottom: 0.55rem;
 }
 
+.board-builder-subheading {
+  margin: 0.2rem 0 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--andon-muted);
+}
+
+.board-builder-subheading--machines {
+  margin-top: 0.85rem;
+  padding-top: 0.7rem;
+  border-top: 1px dashed var(--andon-border);
+}
+
 .board-builder-search-input {
   min-height: 2.55rem;
   border-radius: 0.75rem;
@@ -964,7 +979,7 @@ body.board-screen-shell.management-screen-shell .management-page-shell.is-focus-
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  max-height: 22rem;
+  max-height: 12rem;
   overflow: auto;
   padding-right: 0.25rem;
 }
@@ -1047,22 +1062,26 @@ body.board-screen-shell.management-screen-shell .management-page-shell.is-focus-
 
 .board-builder-tile__remove {
   position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
+  top: 0.68rem;
+  right: 0.68rem;
   z-index: 2;
-  width: 1.9rem;
-  height: 1.9rem;
+  width: 2rem;
+  height: 2rem;
   border-radius: 999px;
   border: 0;
-  background: rgba(193, 18, 31, 0.18);
-  color: #ffdce0;
-  font-size: 1rem;
+  display: grid;
+  place-items: center;
+  background: rgba(220, 38, 38, 0.95);
+  color: #fff;
+  font-size: 1.15rem;
+  font-weight: 900;
   line-height: 1;
+  box-shadow: 0 8px 16px rgba(127, 29, 29, 0.34);
 }
 
 .board-builder-tile__remove:hover,
 .board-builder-tile__remove:focus-visible {
-  background: rgba(193, 18, 31, 0.28);
+  background: #b91c1c;
 }
 
 .board-live-shell__title {
@@ -5979,6 +5998,24 @@ html[data-sidebar="collapsed"] .app-content {
 .app-logout-btn i {
   font-size: 1rem;
   line-height: 1;
+}
+
+html[data-theme="light"] .app-logout-btn {
+  color: #111827;
+}
+
+html[data-theme="light"] .app-logout-btn:hover,
+html[data-theme="light"] .app-logout-btn:focus-visible {
+  color: #030712;
+}
+
+html[data-theme="dark"] .app-logout-btn {
+  color: #f9fafb;
+}
+
+html[data-theme="dark"] .app-logout-btn:hover,
+html[data-theme="dark"] .app-logout-btn:focus-visible {
+  color: #ffffff;
 }
 
 .app-mobile-bar {

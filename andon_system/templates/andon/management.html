@@ -2,8 +2,8 @@
 {% block body_class %}board-screen-shell management-screen-shell{% endblock %}
 {% block content %}
 <div class="container-fluid board-page-shell management-page-shell" id="managementPageShell">
-  {% set page_title = "Board Builder" %}
-  {% set page_subtitle = "Build named boards from machines and machine groups. Saved boards reopen on your account." %}
+  {% set page_title = "Management Boards" %}
+  {% set page_subtitle = "Build layouts when needed, then run in clean board view mode." %}
   {% include "andon/_page_header.html" %}
 
   <div class="board-builder-shell">
@@ -32,9 +32,7 @@
           </div>
           <div class="board-builder-toolbar__actions">
             <button class="btn btn-primary" type="button" id="createBoardBtn">New Board</button>
-            <button class="btn btn-outline-light" type="button" id="saveBoardNameBtn">Rename</button>
-            <button class="btn btn-outline-light" type="button" id="focusModeBtn">Focus</button>
-            <button class="btn btn-outline-light" type="button" id="previewBoardBtn">Preview</button>
+            <button class="btn btn-outline-light" type="button" id="previewBoardBtn">Board View</button>
             <button class="btn btn-outline-danger" type="button" id="deleteBoardBtn">Delete</button>
           </div>
         </div>
@@ -45,8 +43,8 @@
     <section id="previewModeBar" class="card andon-panel board-builder-preview-bar d-none">
       <div class="card-body">
         <div class="board-builder-preview-bar__actions">
-          <button class="btn btn-outline-light" type="button" id="previewEditBtn">Back to Edit</button>
-          <button class="btn btn-primary" type="button" id="previewSaveBtn">Save Board</button>
+          <button class="btn btn-outline-light" type="button" id="previewEditBtn">Edit Board</button>
+          <button class="btn btn-primary d-none" type="button" id="previewSaveBtn">Save Board</button>
         </div>
       </div>
     </section>
@@ -61,15 +59,6 @@
         </div>
         <div class="card andon-panel board-builder-panel">
           <div class="card-body">
-            <div class="board-builder-panel__heading">
-              <span>Machine Groups</span>
-              <span class="board-builder-panel__count" id="groupSourceCount">0</span>
-            </div>
-            <div id="groupDropSource" class="board-builder-chip-list"></div>
-          </div>
-        </div>
-        <div class="card andon-panel board-builder-panel">
-          <div class="card-body">
             <div class="board-builder-panel__heading">Board Modules</div>
             <div class="board-builder-toolbar__modules board-builder-toolbar__modules--panel">
               <label class="board-module-toggle"><input type="checkbox" id="modulePerformance" checked> <span>Performance</span></label>
@@ -81,9 +70,12 @@
         <div class="card andon-panel board-builder-panel">
           <div class="card-body">
             <div class="board-builder-panel__heading">
-              <span>Machines</span>
-              <span class="board-builder-panel__count" id="machineSourceCount">0</span>
+              <span>Machine Sources</span>
+              <span class="board-builder-panel__count"><span id="groupSourceCount">0</span> groups · <span id="machineSourceCount">0</span> machines</span>
             </div>
+            <div class="board-builder-subheading">Machine Groups</div>
+            <div id="groupDropSource" class="board-builder-chip-list"></div>
+            <div class="board-builder-subheading board-builder-subheading--machines">Machines</div>
             <div class="board-builder-search-wrap">
               <input class="form-control board-builder-search-input" id="machineSearchInput" placeholder="Search machine name, group, or department">
             </div>
@@ -110,8 +102,8 @@
       <div class="card-body">
         <div class="board-live-shell__header">
           <div>
-            <div class="board-live-shell__eyebrow">Preview Layout</div>
-            <div class="board-live-shell__title" id="previewBoardTitle">Board Preview</div>
+            <div class="board-live-shell__eyebrow">Board View</div>
+            <div class="board-live-shell__title" id="previewBoardTitle">Live Board View</div>
           </div>
         </div>
         <div id="previewBoardGrid" class="board-live-grid"></div>
