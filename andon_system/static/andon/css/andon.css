@@ -994,7 +994,7 @@ body.board-screen-shell.management-screen-shell .management-page-shell.is-focus-
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  max-height: 12rem;
+  max-height: 16.5rem;
   overflow: auto;
   padding-right: 0.25rem;
 }
@@ -1199,6 +1199,47 @@ body.board-screen-shell.management-screen-shell .management-page-shell.is-focus-
   color: #ecf8ff;
   font-size: 0.9rem;
   font-weight: 700;
+}
+
+.management-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.management-header-action {
+  border-radius: 0.8rem;
+  min-height: 2.3rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
+}
+
+.management-header-action--create {
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.22);
+}
+
+.management-header-action--create:hover,
+.management-header-action--create:focus-visible {
+  background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+  color: #fff;
+}
+
+.management-header-action--edit {
+  background: linear-gradient(180deg, #0f766e 0%, #0f5f59 100%);
+  color: #ecfeff;
+  border-color: rgba(15, 118, 110, 0.48);
+  box-shadow: 0 10px 20px rgba(15, 118, 110, 0.2);
+}
+
+.management-header-action--edit:hover,
+.management-header-action--edit:focus-visible {
+  background: linear-gradient(180deg, #0d9488 0%, #0f766e 100%);
+  color: #fff;
 }
 
 @keyframes management-busy-spin {
@@ -6136,12 +6177,16 @@ html[data-sidebar="collapsed"] .app-nav__link {
 
 html[data-sidebar="collapsed"] .app-theme-toggle {
   width: 100%;
+  min-height: 2.75rem;
+  padding: 0.55rem 0;
   justify-content: center;
 }
 
 html[data-sidebar="collapsed"] .app-logout-btn {
   width: 100%;
-  padding-inline: 0;
+  min-height: 2.75rem;
+  padding: 0.55rem 0;
+  justify-content: center;
 }
 
 html[data-sidebar="collapsed"] .app-sidebar__toggle {

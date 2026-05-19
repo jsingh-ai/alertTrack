@@ -7,6 +7,8 @@ const DRAFT_BOARD_ID = "draft";
 const boardSelector = document.getElementById("boardSelector");
 const boardNameInput = document.getElementById("boardNameInput");
 const createBoardBtn = document.getElementById("createBoardBtn");
+const loadBoardBtn = document.getElementById("loadBoardBtn");
+const updateBoardBtn = document.getElementById("updateBoardBtn");
 const saveBoardNameBtn = document.getElementById("saveBoardNameBtn");
 const focusModeBtn = document.getElementById("focusModeBtn");
 const previewBoardBtn = document.getElementById("previewBoardBtn");
@@ -30,8 +32,11 @@ const managementToastDock = document.getElementById("managementToastDock");
 const managementStatusDock = document.getElementById("managementStatusDock");
 const managementPageShell = document.getElementById("managementPageShell");
 const headerEditBoardBtn = document.getElementById("headerEditBoardBtn");
+const headerCreateBoardBtn = document.getElementById("headerCreateBoardBtn");
 const boardModeBanner = document.getElementById("boardModeBanner");
 const boardNameLabel = document.getElementById("boardNameLabel");
+const savedBoardsField = document.getElementById("savedBoardsField");
+const boardNameField = document.getElementById("boardNameField");
 const boardBuilderSteps = document.getElementById("boardBuilderSteps");
 const groupSourceCount = document.getElementById("groupSourceCount");
 const machineSourceCount = document.getElementById("machineSourceCount");
@@ -66,6 +71,8 @@ const state = {
   shiftStatsLoadedRangeKey: null,
   shiftStatsLoadingPromise: null,
   machineSearchTerm: "",
+  showBoardPicker: false,
+  editBaseline: null,
 };
 
 let activeDetailMachine = null;
@@ -134,9 +141,17 @@ function isDraftBoard(board) {
   return Boolean(board?.isDraft);
 }
 
+function getEditorMode(board = getActiveBoard()) {
+  if (state.viewMode === "display") return "display";
+  if (isDraftBoard(board)) return "create";
+  return "edit_existing";
+}
+
 function setMutatingState(next) {
   isMutating = Boolean(next);
   if (createBoardBtn) createBoardBtn.disabled = isMutating || !getActiveBoard();
+  if (loadBoardBtn) loadBoardBtn.disabled = isMutating;
+  if (updateBoardBtn) updateBoardBtn.disabled = isMutating || isDraftBoard(getActiveBoard());
   if (saveBoardNameBtn) saveBoardNameBtn.disabled = isMutating || !getActiveBoard() || isDraftBoard(getActiveBoard());
   if (deleteBoardBtn) deleteBoardBtn.disabled = isMutating || !getActiveBoard() || isDraftBoard(getActiveBoard());
   if (focusModeBtn) focusModeBtn.disabled = isMutating;
@@ -473,18 +488,19 @@ function renderBoardSelector() {
   modulePerformance.checked = Boolean(activeBoard?.show_performance);
   moduleHistory.checked = Boolean(activeBoard?.show_recent_history);
   moduleRadius.checked = Boolean(activeBoard?.show_radius);
-  if (createBoardBtn) createBoardBtn.textContent = isDraftBoard(activeBoard) ? "Create Board" : "Create New Board";
+  const editorMode = getEditorMode(activeBoard);
+  if (createBoardBtn) createBoardBtn.textContent = editorMode === "create" ? "Create Board" : "Create New Board";
   if (createBoardBtn) {
-    createBoardBtn.classList.toggle("btn-primary", isDraftBoard(activeBoard));
-    createBoardBtn.classList.toggle("btn-warning", !isDraftBoard(activeBoard));
+    createBoardBtn.classList.toggle("btn-primary", editorMode === "create");
+    createBoardBtn.classList.toggle("btn-warning", editorMode !== "create");
   }
   if (saveBoardNameBtn) saveBoardNameBtn.disabled = !activeBoard || isDraftBoard(activeBoard);
   if (deleteBoardBtn) deleteBoardBtn.disabled = !activeBoard || isDraftBoard(activeBoard);
   if (previewBoardBtn) {
     previewBoardBtn.disabled = !activeBoard;
-    previewBoardBtn.textContent = isDraftBoard(activeBoard) ? "Preview Draft" : "Back to Board View";
-    previewBoardBtn.classList.toggle("btn-outline-info", !isDraftBoard(activeBoard));
-    previewBoardBtn.classList.toggle("btn-outline-light", isDraftBoard(activeBoard));
+    previewBoardBtn.textContent = editorMode === "create" ? "Preview Draft" : "Back to Board View";
+    previewBoardBtn.classList.toggle("btn-outline-info", editorMode !== "create");
+    previewBoardBtn.classList.toggle("btn-outline-light", editorMode === "create");
   }
   if (previewSaveBtn) {
     previewSaveBtn.textContent = isDraftBoard(activeBoard) ? "Save Board" : "Board Saved";
@@ -497,9 +513,22 @@ function renderBoardSelector() {
   if (boardNameLabel) {
     boardNameLabel.textContent = isDraftBoard(activeBoard) ? "New Board Name" : "Edit Board Name";
   }
+  if (savedBoardsField) {
+    const shouldShow = editorMode === "create" || state.showBoardPicker;
+    savedBoardsField.classList.toggle("d-none", !shouldShow);
+  }
+  if (boardNameField) {
+    boardNameField.classList.toggle("d-none", editorMode !== "create");
+  }
+  if (loadBoardBtn) {
+    loadBoardBtn.classList.toggle("d-none", editorMode === "create");
+  }
+  if (updateBoardBtn) {
+    updateBoardBtn.classList.toggle("d-none", editorMode !== "edit_existing");
+  }
   if (boardModeBanner) {
     if (state.viewMode === "display") {
-      boardModeBanner.textContent = `Mode: Board View${activeBoard?.name ? ` · ${activeBoard.name}` : ""}`;
+      boardModeBanner.textContent = "Mode: Workflow Management View";
     } else if (isDraftBoard(activeBoard)) {
       boardModeBanner.textContent = "Mode: Create New Board";
     } else {
@@ -540,11 +569,16 @@ function renderStatusDock(machines) {
   const openAlerts = machines.filter((machine) => machine.active_alert && machine.active_alert.status === "OPEN").length;
   const workingAlerts = machines.filter((machine) => ["ACKNOWLEDGED", "ARRIVED"].includes(machine.active_alert?.status)).length;
   const healthy = total - openAlerts - workingAlerts - machines.filter((machine) => !machine.is_active).length;
+  const isDisplayMode = state.viewMode === "display";
+  const dockTitle = isDisplayMode ? "Workflow Management View" : "Build Mode";
+  const dockSubcopy = isDisplayMode
+    ? `${total} machines`
+    : `${escapeHtml(getActiveBoard()?.name || "New Board")} · ${total} machines`;
   managementStatusDock.innerHTML = `
     <div class="operator-status-dock__panel ${openAlerts === 0 && workingAlerts === 0 ? "operator-status-dock__panel--steady" : "operator-status-dock__panel--busy"}">
       <div class="operator-status-dock__headline">
-        <div class="operator-status-dock__title">Build Mode</div>
-        <div class="operator-status-dock__subcopy">${escapeHtml(getActiveBoard()?.name || "New Board")} · ${total} machines</div>
+        <div class="operator-status-dock__title">${dockTitle}</div>
+        <div class="operator-status-dock__subcopy">${dockSubcopy}</div>
       </div>
       <div class="operator-status-dock__stats">
         <div class="operator-status-dock__stat"><i class="bi bi-check2-circle"></i><div><div class="operator-status-dock__stat-label">Healthy</div><div class="operator-status-dock__stat-value">${healthy}</div></div></div>
@@ -649,13 +683,13 @@ function renderCanvas() {
 function renderPreview() {
   const activeBoard = getActiveBoard();
   if (!activeBoard) {
-    previewBoardTitle.textContent = "Board Preview";
+    previewBoardTitle.textContent = "Workflow Management View";
     previewBoardGrid.innerHTML = '<div class="board-builder-empty"><div class="h4 mb-2">No board selected.</div><div class="small text-secondary">Go back to edit mode and build a board first.</div></div>';
     renderStatusDock([]);
     return;
   }
   const machines = (activeBoard.items || []).map((item) => getMachineById(item.machine_id)).filter(Boolean);
-  previewBoardTitle.textContent = activeBoard.name || "Board Preview";
+  previewBoardTitle.textContent = "Workflow Management View";
   previewBoardGrid.innerHTML = machines.length
     ? machines.map((machine) => renderPreviewTile(machine, activeBoard)).join("")
     : '<div class="board-builder-empty"><div class="h4 mb-2">This board is empty.</div><div class="small text-secondary">Go back to edit mode and drag machines into the canvas.</div></div>';
@@ -667,17 +701,24 @@ function renderPreview() {
 
 function renderCurrentView() {
   const isPreview = state.viewMode === "display";
+  const editorMode = getEditorMode();
   managementPageShell?.classList.toggle("is-focus-mode", state.focusMode && !isPreview);
   boardBuilderEditLayout.classList.toggle("d-none", isPreview);
   boardBuilderPreviewShell.classList.toggle("d-none", !isPreview);
-  previewModeBar.classList.toggle("d-none", !isPreview);
-  previewBoardBtn.classList.toggle("d-none", isPreview);
+  previewModeBar?.classList.add("d-none");
+  previewBoardBtn.classList.toggle("d-none", isPreview || editorMode === "create");
   focusModeBtn?.classList.toggle("d-none", isPreview);
   createBoardBtn.classList.toggle("d-none", isPreview);
   saveBoardNameBtn?.classList.toggle("d-none", isPreview);
-  deleteBoardBtn.classList.toggle("d-none", isPreview);
+  deleteBoardBtn.classList.toggle("d-none", isPreview || editorMode === "create");
+  updateBoardBtn?.classList.toggle("d-none", isPreview || editorMode !== "edit_existing");
+  loadBoardBtn?.classList.toggle("d-none", isPreview || editorMode === "create");
   managementStatusDock?.classList.toggle("d-none", !isPreview);
-  headerEditBoardBtn?.classList.toggle("d-none", !isPreview);
+  headerEditBoardBtn?.classList.toggle("d-none", false);
+  headerCreateBoardBtn?.classList.toggle("d-none", !isPreview);
+  if (headerEditBoardBtn) {
+    headerEditBoardBtn.textContent = isPreview ? "Edit Board" : "Preview";
+  }
   document.querySelector(".board-builder-toolbar")?.classList.toggle("d-none", isPreview);
   if (isPreview) {
     renderPreview();
@@ -692,10 +733,13 @@ function setActiveBoard(boardId) {
     ensureDraftBoard();
     state.activeBoardId = DRAFT_BOARD_ID;
     state.viewMode = "edit";
+    state.showBoardPicker = true;
+    state.editBaseline = null;
     queueRender();
     return;
   }
   state.activeBoardId = Number(boardId);
+  state.showBoardPicker = false;
 }
 
 function normalizeItemPositions(board) {
@@ -710,12 +754,62 @@ function updateDraftBoard(patch) {
   queueRender();
 }
 
+function beginEditExistingBoard() {
+  const activeBoard = getActiveBoard();
+  if (!activeBoard || isDraftBoard(activeBoard)) return;
+  state.editBaseline = {
+    boardId: Number(activeBoard.id),
+    machineIds: (activeBoard.items || []).map((item) => Number(item.machine_id)),
+    modules: {
+      show_performance: Boolean(activeBoard.show_performance),
+      show_recent_history: Boolean(activeBoard.show_recent_history),
+      show_radius: Boolean(activeBoard.show_radius),
+    },
+  };
+  state.viewMode = "edit";
+  state.showBoardPicker = false;
+  queueRender();
+}
+
+function hasPendingChanges() {
+  const activeBoard = getActiveBoard();
+  const editorMode = getEditorMode(activeBoard);
+  if (editorMode === "create") {
+    const draft = ensureDraftBoard();
+    const hasItems = (draft.items || []).length > 0;
+    const hasCustomName = String(draft.name || "").trim() && String(draft.name || "").trim() !== "New Board";
+    const hasModuleChanges = !(draft.show_performance && draft.show_recent_history && draft.show_radius);
+    return hasItems || hasCustomName || hasModuleChanges;
+  }
+  if (editorMode === "edit_existing" && state.editBaseline && Number(state.editBaseline.boardId) === Number(activeBoard?.id)) {
+    const baselineIds = state.editBaseline.machineIds || [];
+    const currentIds = (activeBoard.items || []).map((item) => Number(item.machine_id));
+    if (baselineIds.length !== currentIds.length) return true;
+    for (let index = 0; index < baselineIds.length; index += 1) {
+      if (Number(baselineIds[index]) !== Number(currentIds[index])) return true;
+    }
+    const modules = state.editBaseline.modules || {};
+    return (
+      Boolean(activeBoard.show_performance) !== Boolean(modules.show_performance)
+      || Boolean(activeBoard.show_recent_history) !== Boolean(modules.show_recent_history)
+      || Boolean(activeBoard.show_radius) !== Boolean(modules.show_radius)
+    );
+  }
+  return false;
+}
+
+function confirmDiscardChanges() {
+  if (!hasPendingChanges()) return true;
+  return window.confirm("You have unsaved changes. Continue without saving?");
+}
+
 async function createOrSaveBoard() {
   await withMutation(async () => {
     const activeBoard = getActiveBoard();
     if (!isDraftBoard(activeBoard)) {
       ensureDraftBoard();
       state.activeBoardId = DRAFT_BOARD_ID;
+      state.showBoardPicker = true;
       queueRender();
       return;
     }
@@ -737,6 +831,8 @@ async function createOrSaveBoard() {
     state.draftBoard = createDraftBoard();
     state.activeBoardId = board.id;
     state.viewMode = "display";
+    state.showBoardPicker = false;
+    state.editBaseline = null;
     queueRender();
     showToast(`Saved board "${board.name}".`, "success", "Saved");
   }, "Saving board...");
@@ -757,10 +853,85 @@ async function activateBoard(boardId) {
     upsertBoard(board);
     state.activeBoardId = board.id;
     state.viewMode = "display";
+    state.showBoardPicker = false;
+    state.editBaseline = null;
     autoCollapseSourcesForBoard(board);
     queueRender();
     showToast(`Loaded board "${board.name}".`, "success", "Loaded", 2000);
   }, "Loading board...");
+}
+
+async function updateExistingBoard() {
+  const activeBoard = getActiveBoard();
+  if (!activeBoard || isDraftBoard(activeBoard)) return;
+  await withMutation(async () => {
+    const baselineIds = new Set((state.editBaseline?.machineIds || []).map(Number));
+    const currentIds = (activeBoard.items || []).map((item) => Number(item.machine_id));
+    const currentIdSet = new Set(currentIds);
+    const baselineBoard = await fetchJson(`${boardsUrl}/${activeBoard.id}/activate`, {
+      method: "POST",
+      headers: window.AndonSecurity.withCsrfHeaders({ Accept: "application/json" }),
+      credentials: "same-origin",
+    });
+    const baselineItems = baselineBoard.items || [];
+    const baselineItemByMachineId = new Map(baselineItems.map((item) => [Number(item.machine_id), Number(item.id)]));
+    for (const machineId of baselineIds) {
+      if (currentIdSet.has(machineId)) continue;
+      const itemId = baselineItemByMachineId.get(machineId);
+      if (!itemId) continue;
+      await fetchJson(`${boardsUrl}/${activeBoard.id}/items/${itemId}`, {
+        method: "DELETE",
+        headers: window.AndonSecurity.withCsrfHeaders({ Accept: "application/json" }),
+        credentials: "same-origin",
+      });
+    }
+    for (const machineId of currentIds) {
+      if (baselineIds.has(machineId)) continue;
+      await fetchJson(`${boardsUrl}/${activeBoard.id}/items`, {
+        method: "POST",
+        headers: window.AndonSecurity.withCsrfHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        credentials: "same-origin",
+        body: JSON.stringify({ machine_id: machineId }),
+      });
+    }
+    const refreshed = await fetchJson(`${boardsUrl}/${activeBoard.id}/activate`, {
+      method: "POST",
+      headers: window.AndonSecurity.withCsrfHeaders({ Accept: "application/json" }),
+      credentials: "same-origin",
+    });
+    const itemByMachineId = new Map((refreshed.items || []).map((item) => [Number(item.machine_id), Number(item.id)]));
+    const orderedItemIds = currentIds.map((machineId) => itemByMachineId.get(machineId)).filter(Boolean);
+    await fetchJson(`${boardsUrl}/${activeBoard.id}/items/reorder`, {
+      method: "PATCH",
+      headers: window.AndonSecurity.withCsrfHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+      credentials: "same-origin",
+      body: JSON.stringify({ item_ids: orderedItemIds }),
+    });
+    const board = await fetchJson(`${boardsUrl}/${activeBoard.id}`, {
+      method: "PATCH",
+      headers: window.AndonSecurity.withCsrfHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+      credentials: "same-origin",
+      body: JSON.stringify({
+        show_performance: modulePerformance.checked,
+        show_recent_history: moduleHistory.checked,
+        show_radius: moduleRadius.checked,
+      }),
+    });
+    upsertBoard(board);
+    state.activeBoardId = board.id;
+    state.editBaseline = {
+      boardId: Number(board.id),
+      machineIds: (board.items || []).map((item) => Number(item.machine_id)),
+      modules: {
+        show_performance: Boolean(board.show_performance),
+        show_recent_history: Boolean(board.show_recent_history),
+        show_radius: Boolean(board.show_radius),
+      },
+    };
+    state.viewMode = "display";
+    queueRender();
+    showToast("Board updated.", "success", "Updated", 1600);
+  }, "Updating board...");
 }
 
 async function patchActiveBoard(payload, options = {}) {
@@ -807,6 +978,10 @@ function scheduleModulePatch() {
   activeBoard.show_recent_history = moduleHistory.checked;
   activeBoard.show_radius = moduleRadius.checked;
   queueRender();
+  const editorMode = getEditorMode(activeBoard);
+  if (editorMode === "edit_existing") {
+    return;
+  }
   if (modulePatchTimer) {
     window.clearTimeout(modulePatchTimer);
   }
@@ -890,6 +1065,13 @@ function bulkAddToDraft(sourceType, sourceValue) {
 async function addMachineToBoard(machineId) {
   const activeBoard = getActiveBoard();
   if (!activeBoard) return;
+  if (!isDraftBoard(activeBoard) && getEditorMode(activeBoard) === "edit_existing") {
+    if (getBoardMachineIds(activeBoard).has(Number(machineId))) return;
+    activeBoard.items.push({ id: `edit-${nextDraftItemId++}`, machine_id: Number(machineId), position: activeBoard.items.length });
+    normalizeItemPositions(activeBoard);
+    queueRender();
+    return;
+  }
   if (isDraftBoard(activeBoard)) {
     addMachineToDraft(machineId);
     return;
@@ -911,6 +1093,16 @@ async function addMachineToBoard(machineId) {
 async function bulkAddToBoard(sourceType, sourceValue) {
   const activeBoard = getActiveBoard();
   if (!activeBoard) return;
+  if (!isDraftBoard(activeBoard) && getEditorMode(activeBoard) === "edit_existing") {
+    const existingIds = getBoardMachineIds(activeBoard);
+    for (const machineId of resolveBulkMachineIds(sourceType, sourceValue)) {
+      if (existingIds.has(Number(machineId))) continue;
+      activeBoard.items.push({ id: `edit-${nextDraftItemId++}`, machine_id: Number(machineId), position: activeBoard.items.length });
+    }
+    normalizeItemPositions(activeBoard);
+    queueRender();
+    return;
+  }
   if (isDraftBoard(activeBoard)) {
     bulkAddToDraft(sourceType, sourceValue);
     return;
@@ -932,6 +1124,12 @@ async function bulkAddToBoard(sourceType, sourceValue) {
 async function removeBoardItem(itemId) {
   const activeBoard = getActiveBoard();
   if (!activeBoard) return;
+  if (!isDraftBoard(activeBoard) && getEditorMode(activeBoard) === "edit_existing") {
+    activeBoard.items = activeBoard.items.filter((item) => String(item.id) !== String(itemId));
+    normalizeItemPositions(activeBoard);
+    queueRender();
+    return;
+  }
   if (isDraftBoard(activeBoard)) {
     activeBoard.items = activeBoard.items.filter((item) => String(item.id) !== String(itemId));
     normalizeItemPositions(activeBoard);
@@ -954,6 +1152,13 @@ async function removeBoardItem(itemId) {
 async function reorderBoardItems(itemIds) {
   const activeBoard = getActiveBoard();
   if (!activeBoard) return;
+  if (!isDraftBoard(activeBoard) && getEditorMode(activeBoard) === "edit_existing") {
+    const itemsById = Object.fromEntries(activeBoard.items.map((item) => [String(item.id), item]));
+    activeBoard.items = itemIds.map((itemId) => itemsById[String(itemId)]).filter(Boolean);
+    normalizeItemPositions(activeBoard);
+    queueRender();
+    return;
+  }
   if (isDraftBoard(activeBoard)) {
     const itemsById = Object.fromEntries(activeBoard.items.map((item) => [String(item.id), item]));
     activeBoard.items = itemIds.map((itemId) => itemsById[String(itemId)]).filter(Boolean);
@@ -1098,39 +1303,48 @@ async function loadManagementDetailSummary() {
 
 function wireEvents() {
   createBoardBtn?.addEventListener("click", () => runSafely(() => createOrSaveBoard(), "Unable to save board"));
-  saveBoardNameBtn?.addEventListener("click", () => runSafely(() => patchActiveBoard({ name: boardNameInput.value }), "Unable to rename board"));
-  focusModeBtn?.addEventListener("click", () => {
-    setFocusMode(!state.focusMode);
-    renderCurrentView();
+  loadBoardBtn?.addEventListener("click", () => {
+    if (!confirmDiscardChanges()) return;
+    state.showBoardPicker = !state.showBoardPicker;
+    queueRender();
   });
+  updateBoardBtn?.addEventListener("click", () => runSafely(() => updateExistingBoard(), "Unable to update board"));
   previewBoardBtn?.addEventListener("click", () => {
+    if (!confirmDiscardChanges()) return;
     state.viewMode = "display";
+    state.showBoardPicker = false;
     renderCurrentView();
     renderBoardSelector();
     updateFlowSteps();
     showToast("Board view enabled.", "info", "View", 1500);
   });
-  previewEditBtn?.addEventListener("click", () => {
-    state.viewMode = "edit";
-    renderCurrentView();
-    renderBoardSelector();
-    updateFlowSteps();
-    showToast("Build mode enabled.", "info", "Builder", 1500);
-  });
   headerEditBoardBtn?.addEventListener("click", () => {
+    if (state.viewMode === "display") {
+      beginEditExistingBoard();
+      showToast("Build mode enabled.", "info", "Builder", 1500);
+      return;
+    }
+    if (!confirmDiscardChanges()) return;
+    state.viewMode = "display";
+    state.showBoardPicker = false;
+    queueRender();
+    showToast("Board view enabled.", "info", "View", 1500);
+  });
+  headerCreateBoardBtn?.addEventListener("click", () => {
+    ensureDraftBoard();
+    state.activeBoardId = DRAFT_BOARD_ID;
     state.viewMode = "edit";
-    renderCurrentView();
-    renderBoardSelector();
-    updateFlowSteps();
-    showToast("Build mode enabled.", "info", "Builder", 1500);
+    state.showBoardPicker = true;
+    state.editBaseline = null;
+    queueRender();
+    showToast("Create mode enabled.", "info", "Builder", 1500);
   });
-  previewSaveBtn?.addEventListener("click", () => runSafely(() => createOrSaveBoard(), "Unable to save board"));
   deleteBoardBtn?.addEventListener("click", () => runSafely(() => deleteActiveBoard(), "Unable to delete board"));
-  toggleSourcesBtn?.addEventListener("click", () => {
-    setSourcesCollapsed(!state.sourcesCollapsed);
-    renderCurrentView();
-  });
   boardSelector?.addEventListener("change", () => {
+    if (!confirmDiscardChanges()) {
+      renderBoardSelector();
+      return;
+    }
     if (boardSelector.value === DRAFT_BOARD_ID) {
       setActiveBoard(DRAFT_BOARD_ID);
       return;
@@ -1156,7 +1370,7 @@ function wireEvents() {
       runSafely(() => createOrSaveBoard(), "Unable to save board");
       return;
     }
-    runSafely(() => patchActiveBoard({ name: boardNameInput.value }), "Unable to rename board");
+    runSafely(() => createOrSaveBoard(), "Unable to save board");
   });
   [modulePerformance, moduleHistory, moduleRadius].forEach((input) => {
     input?.addEventListener("change", scheduleModulePatch);
@@ -1180,6 +1394,11 @@ function wireEvents() {
     activeDetailMachine = null;
     detailRequestId += 1;
   });
+  window.addEventListener("beforeunload", (event) => {
+    if (!hasPendingChanges()) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
 }
 
 async function boot() {
@@ -1191,6 +1410,7 @@ async function boot() {
   setSourcesCollapsed(false, { silent: true });
   setFocusMode(false, { silent: true });
   state.viewMode = state.boards.length > 0 ? "display" : "edit";
+  state.showBoardPicker = state.boards.length === 0;
   queueRender();
   showToast(state.boards.length > 0 ? "Board view loaded." : "Build mode ready.", "success", "Ready", 1400);
 }

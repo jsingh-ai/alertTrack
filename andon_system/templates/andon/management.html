@@ -4,7 +4,12 @@
 <div class="container-fluid board-page-shell management-page-shell" id="managementPageShell">
   {% set page_title = "Management Boards" %}
   {% set page_subtitle = "Build layouts when needed, then run in clean board view mode." %}
-  {% set page_action_html = '<button class="btn btn-outline-light" type="button" id="headerEditBoardBtn">Edit Board</button>' %}
+  {% set page_action_html %}
+    <div class="management-header-actions">
+      <button class="btn management-header-action management-header-action--create" type="button" id="headerCreateBoardBtn">Create New Board</button>
+      <button class="btn management-header-action management-header-action--edit" type="button" id="headerEditBoardBtn">Edit Board</button>
+    </div>
+  {% endset %}
   {% include "andon/_page_header.html" %}
 
   <div class="board-builder-shell">
@@ -24,16 +29,18 @@
           </div>
         </div>
         <div class="board-builder-toolbar__row">
-          <div class="board-builder-toolbar__field board-builder-toolbar__field--select">
+          <div class="board-builder-toolbar__field board-builder-toolbar__field--select" id="savedBoardsField">
             <label class="form-label" for="boardSelector">Saved Boards</label>
             <select class="form-select" id="boardSelector"></select>
           </div>
-          <div class="board-builder-toolbar__field board-builder-toolbar__field--name">
+          <div class="board-builder-toolbar__field board-builder-toolbar__field--name" id="boardNameField">
             <label class="form-label" id="boardNameLabel" for="boardNameInput">Board Name</label>
             <input class="form-control" id="boardNameInput" placeholder="Board name">
           </div>
           <div class="board-builder-toolbar__actions">
-            <button class="btn btn-primary" type="button" id="createBoardBtn">New Board</button>
+            <button class="btn btn-primary" type="button" id="createBoardBtn">Create New Board</button>
+            <button class="btn btn-outline-light" type="button" id="loadBoardBtn">Load Another Board</button>
+            <button class="btn btn-success" type="button" id="updateBoardBtn">Update Board</button>
             <button class="btn btn-outline-light" type="button" id="previewBoardBtn">Board View</button>
             <button class="btn btn-outline-danger" type="button" id="deleteBoardBtn">Delete</button>
           </div>
@@ -42,23 +49,9 @@
     </section>
 
     <div id="managementStatusDock" class="operator-status-dock" aria-live="polite"></div>
-    <section id="previewModeBar" class="card andon-panel board-builder-preview-bar d-none">
-      <div class="card-body">
-        <div class="board-builder-preview-bar__actions">
-          <button class="btn btn-outline-light" type="button" id="previewEditBtn">Edit Board</button>
-          <button class="btn btn-primary d-none" type="button" id="previewSaveBtn">Save Board</button>
-        </div>
-      </div>
-    </section>
 
     <div id="boardBuilderEditLayout" class="board-builder-layout">
       <aside id="boardBuilderSources" class="board-builder-sources">
-        <div class="board-builder-sources__head">
-          <button class="btn btn-sm btn-outline-light board-builder-sources__toggle" type="button" id="toggleSourcesBtn" aria-expanded="true" aria-controls="boardBuilderSources">
-            <i class="bi bi-layout-sidebar-inset"></i>
-            <span id="toggleSourcesText">Minimize</span>
-          </button>
-        </div>
         <div class="card andon-panel board-builder-panel">
           <div class="card-body">
             <div class="board-builder-panel__heading">Board Modules</div>
