@@ -2,7 +2,7 @@ import os
 import shlex
 import time
 
-from flask import Flask, g, has_request_context, request
+from flask import Flask, g, has_request_context, request, session
 from sqlalchemy import inspect, text
 
 from .company_context import get_companies, get_current_company
@@ -20,6 +20,8 @@ from .security import (
     is_authenticated,
     validate_production_security_config,
 )
+
+WORKSPACE_PROMPT_SESSION_KEY = "andon_workspace_prompt"
 
 
 def _detect_gunicorn_worker_count() -> int:
@@ -182,15 +184,27 @@ def create_app(config_name: str | None = None) -> Flask:
 
     @app.context_processor
     def inject_globals():
-        current_company = get_current_company()
         current_user = get_authenticated_user()
-        current_membership = get_current_membership()
+        show_workspace_prompt = (
+            request.endpoint == "pages.home_page"
+            and is_authenticated()
+            and bool(session.get(WORKSPACE_PROMPT_SESSION_KEY))
+        )
+        current_company = None if show_workspace_prompt else get_current_company()
+        current_membership = None if show_workspace_prompt else get_current_membership()
+        companies = []
+        if show_workspace_prompt:
+            companies = []
+        elif is_authenticated():
+            companies = get_accessible_companies()
+        else:
+            companies = get_companies()
         return {
             "app_name": "ProcessGuard AI - Live Alert System",
             "app_brand": "ProcessGuard AI",
             "app_subtitle": "Live Alert System",
             "current_company": current_company,
-            "companies": get_accessible_companies() if is_authenticated() else get_companies(),
+            "companies": companies,
             "current_user": current_user,
             "current_membership": current_membership,
             "socketio_enabled": socketio is not None and app.config.get("SOCKETIO_ENABLED"),
@@ -207,6 +221,8 @@ def create_app(config_name: str | None = None) -> Flask:
         if request.path.startswith("/static/") or request.path.startswith("/socket.io/"):
             return
         enforce_csrf()
+        if request.path == "/andon/home" and is_authenticated() and session.get(WORKSPACE_PROMPT_SESSION_KEY):
+            return
         g.current_company = get_current_company()
         if is_authenticated():
             ensure_session_company()

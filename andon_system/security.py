@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from flask import abort, current_app, g, has_request_context, request, session
 from sqlalchemy import or_
+from sqlalchemy.orm import joinedload
 
 from .extensions import db
 from .models.company import Company
@@ -16,6 +17,7 @@ from .models.user import User, UserCompanyAccess, UserViewPreference
 USER_SESSION_KEY = "andon_user_id"
 COMPANY_SESSION_KEY = "andon_company_id"
 WORKSPACE_NEXT_SESSION_KEY = "andon_workspace_next"
+WORKSPACE_OPTIONS_SESSION_KEY = "andon_workspace_options"
 ADMIN_SESSION_KEY = "andon_admin_authenticated"
 CSRF_SESSION_KEY = "andon_csrf_token"
 DEV_SECRET_KEY = "dev-andon-secret-key"
@@ -104,6 +106,7 @@ def logout_user() -> None:
     session.pop(ADMIN_SESSION_KEY, None)
     session.pop(COMPANY_SESSION_KEY, None)
     session.pop(WORKSPACE_NEXT_SESSION_KEY, None)
+    session.pop(WORKSPACE_OPTIONS_SESSION_KEY, None)
     session.pop("andon_company_slug", None)
     if has_request_context():
         g.authenticated_user = None
@@ -132,12 +135,13 @@ def get_user_memberships(user: User | None = None, active_only: bool = True) -> 
     if current_user is None:
         _perf_log("get_user_memberships(skip_no_user)", started_at)
         return []
-    if has_request_context() and user is None:
+    if has_request_context():
         cache = getattr(g, "user_memberships_cache", None)
         if cache is None:
             cache = {}
             g.user_memberships_cache = cache
-        cache_key = ("self", bool(active_only))
+        cache_user_id = current_user.id if current_user else None
+        cache_key = (cache_user_id, bool(active_only))
         if cache_key in cache:
             memberships = cache[cache_key]
             _perf_log("get_user_memberships(cache)", started_at, total=len(memberships), active=len(memberships))
@@ -145,10 +149,14 @@ def get_user_memberships(user: User | None = None, active_only: bool = True) -> 
     query = UserCompanyAccess.query.filter_by(user_id=current_user.id)
     if active_only:
         query = query.filter_by(is_active=True)
-    memberships = query.order_by(UserCompanyAccess.company_id.asc()).all()
+    memberships = (
+        query.options(joinedload(UserCompanyAccess.company))
+        .order_by(UserCompanyAccess.company_id.asc())
+        .all()
+    )
     filtered = [membership for membership in memberships if membership.company and membership.company.is_active]
-    if has_request_context() and user is None:
-        g.user_memberships_cache[("self", bool(active_only))] = filtered
+    if has_request_context():
+        g.user_memberships_cache[(current_user.id, bool(active_only))] = filtered
     _perf_log("get_user_memberships(db)", started_at, total=len(memberships), active=len(filtered))
     return filtered
 
@@ -211,7 +219,7 @@ def ensure_session_company(user: User | None = None) -> UserCompanyAccess | None
         return None
     from .company_context import get_current_company, set_current_company_slug
 
-    memberships = get_user_memberships(user=current_user, active_only=True)
+    memberships = get_user_memberships(user=current_user, active_only=True) if user else get_user_memberships(active_only=True)
     if not memberships:
         _perf_log("ensure_session_company(no_memberships)", started_at)
         return None

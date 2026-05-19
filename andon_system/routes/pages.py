@@ -36,6 +36,7 @@ from ..services.escalation_service import FIXED_ESCALATION_PHASES, ensure_fixed_
 pages_bp = Blueprint("pages", __name__)
 MANAGEMENT_TIMEZONE = ZoneInfo("America/Chicago")
 WORKSPACE_PROMPT_SESSION_KEY = "andon_workspace_prompt"
+WORKSPACE_OPTIONS_SESSION_KEY = "andon_workspace_options"
 
 
 def _management_shift_window(now: datetime | None = None):
@@ -95,9 +96,18 @@ def landing_page():
 @pages_bp.get("/andon/home")
 def home_page():
     if is_authenticated():
-        memberships = get_user_memberships(active_only=True)
-        if len(memberships) > 1 and session.get(WORKSPACE_PROMPT_SESSION_KEY):
-            companies = [membership.company for membership in memberships if membership.company]
+        if session.get(WORKSPACE_PROMPT_SESSION_KEY):
+            cached_companies = session.get(WORKSPACE_OPTIONS_SESSION_KEY) or []
+            if cached_companies:
+                companies = cached_companies
+            else:
+                memberships = get_user_memberships(active_only=True)
+                companies = [
+                    {"id": membership.company.id, "name": membership.company.name}
+                    for membership in memberships
+                    if membership.company
+                ]
+                session[WORKSPACE_OPTIONS_SESSION_KEY] = companies
             return render_template("andon/home.html", workspace_companies=companies)
         ensure_session_company()
         return _landing_redirect()
@@ -127,6 +137,11 @@ def login_page():
         set_current_company_id(membership.company_id)
     else:
         session[WORKSPACE_PROMPT_SESSION_KEY] = True
+        session[WORKSPACE_OPTIONS_SESSION_KEY] = [
+            {"id": member.company.id, "name": member.company.name}
+            for member in memberships
+            if member.company
+        ]
         if next_url and is_safe_redirect_target(next_url):
             session["andon_workspace_next"] = next_url
         return redirect(url_for("pages.home_page"))
@@ -156,6 +171,7 @@ def workspace_select_submit():
         session[WORKSPACE_PROMPT_SESSION_KEY] = True
         return redirect(url_for("pages.home_page"))
     session.pop(WORKSPACE_PROMPT_SESSION_KEY, None)
+    session.pop(WORKSPACE_OPTIONS_SESSION_KEY, None)
     membership = ensure_session_company()
     next_url = session.pop("andon_workspace_next", None)
     if next_url and is_safe_redirect_target(next_url):
