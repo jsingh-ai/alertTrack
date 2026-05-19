@@ -95,10 +95,12 @@ def _ensure_auth_schema() -> None:
             )
         )
 
-    from .models.user import UserCompanyAccess, UserViewPreference
+    from .models.user import UserBoard, UserBoardItem, UserCompanyAccess, UserViewPreference
 
     UserCompanyAccess.__table__.create(bind=db.engine, checkfirst=True)
     UserViewPreference.__table__.create(bind=db.engine, checkfirst=True)
+    UserBoard.__table__.create(bind=db.engine, checkfirst=True)
+    UserBoardItem.__table__.create(bind=db.engine, checkfirst=True)
     db.session.flush()
 
     users = db.session.execute(

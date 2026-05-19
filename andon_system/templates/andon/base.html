@@ -74,6 +74,7 @@
             <div class="app-sidebar__meta-label">Live System</div>
             {% if companies %}
             <form method="post" action="{{ url_for('pages.select_company') }}">
+              <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') if request.full_path else request.path }}">
               <select class="form-select form-select-sm mt-2" name="company_slug" onchange="this.form.submit()">
                 {% for company in companies %}
                 <option value="{{ company.slug }}" {% if current_company and company.id == current_company.id %}selected{% endif %}>{{ company.name }}</option>
@@ -95,7 +96,10 @@
           </button>
           {% if user_authenticated %}
           <form method="post" action="{{ url_for('pages.logout_page') }}" class="mt-2">
-            <button class="btn btn-outline-light w-100" type="submit">Logout</button>
+            <button class="btn app-logout-btn w-100" type="submit" aria-label="Logout">
+              <i class="bi bi-box-arrow-right"></i>
+              <span class="app-logout-btn__label">Logout</span>
+            </button>
           </form>
           {% endif %}
         </div>

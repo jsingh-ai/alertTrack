@@ -174,3 +174,77 @@ class UserViewPreference(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class UserBoard(db.Model):
+    __tablename__ = "user_boards"
+    __table_args__ = (
+        db.Index("ix_user_boards_user_id", "user_id"),
+        db.Index("ix_user_boards_company_id", "company_id"),
+        db.Index("ix_user_boards_last_opened_at", "last_opened_at"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    company_id = db.Column(db.Integer, db.ForeignKey("companies.id"), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    show_performance = db.Column(db.Boolean, nullable=False, default=True)
+    show_recent_history = db.Column(db.Boolean, nullable=False, default=True)
+    show_radius = db.Column(db.Boolean, nullable=False, default=True)
+    last_opened_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    user = db.relationship("User", lazy="joined")
+    company = db.relationship("Company", lazy="joined")
+    items = db.relationship(
+        "UserBoardItem",
+        back_populates="board",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        order_by="UserBoardItem.position.asc()",
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "company_id": self.company_id,
+            "name": self.name,
+            "show_performance": self.show_performance,
+            "show_recent_history": self.show_recent_history,
+            "show_radius": self.show_radius,
+            "last_opened_at": self.last_opened_at.isoformat() if self.last_opened_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "items": [item.to_dict() for item in self.items],
+        }
+
+
+class UserBoardItem(db.Model):
+    __tablename__ = "user_board_items"
+    __table_args__ = (
+        db.UniqueConstraint("board_id", "machine_id", name="uq_user_board_items_board_machine"),
+        db.Index("ix_user_board_items_board_id", "board_id"),
+        db.Index("ix_user_board_items_machine_id", "machine_id"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    board_id = db.Column(db.Integer, db.ForeignKey("user_boards.id"), nullable=False)
+    machine_id = db.Column(db.Integer, db.ForeignKey("machines.id"), nullable=False)
+    position = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    board = db.relationship("UserBoard", back_populates="items", lazy="joined")
+    machine = db.relationship("Machine", lazy="joined")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "board_id": self.board_id,
+            "machine_id": self.machine_id,
+            "position": self.position,
+            "machine_name": self.machine.name if self.machine else None,
+            "machine_group": self.machine.machine_type if self.machine else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

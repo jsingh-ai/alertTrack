@@ -132,9 +132,13 @@ def select_company():
     if not is_authenticated():
         return redirect(url_for("pages.home_page"))
     slug = request.form.get("company_slug")
+    next_url = request.form.get("next") or request.referrer
     company = set_current_company_slug(slug)
     if company is None:
         flash("You do not have access to that company.", "warning")
+        return _landing_redirect()
+    if next_url and is_safe_redirect_target(next_url):
+        return redirect(next_url)
     return _landing_redirect()
 
 

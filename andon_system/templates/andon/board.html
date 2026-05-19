@@ -2,51 +2,20 @@
 {% block body_class %}board-screen-shell{% endblock %}
 {% block content %}
 <div class="container-fluid board-page-shell">
-  {% set page_title = "Live Alert Board" %}
-  {% set page_subtitle = "Grouped by machine group and department. Updates when alerts change." %}
-  {% set page_action_html %}
-    <button class="btn btn-light btn-sm operator-page-header__badge board-view-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#boardViewPanel" aria-expanded="false" aria-controls="boardViewPanel">
-      <i class="bi bi-bell-fill"></i>
-      <span>Filter View</span>
-    </button>
-  {% endset %}
+  {% set page_title = "Live Board" %}
+  {% set page_subtitle = "Displays the last board you opened in the builder." %}
   {% include "andon/_page_header.html" %}
-  <div class="board-layout-shell">
-    <div class="board-view-shell">
-      <div class="collapse" id="boardViewPanel">
-        <div class="card board-control andon-panel">
-          <div class="card-body">
-            <div class="board-control__header">
-              <div>
-                <div class="section-heading mb-0">Display Filter</div>
-              </div>
-              <div id="boardLockStatus" class="board-control__status">Unlocked</div>
-            </div>
-            <div class="board-control__grid">
-              <div class="board-control__field">
-                <label class="form-label small text-uppercase text-secondary mb-0" for="boardMachineGroup">Machine Group</label>
-                <select class="form-select" id="boardMachineGroup">
-                  <option value="">All Groups</option>
-                </select>
-              </div>
-              <div class="board-control__field">
-                <label class="form-label small text-uppercase text-secondary mb-0" for="boardDepartment">Department</label>
-                <select class="form-select" id="boardDepartment">
-                  <option value="">All Departments</option>
-                </select>
-              </div>
-              <div class="board-control__field board-control__field--action">
-                <button class="btn btn-warning w-100" id="boardLockView" type="button">Lock View</button>
-              </div>
-              <div class="board-control__field board-control__field--clear">
-                <button class="btn btn-outline-light w-100" id="boardClearView" type="button">Clear View</button>
-              </div>
-            </div>
-          </div>
+  <div id="boardStatusDock" class="operator-status-dock" aria-live="polite"></div>
+  <div class="card andon-panel board-live-shell">
+    <div class="card-body">
+      <div class="board-live-shell__header">
+        <div>
+          <div class="board-live-shell__eyebrow">Saved Layout</div>
+          <div class="board-live-shell__title" id="boardTitle">Loading board...</div>
         </div>
       </div>
+      <div id="boardGrid" class="board-live-grid"></div>
     </div>
-    <div id="boardGrid" class="board-grid-shell"></div>
   </div>
 </div>
 {% endblock %}

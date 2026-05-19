@@ -2,52 +2,70 @@
 {% block body_class %}board-screen-shell management-screen-shell{% endblock %}
 {% block content %}
 <div class="container-fluid board-page-shell management-page-shell">
-  {% set page_title = "ProccesGuard AI - Workflow System" %}
-  {% set page_subtitle = "View machine status by machine group or department. Lock the view or clear back to all departments." %}
-  {% set page_action_html %}
-    <button class="btn btn-light btn-sm operator-page-header__badge board-view-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#managementViewPanel" aria-expanded="false" aria-controls="managementViewPanel">
-      <i class="bi bi-bell-fill"></i>
-      <span>Filter View</span>
-    </button>
-  {% endset %}
+  {% set page_title = "Board Builder" %}
+  {% set page_subtitle = "Build named boards from machines, departments, and machine groups. Saved boards reopen on your account." %}
   {% include "andon/_page_header.html" %}
-  <div class="board-layout-shell management-layout-shell">
-    <div class="board-view-shell">
-      <div class="collapse" id="managementViewPanel">
-        <div class="card board-control andon-panel">
-          <div class="card-body">
-            <div class="board-control__header">
-              <div>
-                <div class="section-heading mb-0">Display Filter</div>
-              </div>
-              <div id="managementLockStatus" class="board-control__status">Unlocked</div>
-            </div>
-            <div class="board-control__grid">
-              <div class="board-control__field">
-                <label class="form-label small text-uppercase text-secondary mb-0" for="managementMachineGroup">Machine Group</label>
-                <select class="form-select" id="managementMachineGroup">
-                  <option value="">All Groups</option>
-                </select>
-              </div>
-              <div class="board-control__field">
-                <label class="form-label small text-uppercase text-secondary mb-0" for="managementDepartment">Department</label>
-                <select class="form-select" id="managementDepartment">
-                  <option value="">All Departments</option>
-                </select>
-              </div>
-              <div class="board-control__field board-control__field--action">
-                <button class="btn btn-warning w-100" id="managementLockView" type="button">Lock View</button>
-              </div>
-              <div class="board-control__field board-control__field--clear">
-                <button class="btn btn-outline-light w-100" id="managementClearView" type="button">Clear View</button>
-              </div>
-            </div>
+
+  <div class="board-builder-shell">
+    <section class="card andon-panel board-builder-toolbar">
+      <div class="card-body">
+        <div class="board-builder-toolbar__row">
+          <div class="board-builder-toolbar__field board-builder-toolbar__field--select">
+            <label class="form-label" for="boardSelector">Saved Boards</label>
+            <select class="form-select" id="boardSelector"></select>
+          </div>
+          <div class="board-builder-toolbar__field board-builder-toolbar__field--name">
+            <label class="form-label" for="boardNameInput">Board Name</label>
+            <input class="form-control" id="boardNameInput" placeholder="Board name">
+          </div>
+          <div class="board-builder-toolbar__actions">
+            <button class="btn btn-primary" type="button" id="createBoardBtn">New Board</button>
+            <button class="btn btn-outline-light" type="button" id="saveBoardNameBtn">Rename</button>
+            <button class="btn btn-outline-danger" type="button" id="deleteBoardBtn">Delete</button>
           </div>
         </div>
+        <div class="board-builder-toolbar__modules">
+          <span class="board-builder-toolbar__label">Board Modules</span>
+          <label class="board-module-toggle"><input type="checkbox" id="modulePerformance" checked> <span>Performance</span></label>
+          <label class="board-module-toggle"><input type="checkbox" id="moduleHistory" checked> <span>Recent History</span></label>
+          <label class="board-module-toggle"><input type="checkbox" id="moduleRadius" checked> <span>Radius</span></label>
+        </div>
       </div>
-    </div>
+    </section>
+
     <div id="managementStatusDock" class="operator-status-dock" aria-live="polite"></div>
-    <div id="managementGrid" class="board-grid-shell management-grid-shell"></div>
+
+    <div class="board-builder-layout">
+      <aside class="board-builder-sources">
+        <div class="card andon-panel board-builder-panel">
+          <div class="card-body">
+            <div class="board-builder-panel__heading">Machine Groups</div>
+            <div id="groupDropSource" class="board-builder-chip-list"></div>
+          </div>
+        </div>
+        <div class="card andon-panel board-builder-panel">
+          <div class="card-body">
+            <div class="board-builder-panel__heading">Departments</div>
+            <div id="departmentDropSource" class="board-builder-chip-list"></div>
+          </div>
+        </div>
+        <div class="card andon-panel board-builder-panel">
+          <div class="card-body">
+            <div class="board-builder-panel__heading">Machines</div>
+            <div id="machineDropSource" class="board-builder-machine-list"></div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="board-builder-canvas-shell">
+        <div class="card andon-panel board-builder-panel board-builder-panel--canvas">
+          <div class="card-body">
+            <div class="board-builder-panel__heading">Canvas</div>
+            <div id="boardBuilderCanvas" class="board-builder-canvas" data-drop-zone="board-items"></div>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 </div>
 
@@ -94,7 +112,7 @@
               </tr>
             </thead>
             <tbody id="managementDetailTableBody">
-              <tr><td colspan="8" class="text-secondary">Select a press to view the shift summary.</td></tr>
+              <tr><td colspan="8" class="text-secondary">Select a machine to view the shift summary.</td></tr>
             </tbody>
           </table>
         </div>

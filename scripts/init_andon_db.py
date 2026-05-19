@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 from andon_system import create_app
 from andon_system.extensions import db
 from andon_system.models import AndonAlert, Machine
+from andon_system.models.user import UserBoard, UserBoardItem, UserCompanyAccess, UserViewPreference
 from andon_system.services.radius_service import resolve_radius_machine_id
 from andon_system.services.seed_service import seed_default_data
 
@@ -19,6 +20,7 @@ def main():
     app = create_app()
     with app.app_context():
         db.create_all()
+        _ensure_management_board_tables()
         _ensure_machine_radius_column()
         _backfill_machine_radius_ids()
         for index in AndonAlert.__table__.indexes:
@@ -27,6 +29,14 @@ def main():
             index.create(bind=db.engine, checkfirst=True)
         seed_default_data()
     print("Initialized Andon database.")
+
+
+def _ensure_management_board_tables():
+    # Older databases may predate the board-builder tables.
+    UserCompanyAccess.__table__.create(bind=db.engine, checkfirst=True)
+    UserViewPreference.__table__.create(bind=db.engine, checkfirst=True)
+    UserBoard.__table__.create(bind=db.engine, checkfirst=True)
+    UserBoardItem.__table__.create(bind=db.engine, checkfirst=True)
 
 
 def _ensure_machine_radius_column():

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from flask import Blueprint, abort, jsonify, request
+from sqlalchemy.orm import joinedload
 
 from ..company_context import get_current_company_id
 from ..models.alert import (
@@ -14,12 +17,13 @@ from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
-from ..models.user import UserCompanyAccess
+from ..models.user import UserBoard, UserBoardItem, UserCompanyAccess
 from ..security import (
     PAGE_BOARD,
     PAGE_MANAGEMENT,
     PAGE_OPERATOR,
     PAGE_REPORTS,
+    get_authenticated_user,
     get_scope_filters,
     get_view_preference,
     require_authentication,
@@ -356,6 +360,160 @@ def api_save_preference(page_key):
     return jsonify({"success": True, "data": save_view_preference(page_key, payload)})
 
 
+@api_bp.get("/boards")
+def api_list_boards():
+    _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
+    user = get_authenticated_user()
+    company_id = get_current_company_id()
+    boards = (
+        UserBoard.query.options(joinedload(UserBoard.items))
+        .filter_by(user_id=user.id, company_id=company_id)
+        .order_by(UserBoard.last_opened_at.desc().nullslast(), UserBoard.updated_at.desc())
+        .all()
+    )
+    active_board = boards[0] if boards else None
+    return jsonify({
+        "success": True,
+        "data": {
+            "boards": [board.to_dict() for board in boards],
+            "active_board_id": active_board.id if active_board else None,
+        },
+    })
+
+
+@api_bp.post("/boards")
+def api_create_board():
+    _require_any_page_access(PAGE_MANAGEMENT)
+    user = get_authenticated_user()
+    company_id = get_current_company_id()
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name") or "").strip() or "New Board"
+    board = UserBoard(
+        user_id=user.id,
+        company_id=company_id,
+        name=name,
+        show_performance=True,
+        show_recent_history=True,
+        show_radius=True,
+        last_opened_at=datetime.now(timezone.utc),
+    )
+    db.session.add(board)
+    db.session.commit()
+    return jsonify({"success": True, "data": board.to_dict()}), 201
+
+
+@api_bp.delete("/boards/<int:board_id>")
+def api_delete_board(board_id):
+    _require_any_page_access(PAGE_MANAGEMENT)
+    board = _get_user_board(board_id)
+    db.session.delete(board)
+    db.session.commit()
+    return jsonify({"success": True, "data": {"board_id": board_id}})
+
+
+@api_bp.post("/boards/<int:board_id>/activate")
+def api_activate_board(board_id):
+    _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
+    board = _get_user_board(board_id)
+    board.last_opened_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return jsonify({"success": True, "data": board.to_dict()})
+
+
+@api_bp.patch("/boards/<int:board_id>")
+def api_update_board(board_id):
+    _require_any_page_access(PAGE_MANAGEMENT)
+    board = _get_user_board(board_id)
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name") or "").strip()
+    if name:
+        board.name = name
+    for field in ("show_performance", "show_recent_history", "show_radius"):
+        if field in payload:
+            setattr(board, field, bool(payload.get(field)))
+    board.last_opened_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return jsonify({"success": True, "data": board.to_dict()})
+
+
+@api_bp.post("/boards/<int:board_id>/items")
+def api_add_board_item(board_id):
+    _require_any_page_access(PAGE_MANAGEMENT)
+    board = _get_user_board(board_id)
+    payload = request.get_json(silent=True) or {}
+    machine_id = payload.get("machine_id")
+    if machine_id is None:
+        return _error("machine_id is required", 400)
+    machine = _get_scoped_machine(machine_id)
+    if machine is None:
+        return _error("Machine not found", 404)
+    existing = UserBoardItem.query.filter_by(board_id=board.id, machine_id=machine.id).one_or_none()
+    if existing is not None:
+        board.last_opened_at = datetime.now(timezone.utc)
+        db.session.commit()
+        return jsonify({"success": True, "data": board.to_dict()})
+    position = len(board.items)
+    db.session.add(UserBoardItem(board_id=board.id, machine_id=machine.id, position=position))
+    board.last_opened_at = datetime.now(timezone.utc)
+    db.session.commit()
+    board = _get_user_board(board.id)
+    return jsonify({"success": True, "data": board.to_dict()}), 201
+
+
+@api_bp.post("/boards/<int:board_id>/bulk-add")
+def api_bulk_add_board_items(board_id):
+    _require_any_page_access(PAGE_MANAGEMENT)
+    board = _get_user_board(board_id)
+    payload = request.get_json(silent=True) or {}
+    source_type = str(payload.get("source_type") or "").strip()
+    source_value = str(payload.get("source_value") or "").strip()
+    machine_ids = _resolve_bulk_machine_ids(source_type, source_value)
+    existing_machine_ids = {item.machine_id for item in board.items}
+    position = len(board.items)
+    for machine_id in machine_ids:
+        if machine_id in existing_machine_ids:
+            continue
+        db.session.add(UserBoardItem(board_id=board.id, machine_id=machine_id, position=position))
+        position += 1
+    board.last_opened_at = datetime.now(timezone.utc)
+    db.session.commit()
+    board = _get_user_board(board.id)
+    return jsonify({"success": True, "data": board.to_dict()})
+
+
+@api_bp.delete("/boards/<int:board_id>/items/<int:item_id>")
+def api_delete_board_item(board_id, item_id):
+    _require_any_page_access(PAGE_MANAGEMENT)
+    board = _get_user_board(board_id)
+    item = UserBoardItem.query.filter_by(id=item_id, board_id=board.id).one_or_none()
+    if item is None:
+        return _error("Board item not found", 404)
+    db.session.delete(item)
+    db.session.flush()
+    _normalize_board_item_positions(board.id)
+    board.last_opened_at = datetime.now(timezone.utc)
+    db.session.commit()
+    board = _get_user_board(board.id)
+    return jsonify({"success": True, "data": board.to_dict()})
+
+
+@api_bp.patch("/boards/<int:board_id>/items/reorder")
+def api_reorder_board_items(board_id):
+    _require_any_page_access(PAGE_MANAGEMENT)
+    board = _get_user_board(board_id)
+    payload = request.get_json(silent=True) or {}
+    item_ids = payload.get("item_ids") or []
+    items_by_id = {item.id: item for item in board.items}
+    for position, item_id in enumerate(item_ids):
+        item = items_by_id.get(int(item_id))
+        if item is not None:
+            item.position = position
+    board.last_opened_at = datetime.now(timezone.utc)
+    db.session.commit()
+    board = _get_user_board(board.id)
+    return jsonify({"success": True, "data": board.to_dict()})
+
+
 def _payload():
     payload = request.get_json(silent=True) or {}
     payload.update(request.form.to_dict(flat=True))
@@ -385,3 +543,50 @@ def _error(message, code, extra=None):
     if extra:
         error.update(extra)
     return jsonify({"success": False, "error": error}), code
+
+
+def _get_user_board(board_id: int) -> UserBoard:
+    user = get_authenticated_user()
+    company_id = get_current_company_id()
+    board = (
+        UserBoard.query.options(joinedload(UserBoard.items).joinedload(UserBoardItem.machine))
+        .filter_by(id=board_id, user_id=user.id, company_id=company_id)
+        .one_or_none()
+    )
+    if board is None:
+        abort(404)
+    return board
+
+
+def _get_scoped_machine(machine_id: int | str):
+    company_id = get_current_company_id()
+    scope = get_scope_filters()
+    query = Machine.query.filter_by(id=int(machine_id), company_id=company_id)
+    if scope["department_id"] is not None:
+        query = query.filter(Machine.department_id == scope["department_id"])
+    if scope["machine_group_name"]:
+        query = query.filter(Machine.machine_type == scope["machine_group_name"])
+    return query.one_or_none()
+
+
+def _resolve_bulk_machine_ids(source_type: str, source_value: str) -> list[int]:
+    company_id = get_current_company_id()
+    scope = get_scope_filters()
+    query = Machine.query.filter(Machine.company_id == company_id)
+    if scope["department_id"] is not None:
+        query = query.filter(Machine.department_id == scope["department_id"])
+    if scope["machine_group_name"]:
+        query = query.filter(Machine.machine_type == scope["machine_group_name"])
+    if source_type == "department":
+        query = query.join(Machine.department).filter(Department.name == source_value)
+    elif source_type == "machine_group":
+        query = query.filter(Machine.machine_type == source_value)
+    else:
+        return []
+    return [machine.id for machine in query.order_by(Machine.name.asc()).all()]
+
+
+def _normalize_board_item_positions(board_id: int) -> None:
+    items = UserBoardItem.query.filter_by(board_id=board_id).order_by(UserBoardItem.position.asc(), UserBoardItem.id.asc()).all()
+    for position, item in enumerate(items):
+        item.position = position

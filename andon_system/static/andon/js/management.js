@@ -1,15 +1,21 @@
-const boardUrl = "/api/andon/board-state";
+const boardStateUrl = "/api/andon/board-state";
 const reportDetailsUrl = "/api/andon/reports/machine-details";
-const managementViewStorageKey = "andon-management-view";
+const boardsUrl = "/api/andon/boards";
 const managementDefaults = window.AndonManagementDefaults || {};
 
-const managementGrid = document.getElementById("managementGrid");
+const boardSelector = document.getElementById("boardSelector");
+const boardNameInput = document.getElementById("boardNameInput");
+const createBoardBtn = document.getElementById("createBoardBtn");
+const saveBoardNameBtn = document.getElementById("saveBoardNameBtn");
+const deleteBoardBtn = document.getElementById("deleteBoardBtn");
+const modulePerformance = document.getElementById("modulePerformance");
+const moduleHistory = document.getElementById("moduleHistory");
+const moduleRadius = document.getElementById("moduleRadius");
+const groupDropSource = document.getElementById("groupDropSource");
+const departmentDropSource = document.getElementById("departmentDropSource");
+const machineDropSource = document.getElementById("machineDropSource");
+const boardBuilderCanvas = document.getElementById("boardBuilderCanvas");
 const managementStatusDock = document.getElementById("managementStatusDock");
-const managementMachineGroupSelect = document.getElementById("managementMachineGroup");
-const managementDepartmentSelect = document.getElementById("managementDepartment");
-const managementLockView = document.getElementById("managementLockView");
-const managementClearView = document.getElementById("managementClearView");
-const managementLockStatus = document.getElementById("managementLockStatus");
 const managementDetailModalEl = document.getElementById("managementDetailModal");
 const managementDetailModalTitle = document.getElementById("managementDetailModalTitle");
 const managementDetailModalSubtitle = document.getElementById("managementDetailModalSubtitle");
@@ -23,308 +29,39 @@ const managementDetailModal = managementDetailModalEl && window.bootstrap ? new 
 const state = {
   boardState: { machines: [], departments: [] },
   shiftDetails: [],
+  boards: [],
+  activeBoardId: null,
   shiftRange: {
     start: managementDefaults.shiftStart || "",
     end: managementDefaults.shiftEnd || "",
     label: managementDefaults.shiftLabel || "Current shift",
   },
-  filters: {
-    machineGroup: "",
-    department: "",
-  },
-  locked: false,
-  refreshedAt: null,
 };
 
-let refreshTimeoutId = null;
-let refreshInFlight = false;
-let refreshQueued = false;
-let fallbackPollIntervalId = null;
-let liveTimerIntervalId = null;
-let liveTimerNodes = [];
-let detailRequestId = 0;
 let activeDetailMachine = null;
+let detailRequestId = 0;
 
 function escapeHtml(value) {
-  return String(value || "")
+  return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function statusClass(status) {
-  return `status-${String(status || "").toLowerCase()}`;
-}
-
-function statusLabel(status) {
-  if (status === "HEALTHY") return "Healthy";
-  if (status === "OPEN") return "Open";
-  if (status === "ACKNOWLEDGED") return "Working";
-  if (status === "ARRIVED") return "Arrived";
-  if (status === "RESOLVED") return "Resolved";
-  if (status === "CANCELLED") return "Cancelled";
-  if (status === "OFF") return "Offline";
-  return String(status || "");
+    .replaceAll("'", "&#39;");
 }
 
 function formatElapsedDuration(totalSeconds) {
-  const seconds = Math.max(0, Math.floor(totalSeconds));
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
+  const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const remainingSeconds = seconds % 60;
-  const parts = [];
-  if (days > 0) {
-    parts.push(`${days}d`);
-  }
-  parts.push(`${days > 0 ? String(hours).padStart(2, "0") : hours}h`);
-  parts.push(`${String(minutes).padStart(2, "0")}m`);
-  parts.push(`${String(remainingSeconds).padStart(2, "0")}s`);
-  return parts.join(" ");
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
 function formatAverageDuration(values) {
-  const numericValues = values.filter((value) => Number.isFinite(value) && value >= 0);
-  if (!numericValues.length) return "—";
-  const average = Math.round(numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length);
-  return formatElapsedDuration(average);
-}
-
-function toLocalIsoString(date) {
-  const pad = (value) => String(value).padStart(2, "0");
-  const offsetMinutes = -date.getTimezoneOffset();
-  const offsetSign = offsetMinutes >= 0 ? "+" : "-";
-  const absOffset = Math.abs(offsetMinutes);
-  const offsetHours = pad(Math.floor(absOffset / 60));
-  const offsetMins = pad(absOffset % 60);
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${offsetSign}${offsetHours}:${offsetMins}`;
-}
-
-function formatDateTimeLocalValue(date) {
-  const pad = (value) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function getDefaultShiftRange() {
-  const start = managementDefaults.shiftStart || "";
-  const end = managementDefaults.shiftEnd || "";
-  return {
-    start,
-    end,
-    label: managementDefaults.shiftLabel || "Current shift",
-  };
-}
-
-function getTimeZoneOffsetMinutes(date, timeZone) {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hour12: false,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-  const parts = Object.fromEntries(formatter.formatToParts(date).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
-  const asUTC = Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    Number(parts.hour),
-    Number(parts.minute),
-    Number(parts.second),
-  );
-  return (asUTC - date.getTime()) / 60000;
-}
-
-function zonedDateTimeToIso(value, timeZone = managementDefaults.timeZone || "America/Chicago") {
-  if (!value) return "";
-  const [datePart, timePart = "00:00:00"] = String(value).split("T");
-  const [year, month, day] = datePart.split("-").map(Number);
-  const [hour = 0, minute = 0, second = 0] = timePart.split(":").map(Number);
-  let utcMillis = Date.UTC(year, month - 1, day, hour, minute, second, 0);
-  for (let index = 0; index < 3; index += 1) {
-    const offset = getTimeZoneOffsetMinutes(new Date(utcMillis), timeZone);
-    const adjusted = Date.UTC(year, month - 1, day, hour, minute, second, 0) - (offset * 60000);
-    if (adjusted === utcMillis) break;
-    utcMillis = adjusted;
-  }
-  return new Date(utcMillis).toISOString();
-}
-
-function getDetailRange() {
-  return {
-    start: managementDetailStart?.value || state.shiftRange.start || "",
-    end: managementDetailEnd?.value || state.shiftRange.end || "",
-  };
-}
-
-async function loadSavedView() {
-  try {
-    const remote = await window.AndonPreferences?.load?.("management");
-    if (remote && Object.keys(remote).length) {
-      state.filters.machineGroup = remote.machineGroup || "";
-      state.filters.department = remote.department || "";
-      state.locked = typeof remote.locked === "boolean" ? remote.locked : false;
-      return;
-    }
-  } catch (_error) {
-    // Fall back to local storage if the preference endpoint is unavailable.
-  }
-  try {
-    const saved = JSON.parse(localStorage.getItem(managementViewStorageKey) || "{}");
-    state.filters.machineGroup = saved.machineGroup || "";
-    state.filters.department = saved.department || "";
-    state.locked = typeof saved.locked === "boolean" ? saved.locked : false;
-  } catch {
-    state.filters.machineGroup = "";
-    state.filters.department = "";
-    state.locked = false;
-  }
-}
-
-function saveView() {
-  localStorage.setItem(managementViewStorageKey, JSON.stringify({
-    machineGroup: state.filters.machineGroup,
-    department: state.filters.department,
-    locked: state.locked,
-  }));
-  window.AndonPreferences?.save?.("management", {
-    machineGroup: state.filters.machineGroup,
-    department: state.filters.department,
-    locked: state.locked,
-  });
-}
-
-async function loadBoardState() {
-  const response = await fetch(boardUrl);
-  const data = await response.json();
-  state.boardState = data.data || state.boardState;
-  state.refreshedAt = Date.now();
-}
-
-async function loadShiftDetails() {
-  const { start, end } = state.shiftRange;
-  const response = await fetch(`${reportDetailsUrl}?${new URLSearchParams({
-    start: zonedDateTimeToIso(start),
-    end: zonedDateTimeToIso(end),
-  }).toString()}`);
-  const data = await response.json();
-  state.shiftDetails = data.data || [];
-}
-
-function getGroups() {
-  return [...new Set((state.boardState.machines || []).map((machine) => machine.machine_type || "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
-}
-
-function getDepartments() {
-  return [...new Set((state.boardState.departments || []).map((department) => department.name || "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
-}
-
-function normalizeViewState() {
-  const groups = new Set(getGroups());
-  const departments = new Set(getDepartments());
-  if (state.filters.machineGroup && !groups.has(state.filters.machineGroup)) {
-    state.filters.machineGroup = "";
-  }
-  if (state.filters.department && !departments.has(state.filters.department)) {
-    state.filters.department = "";
-  }
-  saveView();
-}
-
-function renderViewControls() {
-  const groups = getGroups();
-  const departments = getDepartments();
-  managementMachineGroupSelect.innerHTML = `
-    <option value="">All Groups</option>
-    ${groups.map((group) => `<option value="${escapeHtml(group)}">${escapeHtml(group)}</option>`).join("")}
-  `;
-  managementDepartmentSelect.innerHTML = `
-    <option value="">All Departments</option>
-    ${departments.map((department) => `<option value="${escapeHtml(department)}">${escapeHtml(department)}</option>`).join("")}
-  `;
-  managementMachineGroupSelect.value = state.filters.machineGroup || "";
-  managementDepartmentSelect.value = state.filters.department || "";
-  managementMachineGroupSelect.disabled = state.locked;
-  managementDepartmentSelect.disabled = state.locked;
-  managementLockView.textContent = state.locked ? "Unlock View" : "Lock View";
-  managementLockStatus.textContent = state.locked
-    ? (state.filters.department ? `Locked to ${state.filters.department}` : state.filters.machineGroup ? `Locked to ${state.filters.machineGroup}` : "Locked")
-    : "Unlocked";
-}
-
-function getVisibleMachines() {
-  let machines = [...(state.boardState.machines || [])];
-  if (state.filters.machineGroup) {
-    machines = machines.filter((machine) => (machine.machine_type || "") === state.filters.machineGroup);
-  }
-  if (state.filters.department) {
-    machines = machines.filter((machine) => (machine.department_name || "Unassigned") === state.filters.department);
-  }
-  return machines;
-}
-
-function groupByMachineGroup(machines) {
-  const groups = new Map();
-  machines.forEach((machine) => {
-    const groupName = machine.machine_type || "Unassigned";
-    if (!groups.has(groupName)) {
-      groups.set(groupName, []);
-    }
-    groups.get(groupName).push(machine);
-  });
-  return groups;
-}
-
-function machineSortKey(machine) {
-  const label = String(machine.name || "");
-  const match = label.match(/(\d+)/);
-  return {
-    number: match ? Number(match[1]) : Number.POSITIVE_INFINITY,
-    label,
-  };
-}
-
-function sortMachinesInOrder(a, b) {
-  const aKey = machineSortKey(a);
-  const bKey = machineSortKey(b);
-  if (Number.isFinite(aKey.number) && Number.isFinite(bKey.number) && aKey.number !== bKey.number) {
-    return aKey.number - bKey.number;
-  }
-  if (Number.isFinite(aKey.number) !== Number.isFinite(bKey.number)) {
-    return Number.isFinite(aKey.number) ? -1 : 1;
-  }
-  return aKey.label.localeCompare(bKey.label, undefined, { numeric: true, sensitivity: "base" });
-}
-
-function buildMachineStats(machineId, visibleDetails) {
-  const alerts = visibleDetails.filter((detail) => detail.machine_id === machineId);
-  const acknowledgedSeconds = alerts
-    .map((detail) => Number(detail.acknowledged_seconds))
-    .filter((value) => Number.isFinite(value));
-  const ackToClearSeconds = alerts
-    .map((detail) => Number(detail.ack_to_clear_seconds))
-    .filter((value) => Number.isFinite(value));
-  return {
-    totalAlerts: alerts.length,
-    averageAcknowledge: formatAverageDuration(acknowledgedSeconds),
-    averageFix: formatAverageDuration(ackToClearSeconds),
-  };
-}
-
-function getLatestClosedAlert(machineId, visibleDetails) {
-  const closedAlerts = visibleDetails
-    .filter((detail) => detail.machine_id === machineId && ["RESOLVED", "CANCELLED"].includes(String(detail.status || "").toUpperCase()))
-    .sort((a, b) => {
-      const aTime = new Date(a.closed_at || a.created_at || 0).getTime();
-      const bTime = new Date(b.closed_at || b.created_at || 0).getTime();
-      return bTime - aTime;
-    });
-  return closedAlerts[0] || null;
+  const usable = values.filter((value) => Number.isFinite(value) && value >= 0);
+  if (!usable.length) return "—";
+  return formatElapsedDuration(usable.reduce((sum, value) => sum + value, 0) / usable.length);
 }
 
 function formatClockTime(value) {
@@ -334,14 +71,28 @@ function formatClockTime(value) {
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-function radiusValue(value) {
-  return escapeHtml(value || "N/A");
+function getActiveBoard() {
+  return state.boards.find((board) => Number(board.id) === Number(state.activeBoardId)) || null;
 }
 
-function radiusEventBadge(machine) {
-  const value = String(machine?.radius?.event_type || "").trim();
-  if (!value) return "";
-  return `<span class="radius-event-badge" aria-label="Radius event type">${escapeHtml(value)}</span>`;
+function getMachineById(machineId) {
+  return (state.boardState.machines || []).find((machine) => Number(machine.id) === Number(machineId)) || null;
+}
+
+function getMachineStats(machineId) {
+  const details = state.shiftDetails.filter((detail) => Number(detail.machine_id) === Number(machineId));
+  return {
+    totalAlerts: details.length,
+    averageAcknowledge: formatAverageDuration(details.map((detail) => Number(detail.acknowledged_seconds))),
+    averageFix: formatAverageDuration(details.map((detail) => Number(detail.ack_to_clear_seconds))),
+    latestClosed: details
+      .filter((detail) => ["RESOLVED", "CANCELLED"].includes(String(detail.status || "").toUpperCase()))
+      .sort((a, b) => new Date(b.closed_at || b.created_at || 0).getTime() - new Date(a.closed_at || a.created_at || 0).getTime())[0] || null,
+  };
+}
+
+function radiusValue(value) {
+  return escapeHtml(value || "N/A");
 }
 
 function renderRadiusGroup(machine) {
@@ -367,508 +118,451 @@ function renderRadiusGroup(machine) {
     </div>`;
 }
 
-function renderMachineCard(machine, visibleDetails) {
-  const active = Boolean(machine.active_alert);
-  const alert = machine.active_alert;
-  const isOffline = !machine.is_active;
-  const status = isOffline ? "OFF" : active ? alert.status : "HEALTHY";
-  const issue = active ? String(alert.problem_name || alert.category_name || "Unassigned").trim() : "";
-  const responder = active ? String(alert.responder_name_text || "").trim() : "";
-  const timer = active ? formatElapsedDuration(Math.max(0, Math.floor(alert.elapsed_seconds || 0))) : "";
-  const stats = buildMachineStats(machine.id, visibleDetails);
-  const statusLabelText = isOffline
-    ? "Offline"
-    : active
-      ? (status === "OPEN" ? "Waiting for acknowledgment" : "Working on it")
-      : "Machine running healthy";
-  const statusIcon = isOffline
-    ? "bi-x-lg"
-    : active
-      ? (status === "OPEN" ? "bi-x-lg" : "bi-tools")
-      : "bi-check2-circle";
-  const heroClass = isOffline
-    ? "status-off"
-    : active
-      ? statusClass(status)
-      : "status-healthy";
-  const issueStateClass = status === "ACKNOWLEDGED"
-    ? "management-machine-card__state--issue-working"
-    : "management-machine-card__state--issue-open";
-  const timerStateClass = status === "ACKNOWLEDGED"
-    ? "management-machine-card__state--timer-working"
-    : "management-machine-card__state--timer-open";
-  const lastClosedAlert = !active && !isOffline ? getLatestClosedAlert(machine.id, visibleDetails) : null;
-  const lastIssueDepartment = lastClosedAlert ? String(lastClosedAlert.department_name || "").trim() : "";
-  const lastIssueProblem = lastClosedAlert
-    ? String(lastClosedAlert.issue_problem_name || lastClosedAlert.issue_category_name || "Unassigned").trim()
-    : "";
-  const lastIssueName = lastClosedAlert
-    ? [lastIssueDepartment, lastIssueProblem].filter(Boolean).join(" - ") || "Unassigned"
+function renderBoardTile(machine, board, item, editable = true) {
+  const stats = getMachineStats(machine.id);
+  const active = machine.active_alert;
+  const lastClosed = stats.latestClosed;
+  const issue = active ? String(active.problem_name || active.category_name || "Unassigned").trim() : "";
+  const responder = active ? String(active.responder_name_text || "").trim() : "";
+  const lastIssue = lastClosed
+    ? [lastClosed.department_name, lastClosed.issue_problem_name || lastClosed.issue_category_name].filter(Boolean).join(" - ") || "Unassigned"
     : "No recent issue";
-  const startedAt = lastClosedAlert ? formatClockTime(lastClosedAlert.created_at) : "—";
-  const resolvedAt = lastClosedAlert ? formatClockTime(lastClosedAlert.closed_at) : "—";
   return `
     <article
-      class="management-machine-card management-machine-card--${statusClass(status)} management-machine-card--clickable"
+      class="management-machine-card board-builder-tile"
+      data-board-item-id="${item.id}"
       data-machine-id="${machine.id}"
-      data-machine-name="${escapeHtml(machine.name)}"
-      data-machine-group="${escapeHtml(machine.machine_type || "Unassigned")}"
-      role="button"
-      tabindex="0"
-      aria-label="Open summary for ${escapeHtml(machine.name)}"
+      draggable="${editable ? "true" : "false"}"
     >
-      <div class="management-machine-card__hero management-machine-card__hero--${heroClass}">
+      ${editable ? `<button class="board-builder-tile__remove" type="button" data-remove-board-item="${item.id}" aria-label="Remove ${escapeHtml(machine.name)}">×</button>` : ""}
+      <div class="management-machine-card__hero management-machine-card__hero--${machine.active_alert ? "status-open" : "status-healthy"}">
         <div class="management-machine-card__title-row">
           <div class="management-machine-card__title">${escapeHtml(machine.name)}</div>
-          ${radiusEventBadge(machine)}
+          <span class="board-builder-tile__meta">${escapeHtml(machine.machine_type || "Unassigned")}</span>
         </div>
         <div class="management-machine-card__hero-status">
-          <span class="management-machine-card__hero-icon"><i class="bi ${statusIcon}"></i></span>
-          <span class="management-machine-card__hero-text">${escapeHtml(statusLabelText)}</span>
+          <span class="management-machine-card__hero-text">${escapeHtml(machine.department_name || "Unassigned")}</span>
         </div>
       </div>
-      <div class="management-machine-card__section management-machine-card__section--metrics">
-        <div class="management-machine-card__section-title">Performance</div>
-        <div class="management-machine-card__metrics">
-          <div class="management-machine-card__metric">
-            <div class="management-machine-card__metric-label">Today</div>
-            <div class="management-machine-card__metric-value">${stats.totalAlerts}</div>
+      ${board.show_performance ? `
+        <div class="management-machine-card__section management-machine-card__section--metrics">
+          <div class="management-machine-card__section-title">Performance</div>
+          <div class="management-machine-card__metrics">
+            <div class="management-machine-card__metric"><div class="management-machine-card__metric-label">Today</div><div class="management-machine-card__metric-value">${stats.totalAlerts}</div></div>
+            <div class="management-machine-card__metric"><div class="management-machine-card__metric-label">Avg ack</div><div class="management-machine-card__metric-value">${escapeHtml(stats.averageAcknowledge)}</div></div>
+            <div class="management-machine-card__metric"><div class="management-machine-card__metric-label">Avg fix</div><div class="management-machine-card__metric-value">${escapeHtml(stats.averageFix)}</div></div>
           </div>
-          <div class="management-machine-card__metric">
-            <div class="management-machine-card__metric-label">Avg ack</div>
-            <div class="management-machine-card__metric-value">${escapeHtml(stats.averageAcknowledge)}</div>
-          </div>
-          <div class="management-machine-card__metric">
-            <div class="management-machine-card__metric-label">Avg fix</div>
-            <div class="management-machine-card__metric-value">${escapeHtml(stats.averageFix)}</div>
-          </div>
-        </div>
-      </div>
-      <div class="management-machine-card__section management-machine-card__section--status">
-        <div class="management-machine-card__section-title">${isOffline ? "Machine Status" : active ? "Current Alert" : "Recent History"}</div>
-        <div class="management-machine-card__body">
-          ${isOffline ? `<div class="management-machine-card__state management-machine-card__state--offline">Offline</div>` : active ? `
-            <div class="management-machine-card__state-row management-machine-card__state-row--two">
-              <div class="management-machine-card__state ${issueStateClass}">
-                <div class="management-machine-card__state-label">Issue</div>
-                <div class="management-machine-card__state-value">${escapeHtml(issue)}</div>
-              </div>
-              <div class="management-machine-card__state management-machine-card__state--responder">
-                <div class="management-machine-card__state-label">Responder</div>
-                <div class="management-machine-card__state-value">${escapeHtml(responder || "No Responder Assigned")}</div>
-              </div>
-            </div>
-            <div class="management-machine-card__state ${timerStateClass} management-machine-card__state--elapsed-full">
-              <div class="management-machine-card__state-label">Elapsed</div>
-              <div class="management-machine-card__state-value management-machine-card__state-value--elapsed" data-live-timer="true" data-elapsed-seconds="${Math.max(0, Math.floor(alert.elapsed_seconds || 0))}">${escapeHtml(timer)}</div>
-            </div>
-          ` : `
-            <div class="management-machine-card__history">
-              <div class="management-machine-card__history-label">Last issue</div>
-              <div class="management-machine-card__history-value">${escapeHtml(lastIssueName)}</div>
-              <div class="management-machine-card__history-times">
-                <div class="management-machine-card__history-time">
-                  <span>Started</span>
-                  <strong>${escapeHtml(startedAt)}</strong>
+        </div>` : ""}
+      ${board.show_recent_history ? `
+        <div class="management-machine-card__section management-machine-card__section--status">
+          <div class="management-machine-card__section-title">${active ? "Current Alert" : "Recent History"}</div>
+          <div class="management-machine-card__body">
+            ${active ? `
+              <div class="management-machine-card__state-row management-machine-card__state-row--two">
+                <div class="management-machine-card__state management-machine-card__state--issue-open">
+                  <div class="management-machine-card__state-label">Issue</div>
+                  <div class="management-machine-card__state-value">${escapeHtml(issue)}</div>
                 </div>
-                <div class="management-machine-card__history-time">
-                  <span>Resolved</span>
-                  <strong>${escapeHtml(resolvedAt)}</strong>
+                <div class="management-machine-card__state management-machine-card__state--responder">
+                  <div class="management-machine-card__state-label">Responder</div>
+                  <div class="management-machine-card__state-value">${escapeHtml(responder || "No Responder Assigned")}</div>
                 </div>
               </div>
-            </div>
-          `}
-        </div>
-      </div>
-      <div class="management-machine-card__section management-machine-card__section--radius">
-        <div class="management-machine-card__section-title">Radius</div>
-        ${renderRadiusGroup(machine)}
-      </div>
+              <div class="management-machine-card__state management-machine-card__state--timer-open management-machine-card__state--elapsed-full">
+                <div class="management-machine-card__state-label">Elapsed</div>
+                <div class="management-machine-card__state-value management-machine-card__state-value--elapsed">${formatElapsedDuration(active.elapsed_seconds || 0)}</div>
+              </div>
+            ` : `
+              <div class="management-machine-card__history">
+                <div class="management-machine-card__history-label">Last issue</div>
+                <div class="management-machine-card__history-value">${escapeHtml(lastIssue)}</div>
+                <div class="management-machine-card__history-times">
+                  <div class="management-machine-card__history-time"><span>Started</span><strong>${escapeHtml(formatClockTime(lastClosed?.created_at))}</strong></div>
+                  <div class="management-machine-card__history-time"><span>Resolved</span><strong>${escapeHtml(formatClockTime(lastClosed?.closed_at))}</strong></div>
+                </div>
+              </div>
+            `}
+          </div>
+        </div>` : ""}
+      ${board.show_radius ? `
+        <div class="management-machine-card__section management-machine-card__section--radius">
+          <div class="management-machine-card__section-title">Radius</div>
+          ${renderRadiusGroup(machine)}
+        </div>` : ""}
     </article>`;
 }
 
-function renderMachineGroupSection(groupName, machines) {
-  const machineIds = new Set(machines.map((machine) => machine.id));
-  const visibleDetails = state.shiftDetails.filter((detail) => machineIds.has(detail.machine_id));
-  const headerTitle = `${groupName} Machine Group`;
-  return `
-    <section class="board-card board-department-panel management-department-panel">
-      <div class="board-department-panel__header">
-        <h3 class="board-department-panel__title">${escapeHtml(headerTitle)}</h3>
-      </div>
-      <div class="board-department-panel__grid management-department-panel__grid">
-        ${machines.map((machine) => renderMachineCard(machine, visibleDetails)).join("")}
-      </div>
-    </section>`;
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    throw new Error(data.error?.message || data.message || "Request failed");
+  }
+  return data.data;
 }
 
-function renderEmptyBoard() {
-  return `
-    <div class="board-empty text-center p-4 p-md-5">
-      <div class="h4 mb-2">No machines match this view.</div>
-      <div class="small text-secondary">Change the machine group or department filters.</div>
-    </div>`;
+async function loadBoardState() {
+  state.boardState = await fetchJson(boardStateUrl);
 }
 
-function renderStatusDock(visibleMachines) {
-  if (!managementStatusDock) return;
-  const total = visibleMachines.length;
-  const openAlerts = visibleMachines.filter((machine) => machine.active_alert && machine.active_alert.status === "OPEN").length;
-  const workingAlerts = visibleMachines.filter((machine) => {
-    const status = machine.active_alert && machine.active_alert.status;
-    return status === "ACKNOWLEDGED" || status === "ARRIVED";
-  }).length;
-  const healthy = total - openAlerts - workingAlerts - visibleMachines.filter((machine) => !machine.is_active).length;
-  const offline = visibleMachines.filter((machine) => !machine.is_active).length;
-  const lastRefresh = state.refreshedAt
-    ? new Date(state.refreshedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    : "just now";
-  const viewLabel = state.filters.department
-    ? `Department: ${state.filters.department}`
-    : state.filters.machineGroup
-      ? `Machine group: ${state.filters.machineGroup}`
-      : "All departments";
-  const shiftLabel = state.shiftRange.label || "Current shift";
+async function loadShiftDetails() {
+  const params = new URLSearchParams({
+    start: new Date(state.shiftRange.start).toISOString(),
+    end: new Date(state.shiftRange.end).toISOString(),
+  });
+  state.shiftDetails = await fetchJson(`${reportDetailsUrl}?${params.toString()}`);
+}
 
+async function loadBoards() {
+  const data = await fetchJson(boardsUrl);
+  state.boards = data.boards || [];
+  state.activeBoardId = data.active_board_id || (state.boards[0]?.id ?? null);
+}
+
+function renderBoardSelector() {
+  if (!boardSelector) return;
+  boardSelector.innerHTML = state.boards.length
+    ? state.boards.map((board) => `<option value="${board.id}">${escapeHtml(board.name)}</option>`).join("")
+    : '<option value="">No boards yet</option>';
+  boardSelector.value = state.activeBoardId ? String(state.activeBoardId) : "";
+  const activeBoard = getActiveBoard();
+  boardNameInput.value = activeBoard?.name || "";
+  modulePerformance.checked = Boolean(activeBoard?.show_performance);
+  moduleHistory.checked = Boolean(activeBoard?.show_recent_history);
+  moduleRadius.checked = Boolean(activeBoard?.show_radius);
+  const disabled = !activeBoard;
+  boardNameInput.disabled = disabled;
+  saveBoardNameBtn.disabled = disabled;
+  deleteBoardBtn.disabled = disabled;
+  modulePerformance.disabled = disabled;
+  moduleHistory.disabled = disabled;
+  moduleRadius.disabled = disabled;
+}
+
+function renderSourceLists() {
+  const machines = [...(state.boardState.machines || [])].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { numeric: true }));
+  const groups = [...new Set(machines.map((machine) => machine.machine_type).filter(Boolean))];
+  const departments = [...new Set(machines.map((machine) => machine.department_name).filter(Boolean))];
+
+  groupDropSource.innerHTML = groups.map((group) => `
+    <button class="board-builder-chip" type="button" draggable="true" data-source-type="machine_group" data-source-value="${escapeHtml(group)}">
+      <i class="bi bi-collection"></i><span>${escapeHtml(group)}</span>
+    </button>`).join("");
+
+  departmentDropSource.innerHTML = departments.map((department) => `
+    <button class="board-builder-chip" type="button" draggable="true" data-source-type="department" data-source-value="${escapeHtml(department)}">
+      <i class="bi bi-diagram-3"></i><span>${escapeHtml(department)}</span>
+    </button>`).join("");
+
+  machineDropSource.innerHTML = machines.map((machine) => `
+    <button class="board-builder-machine" type="button" draggable="true" data-source-type="machine" data-machine-id="${machine.id}">
+      <span class="board-builder-machine__name">${escapeHtml(machine.name)}</span>
+      <span class="board-builder-machine__meta">${escapeHtml(machine.machine_type || "Unassigned")} · ${escapeHtml(machine.department_name || "Unassigned")}</span>
+    </button>`).join("");
+}
+
+function renderCanvas() {
+  const activeBoard = getActiveBoard();
+  if (!activeBoard) {
+    boardBuilderCanvas.innerHTML = `
+      <div class="board-builder-empty">
+        <div class="h4 mb-2">No saved board selected.</div>
+        <div class="small text-secondary">Create a new board, then drag in a machine group, department, or individual machine.</div>
+      </div>`;
+    renderStatusDock([]);
+    return;
+  }
+  const items = (activeBoard.items || []).map((item) => ({ item, machine: getMachineById(item.machine_id) })).filter((row) => row.machine);
+  boardBuilderCanvas.innerHTML = items.length
+    ? `<div class="board-builder-grid">${items.map(({ item, machine }) => renderBoardTile(machine, activeBoard, item, true)).join("")}</div>`
+    : `<div class="board-builder-empty">
+        <div class="h4 mb-2">${escapeHtml(activeBoard.name)} is empty.</div>
+        <div class="small text-secondary">Drag a machine group, department, or machine into the canvas to build the board.</div>
+      </div>`;
+  renderStatusDock(items.map((row) => row.machine));
+}
+
+function renderStatusDock(machines) {
+  const total = machines.length;
+  const openAlerts = machines.filter((machine) => machine.active_alert && machine.active_alert.status === "OPEN").length;
+  const workingAlerts = machines.filter((machine) => ["ACKNOWLEDGED", "ARRIVED"].includes(machine.active_alert?.status)).length;
+  const healthy = total - openAlerts - workingAlerts - machines.filter((machine) => !machine.is_active).length;
   managementStatusDock.innerHTML = `
     <div class="operator-status-dock__panel ${openAlerts === 0 && workingAlerts === 0 ? "operator-status-dock__panel--steady" : "operator-status-dock__panel--busy"}">
       <div class="operator-status-dock__headline">
-        <div class="operator-status-dock__status">
-          <span class="operator-status-dock__pulse"></span>
-          <span class="operator-status-dock__label">${openAlerts === 0 && workingAlerts === 0 ? "Line steady" : "Active attention"}</span>
-        </div>
-        <div class="operator-status-dock__title">Management Station</div>
-        <div class="operator-status-dock__subcopy">${escapeHtml(viewLabel)} · ${escapeHtml(shiftLabel)} · refreshed ${escapeHtml(lastRefresh)}</div>
+        <div class="operator-status-dock__title">Board Builder</div>
+        <div class="operator-status-dock__subcopy">${escapeHtml(getActiveBoard()?.name || "No board selected")} · ${total} machines</div>
       </div>
-      <div class="operator-status-dock__stats" role="list" aria-label="Management status summary">
-        <div class="operator-status-dock__stat" role="listitem">
-          <i class="bi bi-check2-circle"></i>
-          <div>
-            <div class="operator-status-dock__stat-label">Healthy</div>
-            <div class="operator-status-dock__stat-value">${healthy}</div>
-          </div>
-        </div>
-        <div class="operator-status-dock__stat" role="listitem">
-          <i class="bi bi-exclamation-triangle-fill"></i>
-          <div>
-            <div class="operator-status-dock__stat-label">Waiting for Ack</div>
-            <div class="operator-status-dock__stat-value">${openAlerts}</div>
-          </div>
-        </div>
-        <div class="operator-status-dock__stat" role="listitem">
-          <i class="bi bi-tools"></i>
-          <div>
-            <div class="operator-status-dock__stat-label">Being Worked On</div>
-            <div class="operator-status-dock__stat-value">${workingAlerts}</div>
-          </div>
-        </div>
-      </div>
-      <div class="operator-status-dock__icons" aria-hidden="true">
-        <span class="operator-status-dock__icon"><i class="bi bi-shield-check"></i></span>
-        <span class="operator-status-dock__icon"><i class="bi bi-lightning-charge-fill"></i></span>
-        <span class="operator-status-dock__icon"><i class="bi bi-gear-wide-connected"></i></span>
-        <span class="operator-status-dock__icon"><i class="bi bi-diagram-3-fill"></i></span>
+      <div class="operator-status-dock__stats">
+        <div class="operator-status-dock__stat"><i class="bi bi-check2-circle"></i><div><div class="operator-status-dock__stat-label">Healthy</div><div class="operator-status-dock__stat-value">${healthy}</div></div></div>
+        <div class="operator-status-dock__stat"><i class="bi bi-exclamation-triangle-fill"></i><div><div class="operator-status-dock__stat-label">Open</div><div class="operator-status-dock__stat-value">${openAlerts}</div></div></div>
+        <div class="operator-status-dock__stat"><i class="bi bi-tools"></i><div><div class="operator-status-dock__stat-label">Working</div><div class="operator-status-dock__stat-value">${workingAlerts}</div></div></div>
       </div>
     </div>`;
 }
 
-function getMachineById(machineId) {
-  return (state.boardState.machines || []).find((machine) => String(machine.id) === String(machineId));
+async function createBoard() {
+  const name = window.prompt("Board name", "New Board");
+  if (name === null) return;
+  const board = await fetchJson(boardsUrl, {
+    method: "POST",
+    headers: window.AndonSecurity.withCsrfHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+    credentials: "same-origin",
+    body: JSON.stringify({ name }),
+  });
+  state.boards.unshift(board);
+  state.activeBoardId = board.id;
+  renderBoardSelector();
+  renderCanvas();
 }
 
-function formatTotalDuration(values) {
-  const total = values
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value) && value >= 0)
-    .reduce((sum, value) => sum + value, 0);
-  return total > 0 ? formatElapsedDuration(total) : "—";
+async function activateBoard(boardId) {
+  const board = await fetchJson(`${boardsUrl}/${boardId}/activate`, {
+    method: "POST",
+    headers: window.AndonSecurity.withCsrfHeaders({ Accept: "application/json" }),
+    credentials: "same-origin",
+  });
+  state.boards = state.boards.map((item) => (Number(item.id) === Number(board.id) ? board : item));
+  state.activeBoardId = board.id;
+  renderBoardSelector();
+  renderCanvas();
+}
+
+async function patchActiveBoard(payload) {
+  const activeBoard = getActiveBoard();
+  if (!activeBoard) return;
+  const board = await fetchJson(`${boardsUrl}/${activeBoard.id}`, {
+    method: "PATCH",
+    headers: window.AndonSecurity.withCsrfHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+    credentials: "same-origin",
+    body: JSON.stringify(payload),
+  });
+  state.boards = state.boards.map((item) => (Number(item.id) === Number(board.id) ? board : item));
+  state.activeBoardId = board.id;
+  renderBoardSelector();
+  renderCanvas();
+}
+
+async function deleteActiveBoard() {
+  const activeBoard = getActiveBoard();
+  if (!activeBoard) return;
+  if (!window.confirm(`Delete ${activeBoard.name}?`)) return;
+  await fetchJson(`${boardsUrl}/${activeBoard.id}`, {
+    method: "DELETE",
+    headers: window.AndonSecurity.withCsrfHeaders({ Accept: "application/json" }),
+    credentials: "same-origin",
+  });
+  await loadBoards();
+  renderBoardSelector();
+  renderCanvas();
+}
+
+async function addMachineToBoard(machineId) {
+  const activeBoard = getActiveBoard();
+  if (!activeBoard) return;
+  const board = await fetchJson(`${boardsUrl}/${activeBoard.id}/items`, {
+    method: "POST",
+    headers: window.AndonSecurity.withCsrfHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+    credentials: "same-origin",
+    body: JSON.stringify({ machine_id: machineId }),
+  });
+  state.boards = state.boards.map((item) => (Number(item.id) === Number(board.id) ? board : item));
+  renderBoardSelector();
+  renderCanvas();
+}
+
+async function bulkAddToBoard(sourceType, sourceValue) {
+  const activeBoard = getActiveBoard();
+  if (!activeBoard) return;
+  const board = await fetchJson(`${boardsUrl}/${activeBoard.id}/bulk-add`, {
+    method: "POST",
+    headers: window.AndonSecurity.withCsrfHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+    credentials: "same-origin",
+    body: JSON.stringify({ source_type: sourceType, source_value: sourceValue }),
+  });
+  state.boards = state.boards.map((item) => (Number(item.id) === Number(board.id) ? board : item));
+  renderBoardSelector();
+  renderCanvas();
+}
+
+async function removeBoardItem(itemId) {
+  const activeBoard = getActiveBoard();
+  if (!activeBoard) return;
+  const board = await fetchJson(`${boardsUrl}/${activeBoard.id}/items/${itemId}`, {
+    method: "DELETE",
+    headers: window.AndonSecurity.withCsrfHeaders({ Accept: "application/json" }),
+    credentials: "same-origin",
+  });
+  state.boards = state.boards.map((item) => (Number(item.id) === Number(board.id) ? board : item));
+  renderBoardSelector();
+  renderCanvas();
+}
+
+async function reorderBoardItems(itemIds) {
+  const activeBoard = getActiveBoard();
+  if (!activeBoard) return;
+  const board = await fetchJson(`${boardsUrl}/${activeBoard.id}/items/reorder`, {
+    method: "PATCH",
+    headers: window.AndonSecurity.withCsrfHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+    credentials: "same-origin",
+    body: JSON.stringify({ item_ids: itemIds }),
+  });
+  state.boards = state.boards.map((item) => (Number(item.id) === Number(board.id) ? board : item));
+  renderBoardSelector();
+  renderCanvas();
+}
+
+function getDraggedPayload(target) {
+  if (target.dataset.machineId) {
+    return { sourceType: "machine", machineId: target.dataset.machineId };
+  }
+  if (target.dataset.sourceType && target.dataset.sourceValue) {
+    return { sourceType: target.dataset.sourceType, sourceValue: target.dataset.sourceValue };
+  }
+  if (target.dataset.boardItemId) {
+    return { boardItemId: target.dataset.boardItemId };
+  }
+  return null;
+}
+
+async function handleDropPayload(payload, dropTarget) {
+  if (!payload) return;
+  if (payload.machineId) {
+    await addMachineToBoard(payload.machineId);
+    return;
+  }
+  if (payload.sourceType && payload.sourceValue) {
+    await bulkAddToBoard(payload.sourceType, payload.sourceValue);
+    return;
+  }
+  if (payload.boardItemId && dropTarget?.dataset.boardItemId && payload.boardItemId !== dropTarget.dataset.boardItemId) {
+    const currentIds = Array.from(boardBuilderCanvas.querySelectorAll("[data-board-item-id]")).map((node) => Number(node.dataset.boardItemId));
+    const draggedId = Number(payload.boardItemId);
+    const targetId = Number(dropTarget.dataset.boardItemId);
+    const withoutDragged = currentIds.filter((id) => id !== draggedId);
+    const targetIndex = withoutDragged.indexOf(targetId);
+    withoutDragged.splice(targetIndex, 0, draggedId);
+    await reorderBoardItems(withoutDragged);
+  }
+}
+
+function wireDragAndDrop() {
+  document.addEventListener("dragstart", (event) => {
+    const target = event.target.closest("[data-machine-id], [data-source-type], [data-board-item-id]");
+    if (!target) return;
+    const payload = getDraggedPayload(target);
+    if (!payload) return;
+    event.dataTransfer.setData("application/json", JSON.stringify(payload));
+  });
+  document.addEventListener("dragover", (event) => {
+    if (event.target.closest("[data-drop-zone='board-items'], [data-board-item-id]")) {
+      event.preventDefault();
+    }
+  });
+  document.addEventListener("drop", async (event) => {
+    const zone = event.target.closest("[data-drop-zone='board-items'], [data-board-item-id]");
+    if (!zone) return;
+    event.preventDefault();
+    try {
+      const payload = JSON.parse(event.dataTransfer.getData("application/json") || "{}");
+      await handleDropPayload(payload, zone.closest("[data-board-item-id]"));
+    } catch (_error) {
+      // Ignore malformed drag payloads.
+    }
+  });
+}
+
+function setDetailModalDefaults(machine) {
+  activeDetailMachine = machine || null;
+  managementDetailModalTitle.textContent = machine ? `${machine.name} Summary` : "Press Summary";
+  managementDetailStart.value = state.shiftRange.start || "";
+  managementDetailEnd.value = state.shiftRange.end || "";
+  managementDetailModalSubtitle.textContent = `${machine?.machine_type || "Unassigned"} · ${state.shiftRange.label || "Current shift"}`;
+  managementDetailSummary.innerHTML = "";
 }
 
 function renderManagementDetailRows(details) {
   if (!details.length) {
     return '<tr><td colspan="8" class="text-secondary">No alerts in this range.</td></tr>';
   }
-  return details.map((detail) => {
-    const issueParts = [detail.issue_category_name, detail.issue_problem_name].filter(Boolean);
-    const issue = issueParts.length ? issueParts.join(" - ") : "Unassigned";
-    const totalTime = detail.total_seconds !== null && detail.total_seconds !== undefined
-      ? formatElapsedDuration(detail.total_seconds)
-      : "—";
-    const ackTime = detail.acknowledged_seconds !== null && detail.acknowledged_seconds !== undefined
-      ? formatElapsedDuration(detail.acknowledged_seconds)
-      : "—";
-    const fixTime = detail.ack_to_clear_seconds !== null && detail.ack_to_clear_seconds !== undefined
-      ? formatElapsedDuration(detail.ack_to_clear_seconds)
-      : "—";
-    const operator = detail.responder_name_text || "—";
-    const finished = detail.closed_at || "—";
-    return `
-      <tr>
-        <td>${escapeHtml(detail.department_name || "Unassigned")}</td>
-        <td>${escapeHtml(issue)}</td>
-        <td>${escapeHtml(operator)}</td>
-        <td>${escapeHtml(detail.created_at || "—")}</td>
-        <td>${escapeHtml(finished)}</td>
-        <td>${escapeHtml(ackTime)}</td>
-        <td>${escapeHtml(fixTime)}</td>
-        <td>${escapeHtml(totalTime)}</td>
-      </tr>`;
-  }).join("");
-}
-
-function setDetailModalDefaults(machine) {
-  activeDetailMachine = machine || null;
-  if (managementDetailModalTitle) {
-    managementDetailModalTitle.textContent = machine ? `${machine.name} Summary` : "Press Summary";
-  }
-  if (managementDetailStart) {
-    managementDetailStart.value = state.shiftRange.start || "";
-  }
-  if (managementDetailEnd) {
-    managementDetailEnd.value = state.shiftRange.end || "";
-  }
-  if (managementDetailModalSubtitle) {
-    const machineGroup = machine?.machine_type || "Unassigned";
-    managementDetailModalSubtitle.textContent = `${machineGroup} · ${state.shiftRange.label || "Current shift"}`;
-  }
-  if (managementDetailSummary) {
-    managementDetailSummary.innerHTML = "";
-  }
+  return details.map((detail) => `
+    <tr>
+      <td>${escapeHtml(detail.department_name || "Unassigned")}</td>
+      <td>${escapeHtml([detail.issue_category_name, detail.issue_problem_name].filter(Boolean).join(" - ") || "Unassigned")}</td>
+      <td>${escapeHtml(detail.responder_name_text || "—")}</td>
+      <td>${escapeHtml(detail.created_at || "—")}</td>
+      <td>${escapeHtml(detail.closed_at || "—")}</td>
+      <td>${escapeHtml(detail.acknowledged_seconds != null ? formatElapsedDuration(detail.acknowledged_seconds) : "—")}</td>
+      <td>${escapeHtml(detail.ack_to_clear_seconds != null ? formatElapsedDuration(detail.ack_to_clear_seconds) : "—")}</td>
+      <td>${escapeHtml(detail.total_seconds != null ? formatElapsedDuration(detail.total_seconds) : "—")}</td>
+    </tr>`).join("");
 }
 
 async function loadManagementDetailSummary() {
-  if (!activeDetailMachine || !managementDetailTableBody) return;
+  if (!activeDetailMachine) return;
   const requestId = ++detailRequestId;
-  const { start, end } = getDetailRange();
   const params = new URLSearchParams({
-    start: zonedDateTimeToIso(start),
-    end: zonedDateTimeToIso(end),
+    start: new Date(managementDetailStart.value || state.shiftRange.start).toISOString(),
+    end: new Date(managementDetailEnd.value || state.shiftRange.end).toISOString(),
     machine_id: activeDetailMachine.id,
   });
   managementDetailTableBody.innerHTML = '<tr><td colspan="8" class="text-secondary">Loading shift summary...</td></tr>';
   try {
-    const response = await fetch(`${reportDetailsUrl}?${params.toString()}`);
-    const data = await response.json();
+    const details = await fetchJson(`${reportDetailsUrl}?${params.toString()}`);
     if (requestId !== detailRequestId) return;
-    if (!data.success) {
-      throw new Error(data.error?.message || "Unable to load machine details");
-    }
-    const details = Array.isArray(data.data) ? data.data : [];
-    const totalDuration = formatTotalDuration(details.map((detail) => detail.total_seconds));
-    const averageAck = formatAverageDuration(details.map((detail) => Number(detail.acknowledged_seconds)));
-    const averageFix = formatAverageDuration(details.map((detail) => Number(detail.ack_to_clear_seconds)));
-    if (managementDetailSummary) {
-      managementDetailSummary.innerHTML = `
-        <div class="management-detail-modal__summary-chip">
-          <div class="management-detail-modal__summary-label">Alerts</div>
-          <div class="management-detail-modal__summary-value">${escapeHtml(details.length)}</div>
-        </div>
-        <div class="management-detail-modal__summary-chip">
-          <div class="management-detail-modal__summary-label">Total Duration</div>
-          <div class="management-detail-modal__summary-value">${escapeHtml(totalDuration)}</div>
-        </div>
-        <div class="management-detail-modal__summary-chip">
-          <div class="management-detail-modal__summary-label">Avg Ack</div>
-          <div class="management-detail-modal__summary-value">${escapeHtml(averageAck)}</div>
-        </div>
-        <div class="management-detail-modal__summary-chip">
-          <div class="management-detail-modal__summary-label">Avg Fix</div>
-          <div class="management-detail-modal__summary-value">${escapeHtml(averageFix)}</div>
-        </div>`;
-    }
+    managementDetailSummary.innerHTML = `
+      <div class="management-detail-modal__summary-chip"><div class="management-detail-modal__summary-label">Alerts</div><div class="management-detail-modal__summary-value">${details.length}</div></div>
+      <div class="management-detail-modal__summary-chip"><div class="management-detail-modal__summary-label">Avg Ack</div><div class="management-detail-modal__summary-value">${escapeHtml(formatAverageDuration(details.map((detail) => Number(detail.acknowledged_seconds))))}</div></div>
+      <div class="management-detail-modal__summary-chip"><div class="management-detail-modal__summary-label">Avg Fix</div><div class="management-detail-modal__summary-value">${escapeHtml(formatAverageDuration(details.map((detail) => Number(detail.ack_to_clear_seconds))))}</div></div>`;
     managementDetailTableBody.innerHTML = renderManagementDetailRows(details);
-    if (managementDetailModalSubtitle) {
-      managementDetailModalSubtitle.textContent = `${activeDetailMachine.machine_type || "Unassigned"} · ${state.shiftRange.label || "Current shift"} · ${details.length} alert${details.length === 1 ? "" : "s"}`;
-    }
   } catch (error) {
     if (requestId !== detailRequestId) return;
     managementDetailTableBody.innerHTML = `<tr><td colspan="8" class="text-danger">${escapeHtml(error.message || "Unable to load machine details")}</td></tr>`;
   }
 }
 
-function openManagementDetailModal(machine) {
-  if (!machine) return;
-  setDetailModalDefaults(machine);
-  if (managementDetailModal) {
-    managementDetailModal.show();
-  }
-  loadManagementDetailSummary();
-}
-
-function renderBoard() {
-  const visibleMachines = getVisibleMachines();
-  const groups = groupByMachineGroup(visibleMachines);
-  managementGrid.innerHTML = visibleMachines.length
-    ? [...groups.entries()]
-        .map(([groupName, machines]) => renderMachineGroupSection(groupName, machines.sort(sortMachinesInOrder)))
-        .join("")
-    : renderEmptyBoard();
-  renderStatusDock(visibleMachines);
-}
-
-function updateTimers() {
-  liveTimerNodes.forEach((timer) => {
-    const nextSeconds = Number(timer.dataset.elapsedSeconds || "0") + 1;
-    timer.dataset.elapsedSeconds = String(nextSeconds);
-    timer.textContent = formatElapsedDuration(nextSeconds);
+function wireEvents() {
+  createBoardBtn?.addEventListener("click", () => createBoard().catch((error) => window.alert(error.message)));
+  saveBoardNameBtn?.addEventListener("click", () => patchActiveBoard({ name: boardNameInput.value }).catch((error) => window.alert(error.message)));
+  deleteBoardBtn?.addEventListener("click", () => deleteActiveBoard().catch((error) => window.alert(error.message)));
+  boardSelector?.addEventListener("change", () => activateBoard(boardSelector.value).catch((error) => window.alert(error.message)));
+  [modulePerformance, moduleHistory, moduleRadius].forEach((input) => {
+    input?.addEventListener("change", () => patchActiveBoard({
+      show_performance: modulePerformance.checked,
+      show_recent_history: moduleHistory.checked,
+      show_radius: moduleRadius.checked,
+    }).catch((error) => window.alert(error.message)));
   });
-}
-
-function syncTimers() {
-  liveTimerNodes = Array.from(managementGrid.querySelectorAll('[data-live-timer="true"][data-elapsed-seconds]'));
-}
-
-async function refreshBoard() {
-  if (refreshInFlight) {
-    refreshQueued = true;
-    return;
-  }
-  refreshInFlight = true;
-  try {
-    await Promise.all([loadBoardState(), loadShiftDetails()]);
-    normalizeViewState();
-    renderViewControls();
-    renderBoard();
-    syncTimers();
-  } finally {
-    refreshInFlight = false;
-    if (refreshQueued) {
-      refreshQueued = false;
-      scheduleRefresh();
+  boardBuilderCanvas?.addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-remove-board-item]");
+    if (removeButton) {
+      removeBoardItem(removeButton.dataset.removeBoardItem).catch((error) => window.alert(error.message));
+      return;
     }
-  }
-}
-
-function scheduleRefresh() {
-  if (refreshTimeoutId) {
-    clearTimeout(refreshTimeoutId);
-  }
-  refreshTimeoutId = setTimeout(() => {
-    refreshTimeoutId = null;
-    refreshBoard();
-  }, 150);
-}
-
-function toggleLock() {
-  state.locked = !state.locked;
-  if (state.locked && !state.filters.machineGroup && !state.filters.department) {
-    state.filters.department = "";
-  }
-  saveView();
-  renderViewControls();
-  renderBoard();
-}
-
-function clearView() {
-  state.filters.machineGroup = "";
-  state.filters.department = "";
-  state.locked = false;
-  saveView();
-  renderViewControls();
-  renderBoard();
-}
-
-function handleManagementCardActivation(event) {
-  const card = event.target.closest(".management-machine-card[data-machine-id]");
-  if (!card || !managementGrid.contains(card)) return;
-  if (event.target.closest("button, a, input, select, textarea, label")) return;
-  const machine = getMachineById(card.dataset.machineId);
-  if (!machine) return;
-  openManagementDetailModal(machine);
-}
-
-function handleManagementCardKeydown(event) {
-  if (event.key !== "Enter" && event.key !== " ") return;
-  const card = event.target.closest(".management-machine-card[data-machine-id]");
-  if (!card || !managementGrid.contains(card)) return;
-  event.preventDefault();
-  const machine = getMachineById(card.dataset.machineId);
-  if (!machine) return;
-  openManagementDetailModal(machine);
-}
-
-function onMachineGroupChange() {
-  if (state.locked) return;
-  state.filters.machineGroup = managementMachineGroupSelect.value || "";
-  saveView();
-  renderViewControls();
-  renderBoard();
-}
-
-function onDepartmentChange() {
-  if (state.locked) return;
-  state.filters.department = managementDepartmentSelect.value || "";
-  saveView();
-  renderViewControls();
-  renderBoard();
-}
-
-function handleVisibilityChange() {
-  if (document.hidden) {
-    if (liveTimerIntervalId) {
-      clearInterval(liveTimerIntervalId);
-      liveTimerIntervalId = null;
-    }
-    return;
-  }
-  if (!liveTimerIntervalId) {
-    liveTimerIntervalId = setInterval(updateTimers, 1000);
-  }
-}
-
-function setFallbackPolling(enabled) {
-  if (!enabled && fallbackPollIntervalId) {
-    clearInterval(fallbackPollIntervalId);
-    fallbackPollIntervalId = null;
-    return;
-  }
-  if (enabled && !fallbackPollIntervalId) {
-    fallbackPollIntervalId = setInterval(scheduleRefresh, 15000);
-  }
-}
-
-async function boot() {
-  if (!state.shiftRange.start || !state.shiftRange.end) {
-    const defaults = getDefaultShiftRange();
-    state.shiftRange.start = defaults.start;
-    state.shiftRange.end = defaults.end;
-    state.shiftRange.label = defaults.label;
-  }
-  await loadSavedView();
-  await refreshBoard();
-  renderViewControls();
-  syncTimers();
-  liveTimerIntervalId = setInterval(updateTimers, 1000);
-  document.addEventListener("visibilitychange", handleVisibilityChange);
-  managementGrid.addEventListener("click", handleManagementCardActivation);
-  managementGrid.addEventListener("keydown", handleManagementCardKeydown);
-  managementMachineGroupSelect.addEventListener("change", onMachineGroupChange);
-  managementDepartmentSelect.addEventListener("change", onDepartmentChange);
-  managementLockView.addEventListener("click", toggleLock);
-  managementClearView.addEventListener("click", clearView);
+    const tile = event.target.closest("[data-machine-id]");
+    if (!tile) return;
+    const machine = getMachineById(tile.dataset.machineId);
+    if (!machine) return;
+    setDetailModalDefaults(machine);
+    managementDetailModal?.show();
+    loadManagementDetailSummary();
+  });
   managementDetailRefresh?.addEventListener("click", loadManagementDetailSummary);
-  managementDetailStart?.addEventListener("change", () => {
-    if (activeDetailMachine) {
-      loadManagementDetailSummary();
-    }
-  });
-  managementDetailEnd?.addEventListener("change", () => {
-    if (activeDetailMachine) {
-      loadManagementDetailSummary();
-    }
-  });
   managementDetailModalEl?.addEventListener("hidden.bs.modal", () => {
     activeDetailMachine = null;
     detailRequestId += 1;
   });
-  window.AndonRefreshBus?.onRefresh(scheduleRefresh);
-  window.AndonRealtime?.onEvent((event) => {
-    if (["board_refresh", "alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
-      scheduleRefresh();
-    }
-  });
-  window.AndonRealtime?.onStatus((status) => setFallbackPolling(!status.connected));
-  setFallbackPolling(!window.AndonRealtime?.connected);
 }
 
-boot();
+async function boot() {
+  wireDragAndDrop();
+  wireEvents();
+  await Promise.all([loadBoardState(), loadShiftDetails(), loadBoards()]);
+  renderBoardSelector();
+  renderSourceLists();
+  renderCanvas();
+}
+
+boot().catch((error) => {
+  boardBuilderCanvas.innerHTML = `<div class="board-builder-empty text-danger">${escapeHtml(error.message || "Unable to load board builder")}</div>`;
+});

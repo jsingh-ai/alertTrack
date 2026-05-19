@@ -25,6 +25,12 @@ python scripts/seed_andon_data.py
 python scripts/seed_auth_users.py
 ```
 
+If your database was created before the board builder / management page was added, run this repair script once to create the missing board tables:
+
+```bash
+python scripts/init_management_board_tables.py
+```
+
 `scripts/seed_auth_users.py` creates or updates demo login accounts, applies passwords, ensures base machine groups exist, and adds multi-company memberships for admin/manager/operator examples.
 
 ### Windows PostgreSQL Setup
