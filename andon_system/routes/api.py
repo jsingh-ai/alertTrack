@@ -152,7 +152,8 @@ def users():
 @api_bp.get("/board-state")
 def board_state():
     _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
-    return jsonify({"success": True, "data": build_board_state()})
+    compact = str(request.args.get("compact") or "").strip().lower() in {"1", "true", "yes", "on"}
+    return jsonify({"success": True, "data": build_board_state(include_metadata=not compact)})
 
 
 @api_bp.get("/operator-snapshot")
@@ -392,13 +393,32 @@ def api_create_board():
         user_id=user.id,
         company_id=company_id,
         name=name,
-        show_performance=True,
-        show_recent_history=True,
-        show_radius=True,
+        show_performance=bool(payload.get("show_performance", True)),
+        show_recent_history=bool(payload.get("show_recent_history", True)),
+        show_radius=bool(payload.get("show_radius", True)),
         last_opened_at=datetime.now(timezone.utc),
     )
     db.session.add(board)
+    db.session.flush()
+    seen_machine_ids = set()
+    machine_ids = payload.get("machine_ids") or []
+    if isinstance(machine_ids, list):
+        position = 0
+        for raw_machine_id in machine_ids:
+            try:
+                machine_id = int(raw_machine_id)
+            except (TypeError, ValueError):
+                continue
+            if machine_id in seen_machine_ids:
+                continue
+            machine = _get_scoped_machine(machine_id)
+            if machine is None:
+                continue
+            seen_machine_ids.add(machine_id)
+            db.session.add(UserBoardItem(board_id=board.id, machine_id=machine_id, position=position))
+            position += 1
     db.session.commit()
+    board = _get_user_board(board.id)
     return jsonify({"success": True, "data": board.to_dict()}), 201
 
 

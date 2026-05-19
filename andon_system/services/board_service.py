@@ -23,14 +23,14 @@ def utc_now():
     return datetime.now(timezone.utc)
 
 
-def build_board_state():
+def build_board_state(include_metadata: bool = True):
     company_id = get_current_company_id()
-    cache_key = ("board_state", company_id)
+    cache_key = ("board_state", company_id, include_metadata)
     cached = get_cached(cache_key)
     if cached is not None:
         return cached
 
-    context = _load_board_context(company_id, include_alerts=True)
+    context = _load_board_context(company_id, include_alerts=True, include_metadata=include_metadata)
 
     result = {
         "machines": [
@@ -42,42 +42,6 @@ def build_board_state():
             )
             for machine in context["visible_machines"]
         ],
-        "departments": [
-            {
-                "id": department.id,
-                "name": department.name,
-            }
-            for department in context["visible_departments"]
-        ],
-        "issue_groups": [
-            {
-                "department_id": category.department_id,
-                "department_name": category.department.name if category.department else None,
-                "category_id": category.id,
-                "category_name": category.name,
-                "problems": [
-                    {
-                        "id": problem.id,
-                        "name": problem.name,
-                        "description": problem.description,
-                    }
-                    for problem in sorted(category.problems or [], key=lambda item: item.name.lower())
-                ],
-            }
-            for category in context["visible_issue_categories"]
-        ],
-        "users": [
-            {
-                "id": user.id,
-                "display_name": user.display_name,
-                "work_id": user.employee_id,
-                "department_id": user.department_id,
-                "department_name": user.department.name if user.department else None,
-                "machine_group_id": user.machine_group_id,
-                "machine_group_name": user.machine_group.name if user.machine_group else None,
-            }
-            for user in context["visible_users"]
-        ],
         "filters": {
             "machine_types": _unique_values(machine.machine_type for machine in context["visible_machines"]),
             "areas": _unique_values(machine.area for machine in context["visible_machines"]),
@@ -85,6 +49,47 @@ def build_board_state():
             "departments": _unique_values(machine.department.name for machine in context["visible_machines"] if machine.department),
         },
     }
+    if include_metadata:
+        result.update(
+            {
+                "departments": [
+                    {
+                        "id": department.id,
+                        "name": department.name,
+                    }
+                    for department in context["visible_departments"]
+                ],
+                "issue_groups": [
+                    {
+                        "department_id": category.department_id,
+                        "department_name": category.department.name if category.department else None,
+                        "category_id": category.id,
+                        "category_name": category.name,
+                        "problems": [
+                            {
+                                "id": problem.id,
+                                "name": problem.name,
+                                "description": problem.description,
+                            }
+                            for problem in sorted(category.problems or [], key=lambda item: item.name.lower())
+                        ],
+                    }
+                    for category in context["visible_issue_categories"]
+                ],
+                "users": [
+                    {
+                        "id": user.id,
+                        "display_name": user.display_name,
+                        "work_id": user.employee_id,
+                        "department_id": user.department_id,
+                        "department_name": user.department.name if user.department else None,
+                        "machine_group_id": user.machine_group_id,
+                        "machine_group_name": user.machine_group.name if user.machine_group else None,
+                    }
+                    for user in context["visible_users"]
+                ],
+            }
+        )
     set_cached(cache_key, result, BOARD_STATE_CACHE_TTL_SECONDS)
     return result
 
@@ -96,7 +101,7 @@ def build_operator_snapshot():
     if cached is not None:
         return cached
 
-    context = _load_board_context(company_id, include_alerts=True)
+    context = _load_board_context(company_id, include_alerts=True, include_metadata=False)
     result = {
         "machines": [
             _serialize_machine(
@@ -119,7 +124,7 @@ def build_operator_metadata():
     if cached is not None:
         return cached
 
-    context = _load_board_context(company_id, include_alerts=False)
+    context = _load_board_context(company_id, include_alerts=False, include_metadata=True)
     result = {
         "departments": [
             {
@@ -162,37 +167,44 @@ def build_operator_metadata():
     return result
 
 
-def _load_board_context(company_id, include_alerts: bool):
+def _load_board_context(company_id, include_alerts: bool, include_metadata: bool = True):
     scope = get_scope_filters()
     machine_query = Machine.query.options(joinedload(Machine.department))
-    department_query = Department.query
-    issue_query = IssueCategory.query.options(joinedload(IssueCategory.department), joinedload(IssueCategory.problems))
-    user_query = UserCompanyAccess.query.options(
-        joinedload(UserCompanyAccess.user),
-        joinedload(UserCompanyAccess.department),
-        joinedload(UserCompanyAccess.machine_group),
+    department_query = Department.query if include_metadata else None
+    issue_query = IssueCategory.query.options(joinedload(IssueCategory.department), joinedload(IssueCategory.problems)) if include_metadata else None
+    user_query = (
+        UserCompanyAccess.query.options(
+            joinedload(UserCompanyAccess.user),
+            joinedload(UserCompanyAccess.department),
+            joinedload(UserCompanyAccess.machine_group),
+        )
+        if include_metadata
+        else None
     )
     alert_query = AndonAlert.query.filter(AndonAlert.status.in_(ALERT_STATUSES_ACTIVE))
     if company_id:
         machine_query = machine_query.filter(Machine.company_id == company_id)
-        department_query = department_query.filter(Department.company_id == company_id)
-        issue_query = issue_query.filter(IssueCategory.company_id == company_id)
-        user_query = user_query.filter(UserCompanyAccess.company_id == company_id)
+        if include_metadata:
+            department_query = department_query.filter(Department.company_id == company_id)
+            issue_query = issue_query.filter(IssueCategory.company_id == company_id)
+            user_query = user_query.filter(UserCompanyAccess.company_id == company_id)
         alert_query = alert_query.filter(AndonAlert.company_id == company_id)
     if scope["department_id"] is not None:
         machine_query = machine_query.filter(Machine.department_id == scope["department_id"])
-        department_query = department_query.filter(Department.id == scope["department_id"])
-        issue_query = issue_query.filter(IssueCategory.department_id == scope["department_id"])
-        user_query = user_query.filter(UserCompanyAccess.department_id == scope["department_id"])
+        if include_metadata:
+            department_query = department_query.filter(Department.id == scope["department_id"])
+            issue_query = issue_query.filter(IssueCategory.department_id == scope["department_id"])
+            user_query = user_query.filter(UserCompanyAccess.department_id == scope["department_id"])
         alert_query = alert_query.filter(AndonAlert.department_id == scope["department_id"])
     if scope["machine_group_name"]:
         machine_query = machine_query.filter(Machine.machine_type == scope["machine_group_name"])
-        user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name == scope["machine_group_name"])
+        if include_metadata:
+            user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name == scope["machine_group_name"])
         alert_query = alert_query.filter(AndonAlert.machine.has(Machine.machine_type == scope["machine_group_name"]))
 
     machines = machine_query.order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all()
-    departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all()
-    issue_categories = issue_query.filter_by(is_active=True).order_by(IssueCategory.name.asc()).all()
+    departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all() if include_metadata else []
+    issue_categories = issue_query.filter_by(is_active=True).order_by(IssueCategory.name.asc()).all() if include_metadata else []
     visible_machines = [machine for machine in machines if machine.is_active and (machine.department is None or machine.department.is_active)]
     visible_departments = departments
     visible_issue_categories = [
@@ -200,14 +212,18 @@ def _load_board_context(company_id, include_alerts: bool):
         for category in issue_categories
         if category.department and category.department.is_active
     ]
-    visible_users = [
-        access.user
-        for access in user_query.filter_by(is_active=True).order_by(UserCompanyAccess.id.asc()).all()
-        if access.user
-        and access.user.is_active
-        and (access.department is None or access.department.is_active)
-        and (access.machine_group is None or access.machine_group.is_active)
-    ]
+    visible_users = (
+        [
+            access.user
+            for access in user_query.filter_by(is_active=True).order_by(UserCompanyAccess.id.asc()).all()
+            if access.user
+            and access.user.is_active
+            and (access.department is None or access.department.is_active)
+            and (access.machine_group is None or access.machine_group.is_active)
+        ]
+        if include_metadata
+        else []
+    )
     radius_status_by_machine = build_radius_status_map(visible_machines)
 
     alert_by_machine = {}
@@ -228,8 +244,13 @@ def _load_board_context(company_id, include_alerts: bool):
             alert
             for alert in active_alerts
             if alert.machine_id in visible_machine_ids
-            and (alert.department_id is None or alert.department_id in visible_department_ids)
-            and (alert.issue_category_id is None or alert.issue_category_id in visible_category_ids)
+            and (
+                not include_metadata
+                or (
+                    (alert.department_id is None or alert.department_id in visible_department_ids)
+                    and (alert.issue_category_id is None or alert.issue_category_id in visible_category_ids)
+                )
+            )
         ]
         created_notes_by_alert_id = _created_notes_by_alert_id(active_alerts, company_id)
         for alert in active_alerts:
