@@ -8588,6 +8588,7 @@ body.board-screen-shell .board-alert-card.status-cancelled {
 }
 
 body.board-screen-shell #departmentBoardShell .operator-status-dock {
+  margin-top: 0 !important;
   margin-bottom: 0.45rem !important;
 }
 
