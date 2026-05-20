@@ -169,6 +169,8 @@ def build_operator_metadata():
 
 def _load_board_context(company_id, include_alerts: bool, include_metadata: bool = True):
     scope = get_scope_filters()
+    department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
     machine_query = Machine.query.options(
         load_only(
             Machine.id,
@@ -249,18 +251,18 @@ def _load_board_context(company_id, include_alerts: bool, include_metadata: bool
             issue_query = issue_query.filter(IssueCategory.company_id == company_id)
             user_query = user_query.filter(UserCompanyAccess.company_id == company_id)
         alert_query = alert_query.filter(AndonAlert.company_id == company_id)
-    if scope["department_id"] is not None:
-        machine_query = machine_query.filter(Machine.department_id == scope["department_id"])
+    if department_ids:
+        machine_query = machine_query.filter(Machine.department_id.in_(department_ids))
         if include_metadata:
-            department_query = department_query.filter(Department.id == scope["department_id"])
-            issue_query = issue_query.filter(IssueCategory.department_id == scope["department_id"])
-            user_query = user_query.filter(UserCompanyAccess.department_id == scope["department_id"])
-        alert_query = alert_query.filter(AndonAlert.department_id == scope["department_id"])
-    if scope["machine_group_name"]:
-        machine_query = machine_query.filter(Machine.machine_type == scope["machine_group_name"])
+            department_query = department_query.filter(Department.id.in_(department_ids))
+            issue_query = issue_query.filter(IssueCategory.department_id.in_(department_ids))
+            user_query = user_query.filter(UserCompanyAccess.department_id.in_(department_ids))
+        alert_query = alert_query.filter(AndonAlert.department_id.in_(department_ids))
+    if machine_group_names:
+        machine_query = machine_query.filter(Machine.machine_type.in_(machine_group_names))
         if include_metadata:
-            user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name == scope["machine_group_name"])
-        alert_query = alert_query.filter(AndonAlert.machine.has(Machine.machine_type == scope["machine_group_name"]))
+            user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
+        alert_query = alert_query.filter(AndonAlert.machine.has(Machine.machine_type.in_(machine_group_names)))
 
     machines = machine_query.order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all()
     departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all() if include_metadata else []

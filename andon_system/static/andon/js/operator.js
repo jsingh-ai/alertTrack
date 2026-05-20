@@ -1,6 +1,12 @@
 const boardUrl = "/api/andon/operator-snapshot";
 const operatorMetadataUrl = "/api/andon/operator-metadata";
 const operatorViewStorageKey = "andon-operator-view";
+const operatorMetadataCacheScope = [
+  String(window.AndonRealtimeConfig?.companyId ?? "none"),
+  String((document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "").slice(0, 16) || "anon"),
+].join(":");
+const operatorMetadataCacheKey = `andon-operator-metadata-cache-v1:${operatorMetadataCacheScope}`;
+const operatorMetadataCacheTtlMs = 5 * 60 * 1000;
 const defaultOperatorMachineGroup = "Press";
 
 const machineBoard = document.getElementById("machineBoard");
@@ -63,6 +69,10 @@ let operatorMetadataLoadPromise = null;
 let operatorLastPersistedViewKey = "";
 let createAlertInFlight = false;
 let createAlertMachineId = null;
+let departmentButtonsMarkupCacheKey = "";
+let departmentButtonsMarkupCacheValue = "";
+let problemOptionsMarkupCacheKey = "";
+let problemOptionsMarkupCacheValue = "";
 
 function markOperatorInteractionActive(durationMs = 1800) {
   operatorInteractionLockUntil = Date.now() + durationMs;
@@ -113,16 +123,13 @@ function handleVisibilityChange() {
 }
 
 async function boot() {
+  hydrateOperatorMetadataFromCache();
   void restoreViewState().then(() => {
     normalizeViewState();
     renderViewControls();
     renderBoard();
   }).catch((_error) => {
     console.warn("Failed to restore operator view state.");
-  });
-
-  void loadOperatorMetadata().catch((_error) => {
-    console.warn("Failed to preload operator metadata.");
   });
   await loadBoardState();
   normalizeViewState();
@@ -138,7 +145,7 @@ async function boot() {
         state.metadataLoaded = false;
         operatorMetadataLoadPromise = null;
         if (state.selectedMachine || state.selectedAlert) {
-          void loadOperatorMetadata().then(renderBoard).catch(() => {});
+          void loadOperatorMetadata({ force: true }).then(renderBoard).catch(() => {});
         }
       }
       scheduleOperatorRefresh();
@@ -146,6 +153,7 @@ async function boot() {
   });
   window.AndonRealtime?.onStatus((status) => setOperatorFallbackPolling(!status.connected));
   setOperatorFallbackPolling(!window.AndonRealtime?.connected);
+  scheduleOperatorMetadataWarmup();
 }
 
 async function loadBoardState() {
@@ -155,17 +163,58 @@ async function loadBoardState() {
   state.refreshedAt = Date.now();
 }
 
-async function loadOperatorMetadata() {
-  if (state.metadataLoaded) return;
+function getCachedOperatorMetadata() {
+  try {
+    const raw = window.sessionStorage.getItem(operatorMetadataCacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const cachedAt = Number(parsed.cachedAt || 0);
+    if (!cachedAt || (Date.now() - cachedAt) > operatorMetadataCacheTtlMs) return null;
+    return parsed.data || null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function setCachedOperatorMetadata(metadata) {
+  try {
+    window.sessionStorage.setItem(
+      operatorMetadataCacheKey,
+      JSON.stringify({ cachedAt: Date.now(), data: metadata || {} }),
+    );
+  } catch (_error) {
+    // Ignore storage failures in locked-down kiosk environments.
+  }
+}
+
+function applyOperatorMetadata(metadata) {
+  state.departments = metadata?.departments || [];
+  state.issueGroups = metadata?.issue_groups || [];
+  state.users = metadata?.users || [];
+  state.metadataLoaded = true;
+}
+
+function hydrateOperatorMetadataFromCache() {
+  const cached = getCachedOperatorMetadata();
+  if (!cached) return false;
+  applyOperatorMetadata(cached);
+  return true;
+}
+
+async function loadOperatorMetadata(options = {}) {
+  const force = Boolean(options.force);
+  if (state.metadataLoaded && !force) return;
   if (!operatorMetadataLoadPromise) {
     operatorMetadataLoadPromise = (async () => {
+      if (!force && hydrateOperatorMetadataFromCache()) {
+        return;
+      }
       const response = await fetch(operatorMetadataUrl);
       const data = await response.json();
       const metadata = data.data || {};
-      state.departments = metadata.departments || [];
-      state.issueGroups = metadata.issue_groups || [];
-      state.users = metadata.users || [];
-      state.metadataLoaded = true;
+      applyOperatorMetadata(metadata);
+      setCachedOperatorMetadata(metadata);
     })().finally(() => {
       operatorMetadataLoadPromise = null;
     });
@@ -176,6 +225,24 @@ async function loadOperatorMetadata() {
 async function ensureOperatorMetadataLoaded() {
   if (state.metadataLoaded) return;
   await loadOperatorMetadata();
+}
+
+function scheduleOperatorMetadataWarmup() {
+  if (state.metadataLoaded || operatorMetadataLoadPromise) return;
+  const runWarmup = () => {
+    void loadOperatorMetadata().then(() => {
+      if (state.selectedMachine || state.selectedAlert) {
+        renderBoard();
+      }
+    }).catch((_error) => {
+      console.warn("Failed to preload operator metadata.");
+    });
+  };
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(runWarmup, { timeout: 1200 });
+    return;
+  }
+  setTimeout(runWarmup, 250);
 }
 
 function wireEvents() {
@@ -808,6 +875,14 @@ function getGroupSummary(machines) {
 }
 
 function renderDepartmentButtonsMarkup() {
+  const selectedDepartmentId = state.selectedDepartment ? Number(state.selectedDepartment.id) : null;
+  const metadataKey = getRenderableDepartments()
+    .map((department) => `${department.id}:${department.name}:${department.isPlaceholder ? 1 : 0}`)
+    .join("|");
+  const cacheKey = `${selectedDepartmentId || ""}|${metadataKey}`;
+  if (cacheKey === departmentButtonsMarkupCacheKey) {
+    return departmentButtonsMarkupCacheValue;
+  }
   const departments = getRenderableDepartments().sort((left, right) => {
     const leftIndex = departmentPreferredOrder.indexOf(left.name);
     const rightIndex = departmentPreferredOrder.indexOf(right.name);
@@ -816,7 +891,7 @@ function renderDepartmentButtonsMarkup() {
     if (rightIndex === -1) return -1;
     return leftIndex - rightIndex;
   });
-  return departments
+  const markup = departments
     .map((department) => {
       const label = departmentLabelMap[department.name] || department.name;
       const isSelected = state.selectedDepartment && Number(state.selectedDepartment.id) === Number(department.id);
@@ -830,6 +905,9 @@ function renderDepartmentButtonsMarkup() {
         </button>`;
     })
     .join("");
+  departmentButtonsMarkupCacheKey = cacheKey;
+  departmentButtonsMarkupCacheValue = markup;
+  return markup;
 }
 
 function getRenderableDepartments() {
@@ -846,16 +924,25 @@ function getRenderableDepartments() {
 }
 
 function renderProblemOptionsMarkup(problems) {
-  return problems.length
+  const selectedProblemId = state.selectedProblem ? Number(state.selectedProblem.id) : null;
+  const problemKey = problems.map((problem) => `${problem.id}:${problem.name}`).join("|");
+  const cacheKey = `${selectedProblemId || ""}|${problemKey}`;
+  if (cacheKey === problemOptionsMarkupCacheKey) {
+    return problemOptionsMarkupCacheValue;
+  }
+  const markup = problems.length
     ? problems
-        .map(
-          (problem) => `
+      .map(
+        (problem) => `
             <button type="button" class="problem-btn${state.selectedProblem && Number(state.selectedProblem.id) === Number(problem.id) ? " is-active" : ""}" data-problem-id="${problem.id}">
               <span class="problem-btn__name">${escapeHtml(problem.name)}</span>
             </button>`,
-        )
-        .join("")
+      )
+      .join("")
     : '<div class="problem-empty">No issues found for this department.</div>';
+  problemOptionsMarkupCacheKey = cacheKey;
+  problemOptionsMarkupCacheValue = markup;
+  return markup;
 }
 
 function getDepartmentIconClass(name) {

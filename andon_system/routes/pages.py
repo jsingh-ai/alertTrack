@@ -327,10 +327,12 @@ def reports_page():
         Machine.machine_type.isnot(None),
         Machine.machine_type != "",
     )
-    if scope["department_id"] is not None:
-        query = query.filter(Machine.department_id == scope["department_id"])
-    if scope["machine_group_name"]:
-        query = query.filter(Machine.machine_type == scope["machine_group_name"])
+    department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+    if department_ids:
+        query = query.filter(Machine.department_id.in_(department_ids))
+    if machine_group_names:
+        query = query.filter(Machine.machine_type.in_(machine_group_names))
     machine_groups = [row.machine_type for row in query.distinct().order_by(Machine.machine_type.asc()).all()] if company else []
     return render_template(
         "andon/reports.html",

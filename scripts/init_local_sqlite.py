@@ -28,6 +28,7 @@ DEMO_PASSWORDS = {
     "admin.demo": "AdminDemo!2026",
     "manager.demo": "ManagerDemo!2026",
     "operator.demo": "OperatorDemo!2026",
+    "viewer.demo": "ViewerDemo!2026",
 }
 
 
@@ -110,6 +111,15 @@ def _ensure_demo_users():
             "password": DEMO_PASSWORDS["operator.demo"],
             "memberships": [
                 ("starpak", "Operator", "restricted", "Quality", "Press"),
+            ],
+        },
+        {
+            "username": "viewer.demo",
+            "email": "viewer.demo@processguard.local",
+            "display_name": "Line Manager",
+            "password": DEMO_PASSWORDS["viewer.demo"],
+            "memberships": [
+                ("five-star", "Manager", "restricted", "Shipping", "Converting"),
             ],
         },
     ]

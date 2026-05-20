@@ -1,5 +1,11 @@
 const alertsUrl = "/api/andon/alerts?status=active";
 const operatorMetadataUrl = "/api/andon/operator-metadata";
+const operatorMetadataCacheScope = [
+  String(window.AndonRealtimeConfig?.companyId ?? "none"),
+  String((document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "").slice(0, 16) || "anon"),
+].join(":");
+const operatorMetadataCacheKey = `andon-operator-metadata-cache-v1:${operatorMetadataCacheScope}`;
+const operatorMetadataCacheTtlMs = 5 * 60 * 1000;
 
 const openAlertsList = document.getElementById("openAlertsList");
 const workingAlertsList = document.getElementById("workingAlertsList");
@@ -12,9 +18,11 @@ const state = {
   timerSnapshotByAlert: {},
   selectedResponderByAlert: {},
   appendNoteByAlert: {},
+  metadataLoading: false,
 };
 
 let timerIntervalId = null;
+let operatorMetadataLoadPromise = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -106,6 +114,9 @@ function renderUserChips(alert, kind) {
   const users = getScopedUsers(alert);
   const activeResponderId = state.selectedResponderByAlert[alert.id] || alert.responder_user_id || null;
   if (!users.length) {
+    if (state.metadataLoading && !state.users.length) {
+      return '<div class="problem-empty">Loading responders...</div>';
+    }
     return '<div class="problem-empty">No users found for this machine group and department.</div>';
   }
   return `
@@ -281,18 +292,64 @@ async function loadAlerts() {
   state.alerts = Array.isArray(alertsData) ? alertsData : [];
 }
 
-async function loadOperatorMetadata() {
-  const metadata = await fetchJson(operatorMetadataUrl);
-  state.users = metadata.users || [];
+function getCachedOperatorMetadata() {
+  try {
+    const raw = window.sessionStorage.getItem(operatorMetadataCacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const cachedAt = Number(parsed.cachedAt || 0);
+    if (!cachedAt || (Date.now() - cachedAt) > operatorMetadataCacheTtlMs) return null;
+    return parsed.data || null;
+  } catch (_error) {
+    return null;
+  }
 }
 
-async function loadState(options = {}) {
-  const includeMetadata = Boolean(options.includeMetadata);
-  if (includeMetadata || !state.users.length) {
-    await Promise.all([loadAlerts(), loadOperatorMetadata()]);
+function setCachedOperatorMetadata(metadata) {
+  try {
+    window.sessionStorage.setItem(
+      operatorMetadataCacheKey,
+      JSON.stringify({ cachedAt: Date.now(), data: metadata || {} }),
+    );
+  } catch (_error) {
+    // Ignore storage failures in locked-down kiosk environments.
+  }
+}
+
+function applyOperatorMetadata(metadata) {
+  state.users = metadata?.users || [];
+}
+
+function hydrateOperatorMetadataFromCache() {
+  const cached = getCachedOperatorMetadata();
+  if (!cached) return false;
+  applyOperatorMetadata(cached);
+  return true;
+}
+
+async function loadOperatorMetadata(options = {}) {
+  const preferCache = options.preferCache !== false;
+  if (preferCache && hydrateOperatorMetadataFromCache()) return;
+  const metadata = await fetchJson(operatorMetadataUrl);
+  applyOperatorMetadata(metadata);
+  setCachedOperatorMetadata(metadata);
+}
+
+async function ensureOperatorMetadataLoaded(options = {}) {
+  const force = Boolean(options.force);
+  if (!force && state.users.length) {
     return;
   }
-  await loadAlerts();
+  if (!operatorMetadataLoadPromise) {
+    state.metadataLoading = true;
+    operatorMetadataLoadPromise = loadOperatorMetadata({ preferCache: !force })
+      .finally(() => {
+        state.metadataLoading = false;
+        operatorMetadataLoadPromise = null;
+      });
+  }
+  await operatorMetadataLoadPromise;
 }
 
 function buildCombinedNote(alert) {
@@ -434,11 +491,12 @@ function startTimer() {
 }
 
 async function refresh() {
-  await loadState({ includeMetadata: false });
+  await loadAlerts();
   render();
 }
 
 async function boot() {
+  hydrateOperatorMetadataFromCache();
   openAlertsList?.addEventListener("click", (event) => { void onListClick(event); });
   workingAlertsList?.addEventListener("click", (event) => { void onListClick(event); });
   openAlertsList?.addEventListener("input", onListInput);
@@ -450,12 +508,16 @@ async function boot() {
   window.AndonRealtime?.onEvent((event) => {
     if (["alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
       void refresh();
+      if (event.type === "admin_metadata_updated") {
+        void ensureOperatorMetadataLoaded({ force: true }).then(render).catch(() => {});
+      }
     }
   });
 
-  await loadState({ includeMetadata: true });
+  await loadAlerts();
   render();
   startTimer();
+  void ensureOperatorMetadataLoaded().then(render).catch(() => {});
 }
 
 boot().catch((error) => {

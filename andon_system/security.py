@@ -13,6 +13,7 @@ from sqlalchemy.orm import joinedload, load_only, noload
 
 from .extensions import db
 from .models.company import Company
+from .models.machine_group import MachineGroup
 from .models.user import User, UserCompanyAccess, UserViewPreference
 
 USER_SESSION_KEY = "andon_user_id"
@@ -29,6 +30,7 @@ PAGE_BOARD = "board"
 PAGE_MANAGEMENT = "management"
 PAGE_REPORTS = "reports"
 PAGE_ADMIN = "admin"
+VIEWER_DEMO_USERNAME = "viewer.demo"
 
 ROLE_PAGE_ACCESS = {
     "Admin": {PAGE_HOME, PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT, PAGE_REPORTS, PAGE_ADMIN},
@@ -323,6 +325,9 @@ def get_default_membership(user: User | None = None) -> UserCompanyAccess | None
 
 
 def get_default_landing_endpoint(user: User | None = None, membership: UserCompanyAccess | None = None) -> str:
+    effective_user = user or get_authenticated_user()
+    if effective_user and str(effective_user.username or "").strip().lower() == VIEWER_DEMO_USERNAME:
+        return "pages.board_page"
     effective_membership = membership or get_default_membership(user)
     if effective_membership is None:
         return "pages.home_page"
@@ -404,6 +409,9 @@ def require_authentication() -> User:
 
 
 def user_can_access_page(page_key: str, membership: UserCompanyAccess | None = None) -> bool:
+    user = get_authenticated_user()
+    if user and str(user.username or "").strip().lower() == VIEWER_DEMO_USERNAME:
+        return page_key in {PAGE_HOME, PAGE_BOARD}
     effective_membership = membership or get_current_membership()
     if effective_membership is None:
         return False
@@ -468,16 +476,83 @@ def get_authorized_company_id() -> int | None:
 
 
 def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
-    effective_membership = membership or get_current_membership()
+    if membership is not None:
+        if not membership.is_restricted:
+            return {
+                "company_id": membership.company_id,
+                "department_id": None,
+                "department_ids": [],
+                "machine_group_name": None,
+                "machine_group_names": [],
+                "restricted": False,
+            }
+        department_ids = [membership.department_id] if membership.department_id is not None else []
+        machine_group_names = []
+        if membership.machine_group and membership.machine_group.name:
+            machine_group_names.append(membership.machine_group.name)
+        return {
+            "company_id": membership.company_id,
+            "department_id": department_ids[0] if len(department_ids) == 1 else None,
+            "department_ids": department_ids,
+            "machine_group_name": machine_group_names[0] if len(machine_group_names) == 1 else None,
+            "machine_group_names": machine_group_names,
+            "restricted": True,
+        }
+
+    effective_membership = get_current_membership()
     if effective_membership is None:
-        return {"company_id": None, "department_id": None, "machine_group_name": None, "restricted": False}
-    # Company is always the hard boundary. Department/machine-group visibility is
-    # controlled by page filters, not per-user scope restrictions.
+        return {
+            "company_id": None,
+            "department_id": None,
+            "department_ids": [],
+            "machine_group_name": None,
+            "machine_group_names": [],
+            "restricted": False,
+        }
+
+    company_id = effective_membership.company_id
+    company_memberships = [
+        item
+        for item in get_user_memberships(active_only=True)
+        if item.company_id == company_id
+    ]
+    if not company_memberships:
+        company_memberships = [effective_membership]
+
+    # If any membership for this company is all-scope (or Admin), treat the user as unrestricted.
+    if any(not item.is_restricted for item in company_memberships):
+        return {
+            "company_id": company_id,
+            "department_id": None,
+            "department_ids": [],
+            "machine_group_name": None,
+            "machine_group_names": [],
+            "restricted": False,
+        }
+
+    department_ids = sorted({item.department_id for item in company_memberships if item.department_id is not None})
+    machine_group_ids = sorted({item.machine_group_id for item in company_memberships if item.machine_group_id is not None})
+    machine_group_names = []
+    if machine_group_ids:
+        rows = (
+            MachineGroup.query.options(noload("*"))
+            .with_entities(MachineGroup.name)
+            .filter(
+                MachineGroup.company_id == company_id,
+                MachineGroup.id.in_(machine_group_ids),
+                MachineGroup.is_active.is_(True),
+            )
+            .all()
+        )
+        machine_group_names = sorted({row.name for row in rows if row.name})
+
     return {
-        "company_id": effective_membership.company_id,
-        "department_id": None,
-        "machine_group_name": None,
-        "restricted": False,
+        "company_id": company_id,
+        "department_id": department_ids[0] if len(department_ids) == 1 else None,
+        "department_ids": department_ids,
+        "machine_group_name": machine_group_names[0] if len(machine_group_names) == 1 else None,
+        "machine_group_names": machine_group_names,
+        "restricted": True,
     }
 
 

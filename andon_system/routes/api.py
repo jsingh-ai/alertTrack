@@ -82,10 +82,12 @@ def machines():
     ).filter_by(is_active=True)
     if company_id:
         query = query.filter(Machine.company_id == company_id)
-    if scope["department_id"] is not None:
-        query = query.filter(Machine.department_id == scope["department_id"])
-    if scope["machine_group_name"]:
-        query = query.filter(Machine.machine_type == scope["machine_group_name"])
+    department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+    if department_ids:
+        query = query.filter(Machine.department_id.in_(department_ids))
+    if machine_group_names:
+        query = query.filter(Machine.machine_type.in_(machine_group_names))
     return jsonify({"success": True, "data": [machine.to_dict() for machine in query.order_by(Machine.name.asc()).all()]})
 
 
@@ -97,8 +99,9 @@ def departments():
     query = Department.query.options(noload("*")).filter_by(is_active=True)
     if company_id:
         query = query.filter(Department.company_id == company_id)
-    if scope["department_id"] is not None:
-        query = query.filter(Department.id == scope["department_id"])
+    department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    if department_ids:
+        query = query.filter(Department.id.in_(department_ids))
     return jsonify({"success": True, "data": [department.to_dict() for department in query.order_by(Department.name.asc()).all()]})
 
 
@@ -114,8 +117,9 @@ def issue_categories():
     ).filter_by(is_active=True)
     if company_id:
         query = query.filter(IssueCategory.company_id == company_id)
-    if scope["department_id"] is not None:
-        query = query.filter(IssueCategory.department_id == scope["department_id"])
+    department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    if department_ids:
+        query = query.filter(IssueCategory.department_id.in_(department_ids))
     return jsonify({"success": True, "data": [category.to_dict() for category in query.order_by(IssueCategory.name.asc()).all()]})
 
 
@@ -136,8 +140,9 @@ def issue_problems():
         query = query.filter(IssueProblem.company_id == company_id)
     if category_id:
         query = query.filter_by(category_id=category_id)
-    if scope["department_id"] is not None:
-        query = query.join(IssueProblem.category).filter(IssueCategory.department_id == scope["department_id"])
+    department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    if department_ids:
+        query = query.join(IssueProblem.category).filter(IssueCategory.department_id.in_(department_ids))
     data = [problem.to_dict() for problem in query.order_by(IssueProblem.name.asc()).all()]
     return jsonify({"success": True, "data": data})
 
@@ -181,10 +186,12 @@ def users():
     ).filter_by(is_active=True)
     if company_id:
         query = query.filter(UserCompanyAccess.company_id == company_id)
-    if scope["department_id"] is not None:
-        query = query.filter(UserCompanyAccess.department_id == scope["department_id"])
-    if scope["machine_group_name"]:
-        query = query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name == scope["machine_group_name"])
+    department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+    if department_ids:
+        query = query.filter(UserCompanyAccess.department_id.in_(department_ids))
+    if machine_group_names:
+        query = query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
     data = []
     for access in query.order_by(UserCompanyAccess.id.asc()).all():
         if access.user and access.user.is_active:
@@ -655,10 +662,12 @@ def _get_scoped_machine(machine_id: int | str):
     company_id = get_current_company_id()
     scope = get_scope_filters()
     query = Machine.query.options(noload("*")).filter_by(id=int(machine_id), company_id=company_id)
-    if scope["department_id"] is not None:
-        query = query.filter(Machine.department_id == scope["department_id"])
-    if scope["machine_group_name"]:
-        query = query.filter(Machine.machine_type == scope["machine_group_name"])
+    department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+    if department_ids:
+        query = query.filter(Machine.department_id.in_(department_ids))
+    if machine_group_names:
+        query = query.filter(Machine.machine_type.in_(machine_group_names))
     return query.one_or_none()
 
 
@@ -666,10 +675,12 @@ def _resolve_bulk_machine_ids(source_type: str, source_value: str) -> list[int]:
     company_id = get_current_company_id()
     scope = get_scope_filters()
     query = Machine.query.options(load_only(Machine.id, Machine.name, Machine.machine_type, Machine.department_id), noload("*")).filter(Machine.company_id == company_id)
-    if scope["department_id"] is not None:
-        query = query.filter(Machine.department_id == scope["department_id"])
-    if scope["machine_group_name"]:
-        query = query.filter(Machine.machine_type == scope["machine_group_name"])
+    department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+    if department_ids:
+        query = query.filter(Machine.department_id.in_(department_ids))
+    if machine_group_names:
+        query = query.filter(Machine.machine_type.in_(machine_group_names))
     if source_type == "department":
         query = query.join(Machine.department).filter(Department.name == source_value)
     elif source_type == "machine_group":
