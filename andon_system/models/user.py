@@ -99,6 +99,7 @@ class UserCompanyAccess(db.Model):
         db.CheckConstraint("role IN ('Admin', 'Manager', 'Operator')", name="ck_user_company_access_role"),
         db.CheckConstraint("scope_mode IN ('all', 'restricted')", name="ck_user_company_access_scope_mode"),
         db.Index("ix_user_company_access_user_id", "user_id"),
+        db.Index("ix_user_company_access_user_active_company", "user_id", "is_active", "company_id"),
         db.Index("ix_user_company_access_company_id", "company_id"),
         db.Index("ix_user_company_access_is_active", "is_active"),
     )

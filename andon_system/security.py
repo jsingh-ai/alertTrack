@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from flask import abort, current_app, g, has_request_context, request, session
-from sqlalchemy import or_
+from sqlalchemy import select
 from sqlalchemy.orm import joinedload, load_only, noload
 
 from .extensions import db
@@ -136,29 +136,33 @@ def authenticate_user(identity: str | None, password: str | None) -> User | None
     normalized_identity = str(identity or "").strip()
     if not normalized_identity:
         return None
-    user = (
-        User.query.options(
-            load_only(
-                User.id,
-                User.company_id,
-                User.display_name,
-                User.username,
-                User.role,
-                User.email,
-                User.password_hash,
-                User.is_active,
-                User.last_login_at,
-            ),
-            noload("*"),
-        )
-        .filter(or_(User.username == normalized_identity, User.email == normalized_identity))
-        .one_or_none()
-    )
+    user = _find_user_by_identity(normalized_identity)
     if not user or not user.is_active:
         return None
     if not user.check_password(password):
         return None
     return user
+
+
+def _find_user_by_identity(identity: str) -> User | None:
+    options = (
+        load_only(
+            User.id,
+            User.company_id,
+            User.display_name,
+            User.username,
+            User.role,
+            User.email,
+            User.password_hash,
+            User.is_active,
+            User.last_login_at,
+        ),
+        noload("*"),
+    )
+    user = User.query.options(*options).filter(User.username == identity).one_or_none()
+    if user is not None:
+        return user
+    return User.query.options(*options).filter(User.email == identity).first()
 
 
 def get_user_memberships(user: User | None = None, active_only: bool = True) -> list[UserCompanyAccess]:
@@ -183,40 +187,66 @@ def get_user_memberships(user: User | None = None, active_only: bool = True) -> 
             cache[cache_key] = session_memberships
             _perf_log("get_user_memberships(session)", started_at, total=len(session_memberships), active=len(session_memberships))
             return session_memberships
-    query = UserCompanyAccess.query.filter_by(user_id=current_user.id)
-    if active_only:
-        query = query.filter_by(is_active=True)
-    memberships = (
-        query.options(
-            load_only(
-                UserCompanyAccess.id,
-                UserCompanyAccess.user_id,
-                UserCompanyAccess.company_id,
-                UserCompanyAccess.role,
-                UserCompanyAccess.scope_mode,
-                UserCompanyAccess.department_id,
-                UserCompanyAccess.machine_group_id,
-                UserCompanyAccess.is_active,
-            ),
-            joinedload(UserCompanyAccess.company).load_only(
-                Company.id,
-                Company.name,
-                Company.slug,
-                Company.is_active,
-            ),
-            noload(UserCompanyAccess.user),
-            noload(UserCompanyAccess.department),
-            noload(UserCompanyAccess.machine_group),
-        )
-        .order_by(UserCompanyAccess.company_id.asc())
-        .all()
-    )
-    filtered = [membership for membership in memberships if membership.company and membership.company.is_active]
+    memberships = _load_memberships_from_db(current_user.id, active_only)
+    filtered = memberships
     if has_request_context():
         g.user_memberships_cache[(current_user.id, bool(active_only))] = filtered
         _store_memberships_in_session(current_user, filtered, active_only)
-    _perf_log("get_user_memberships(db)", started_at, total=len(memberships), active=len(filtered))
+    _perf_log("get_user_memberships(db)", started_at, total=len(filtered), active=len(filtered))
     return filtered
+
+
+def _load_memberships_from_db(user_id: int, active_only: bool) -> list[SimpleNamespace]:
+    stmt = (
+        select(
+            UserCompanyAccess.id.label("access_id"),
+            UserCompanyAccess.user_id,
+            UserCompanyAccess.company_id,
+            UserCompanyAccess.role,
+            UserCompanyAccess.scope_mode,
+            UserCompanyAccess.department_id,
+            UserCompanyAccess.machine_group_id,
+            UserCompanyAccess.is_active,
+            Company.id.label("company_id_value"),
+            Company.name.label("company_name"),
+            Company.slug.label("company_slug"),
+            Company.is_active.label("company_is_active"),
+        )
+        .select_from(UserCompanyAccess)
+        .join(Company, Company.id == UserCompanyAccess.company_id)
+        .where(UserCompanyAccess.user_id == user_id, Company.is_active.is_(True))
+        .order_by(UserCompanyAccess.company_id.asc())
+    )
+    if active_only:
+        stmt = stmt.where(UserCompanyAccess.is_active.is_(True))
+
+    rows = db.session.execute(stmt).mappings().all()
+    memberships = []
+    for row in rows:
+        company = SimpleNamespace(
+            id=row["company_id_value"],
+            name=row["company_name"],
+            slug=row["company_slug"],
+            is_active=row["company_is_active"],
+        )
+        memberships.append(
+            SimpleNamespace(
+                id=row["access_id"],
+                user_id=row["user_id"],
+                company_id=row["company_id"],
+                role=row["role"],
+                scope_mode=row["scope_mode"],
+                department_id=row["department_id"],
+                machine_group_id=row["machine_group_id"],
+                is_active=row["is_active"],
+                is_admin=row["role"] == "Admin",
+                is_restricted=row["scope_mode"] == "restricted" and row["role"] != "Admin",
+                company=company,
+                department=None,
+                machine_group=None,
+            )
+        )
+    return memberships
 
 
 def _memberships_from_session(user: User, active_only: bool) -> list[SimpleNamespace] | None:

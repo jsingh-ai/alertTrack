@@ -113,10 +113,18 @@ function handleVisibilityChange() {
 }
 
 async function boot() {
-  const metadataLoad = loadOperatorMetadata().catch((_error) => {
+  void restoreViewState().then(() => {
+    normalizeViewState();
+    renderViewControls();
+    renderBoard();
+  }).catch((_error) => {
+    console.warn("Failed to restore operator view state.");
+  });
+
+  void loadOperatorMetadata().catch((_error) => {
     console.warn("Failed to preload operator metadata.");
   });
-  await Promise.all([restoreViewState(), loadBoardState(), metadataLoad]);
+  await loadBoardState();
   normalizeViewState();
   wireEvents();
   renderViewControls();
