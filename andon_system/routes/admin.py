@@ -148,25 +148,38 @@ def _int_list_from_csv(value: str | None) -> list[int]:
     return sorted(set(values))
 
 
+def _int_list_from_form(field_name: str) -> list[int]:
+    values = []
+    for raw in request.form.getlist(field_name):
+        values.extend(_int_list_from_csv(raw))
+    if values:
+        return sorted(set(values))
+    return _int_list_from_csv(request.form.get(field_name))
+
+
 def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], machine_group_ids: list[int], department_ids: list[int]):
     valid_machine_ids = set()
+    machine_department_ids = set()
     valid_group_ids = set()
     valid_department_ids = set()
+    group_names_by_id = {}
 
     if machine_ids:
-        rows = Machine.query.with_entities(Machine.id).filter(
+        rows = Machine.query.with_entities(Machine.id, Machine.department_id).filter(
             Machine.company_id == company_id,
             Machine.id.in_(machine_ids),
             Machine.is_active.is_(True),
         ).all()
         valid_machine_ids = {row.id for row in rows}
+        machine_department_ids = {row.department_id for row in rows if row.department_id is not None}
     if machine_group_ids:
-        rows = MachineGroup.query.with_entities(MachineGroup.id).filter(
+        rows = MachineGroup.query.with_entities(MachineGroup.id, MachineGroup.name).filter(
             MachineGroup.company_id == company_id,
             MachineGroup.id.in_(machine_group_ids),
             MachineGroup.is_active.is_(True),
         ).all()
         valid_group_ids = {row.id for row in rows}
+        group_names_by_id = {row.id: row.name for row in rows if row.name}
     if department_ids:
         rows = Department.query.with_entities(Department.id).filter(
             Department.company_id == company_id,
@@ -174,6 +187,17 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
             Department.is_active.is_(True),
         ).all()
         valid_department_ids = {row.id for row in rows}
+
+    group_machine_ids = set()
+    group_department_ids = set()
+    if group_names_by_id:
+        rows = Machine.query.with_entities(Machine.id, Machine.department_id).filter(
+            Machine.company_id == company_id,
+            Machine.machine_type.in_(list(group_names_by_id.values())),
+            Machine.is_active.is_(True),
+        ).all()
+        group_machine_ids = {row.id for row in rows}
+        group_department_ids = {row.department_id for row in rows if row.department_id is not None}
 
     if role == "Operator":
         if not valid_machine_ids:
@@ -186,18 +210,26 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
     if role == "Viewer":
         if not valid_group_ids:
             return None, _validation_error("Viewer requires at least one machine group ID in scope")
-        if not valid_department_ids:
+        resolved_department_ids = set(valid_department_ids)
+        if not resolved_department_ids:
+            resolved_department_ids.update(machine_department_ids)
+            resolved_department_ids.update(group_department_ids)
+        if not resolved_department_ids:
             return None, _validation_error("Viewer requires at least one department ID in scope")
+        resolved_machine_ids = set(valid_machine_ids)
+        resolved_machine_ids.update(group_machine_ids)
         return {
-            "machine_ids": sorted(valid_machine_ids),
+            "machine_ids": sorted(resolved_machine_ids),
             "machine_group_ids": sorted(valid_group_ids),
-            "department_ids": sorted(valid_department_ids),
+            "department_ids": sorted(resolved_department_ids),
         }, None
     if role == "Manager":
         if not valid_machine_ids and not valid_group_ids:
             return None, _validation_error("Manager requires at least one machine ID or machine group ID in scope")
+        resolved_machine_ids = set(valid_machine_ids)
+        resolved_machine_ids.update(group_machine_ids)
         return {
-            "machine_ids": sorted(valid_machine_ids),
+            "machine_ids": sorted(resolved_machine_ids),
             "machine_group_ids": sorted(valid_group_ids),
             "department_ids": [],
         }, None
@@ -635,9 +667,9 @@ def create_user():
         scope_mode = "restricted"
     machine_group_id = _int_or_none(request.form.get("machine_group_id"))
     department_id = _int_or_none(request.form.get("department_id"))
-    scope_machine_ids = _int_list_from_csv(request.form.get("scope_machine_ids"))
-    scope_machine_group_ids = _int_list_from_csv(request.form.get("scope_machine_group_ids"))
-    scope_department_ids = _int_list_from_csv(request.form.get("scope_department_ids"))
+    scope_machine_ids = _int_list_from_form("scope_machine_ids")
+    scope_machine_group_ids = _int_list_from_form("scope_machine_group_ids")
+    scope_department_ids = _int_list_from_form("scope_department_ids")
     email = (request.form.get("email") or "").strip() or None
     phone_number = (request.form.get("phone_number") or "").strip() or None
     if not display_name:
@@ -675,8 +707,8 @@ def create_user():
             role=role,
             email=email,
             phone_number=phone_number,
-            department_id=department.id if role in {"Admin", "Manager"} and department else None,
-            machine_group_id=machine_group.id if role in {"Admin", "Manager"} and machine_group else None,
+            department_id=department.id if role == "Admin" and department else None,
+            machine_group_id=machine_group.id if role == "Admin" and machine_group else None,
             is_active=True,
         )
         user.set_password(password.strip())
@@ -699,8 +731,8 @@ def create_user():
         company_id=company_id,
         role=role,
         scope_mode="all" if role == "Admin" else scope_mode,
-        department_id=department.id if role in {"Admin", "Manager"} and department else None,
-        machine_group_id=machine_group.id if role in {"Admin", "Manager"} and machine_group else None,
+        department_id=department.id if role == "Admin" and department else None,
+        machine_group_id=machine_group.id if role == "Admin" and machine_group else None,
         scope_config_json=json.dumps(scope_config or {}, separators=(",", ":"), sort_keys=True),
         is_active=True,
     )
@@ -732,9 +764,9 @@ def update_user(user_id):
         scope_mode = "restricted"
     machine_group_id = _int_or_none(request.form.get("machine_group_id"))
     department_id = _int_or_none(request.form.get("department_id"))
-    scope_machine_ids = _int_list_from_csv(request.form.get("scope_machine_ids"))
-    scope_machine_group_ids = _int_list_from_csv(request.form.get("scope_machine_group_ids"))
-    scope_department_ids = _int_list_from_csv(request.form.get("scope_department_ids"))
+    scope_machine_ids = _int_list_from_form("scope_machine_ids")
+    scope_machine_group_ids = _int_list_from_form("scope_machine_group_ids")
+    scope_department_ids = _int_list_from_form("scope_department_ids")
     email = (request.form.get("email") or "").strip() or None
     phone_number = (request.form.get("phone_number") or "").strip() or None
 
@@ -769,14 +801,14 @@ def update_user(user_id):
     user.email = email
     user.phone_number = phone_number
     user.role = role
-    user.machine_group_id = machine_group.id if role in {"Admin", "Manager"} and machine_group else None
-    user.department_id = department.id if role in {"Admin", "Manager"} and department else None
+    user.machine_group_id = machine_group.id if role == "Admin" and machine_group else None
+    user.department_id = department.id if role == "Admin" and department else None
     if password.strip():
         user.set_password(password.strip())
     access.role = role
     access.scope_mode = "all" if role == "Admin" else scope_mode
-    access.machine_group_id = machine_group.id if role in {"Admin", "Manager"} and machine_group else None
-    access.department_id = department.id if role in {"Admin", "Manager"} and department else None
+    access.machine_group_id = machine_group.id if role == "Admin" and machine_group else None
+    access.department_id = department.id if role == "Admin" and department else None
     access.scope_config_json = json.dumps(scope_config or {}, separators=(",", ":"), sort_keys=True)
     db.session.commit()
     _invalidate_company_caches(company_id)

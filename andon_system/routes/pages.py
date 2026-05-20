@@ -396,7 +396,11 @@ def admin_page():
         )
         users.append(user_payload)
     machine_groups = []
-    for group in MachineGroup.query.filter_by(company_id=company_id).order_by(MachineGroup.name.asc()).all() if company_id else []:
+    machine_group_rows = MachineGroup.query.filter_by(company_id=company_id).order_by(MachineGroup.name.asc()).all() if company_id else []
+    machine_group_id_by_name = {group.name: group.id for group in machine_group_rows}
+    departments = Department.query.filter_by(company_id=company_id).order_by(Department.name.asc()).all() if company_id else []
+    department_name_by_id = {department.id: department.name for department in departments}
+    for group in machine_group_rows:
         grouped_machines = [machine for machine in machines if machine.machine_type == group.name]
         machine_groups.append(
             {
@@ -406,7 +410,27 @@ def admin_page():
                 "machine_count": len(grouped_machines),
             }
         )
-    departments = Department.query.filter_by(company_id=company_id).order_by(Department.name.asc()).all() if company_id else []
+    machine_scope_catalog = [
+        {
+            "id": machine.id,
+            "name": machine.name,
+            "machine_code": machine.machine_code,
+            "machine_group_name": machine.machine_type,
+            "machine_group_id": machine_group_id_by_name.get(machine.machine_type),
+            "department_id": machine.department_id,
+            "department_name": department_name_by_id.get(machine.department_id),
+            "is_active": machine.is_active,
+        }
+        for machine in machines
+    ]
+    departments_catalog = [
+        {
+            "id": department.id,
+            "name": department.name,
+            "is_active": department.is_active,
+        }
+        for department in departments
+    ]
     problems = (
         IssueProblem.query.join(IssueCategory)
         .join(Department)
@@ -441,4 +465,6 @@ def admin_page():
         user_roles=USER_ROLES,
         user_scope_modes=USER_SCOPE_MODES,
         current_company=company,
+        machine_scope_catalog=machine_scope_catalog,
+        departments_catalog=departments_catalog,
     )

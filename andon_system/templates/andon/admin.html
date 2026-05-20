@@ -107,7 +107,7 @@
             <thead><tr><th>Group</th><th>Name</th><th>Code</th><th>Status</th><th></th></tr></thead>
             <tbody id="machineTableBody">
               {% for machine in machines %}
-              <tr id="machine-row-{{ machine.id }}" data-machine-id="{{ machine.id }}" data-machine-group="{{ machine.machine_type or '' }}">
+              <tr id="machine-row-{{ machine.id }}" data-machine-id="{{ machine.id }}" data-machine-group="{{ machine.machine_type or '' }}" data-machine-name="{{ machine.name }}">
                 <td class="machine-group">{{ machine.machine_type or "-" }}</td>
                 <td class="machine-name">{{ machine.name }}</td>
                 <td class="machine-code">{{ machine.machine_code or "-" }}</td>
@@ -200,7 +200,7 @@
             <tbody id="issueTableBody">
               {% for group in issue_groups %}
                 {% for problem in group.problems %}
-              <tr id="issue-row-{{ problem.id }}" data-department-id="{{ group.department.id }}">
+              <tr id="issue-row-{{ problem.id }}" data-department-id="{{ group.department.id }}" data-department-name="{{ group.department.name }}">
                 <td class="issue-department">{{ group.department.name }}</td>
                 <td>{{ problem.name }}</td>
                 <td class="issue-status">{{ "Active" if problem.is_active else "Inactive" }}</td>
@@ -265,87 +265,110 @@
           <h2 class="h4 mb-0">Users</h2>
           <p class="text-secondary small mb-0">Users are global accounts. This table manages the selected company's role and scope for each account.</p>
         </div>
-        <form class="row g-2 mb-3 js-ajax-form" method="post" action="{{ url_for('admin.create_user') }}" id="userCreateForm" data-kind="user-create">
-          <div class="col-md-2">
-            <label class="form-label">Username</label>
-            <input class="form-control" name="username" placeholder="username">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Password</label>
-            <input class="form-control" name="password" type="password" placeholder="Required for new account">
-          </div>
-          <div class="col-md-1">
-            <label class="form-label">Work ID</label>
-            <input class="form-control" name="work_id" placeholder="Work ID">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Name</label>
-            <input class="form-control" name="display_name" placeholder="Display name" required>
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Email</label>
-            <input class="form-control" name="email" type="email" placeholder="name@company.com">
-          </div>
-          <div class="col-md-1">
-            <label class="form-label">Phone</label>
-            <input class="form-control" name="phone_number" placeholder="Phone number">
-          </div>
-          <div class="col-md-1">
-            <label class="form-label">Role</label>
-            <select class="form-select" name="role" id="userRoleSelect" required>
-              {% for role in user_roles %}
-                <option value="{{ role }}"{% if role == "Operator" %} selected{% endif %}>{{ role }}</option>
-              {% endfor %}
+        <div class="row g-2 align-items-end mb-3">
+          <div class="col-md-4 col-lg-3">
+            <label class="form-label">Group Users By</label>
+            <select class="form-select" id="userGroupingModeSelect">
+              <option value="combined" selected>Machine Group + Department</option>
+              <option value="machine-group">Machine Group</option>
+              <option value="department">Department</option>
+              <option value="none">No Grouping</option>
             </select>
           </div>
-          <div class="col-md-1">
-            <label class="form-label">Scope</label>
-            <select class="form-select" name="scope_mode" id="userScopeModeSelect" required>
-              {% for scope_mode in user_scope_modes %}
-                <option value="{{ scope_mode }}">{{ scope_mode|title }}</option>
-              {% endfor %}
-            </select>
+        </div>
+        <form class="mb-3 js-ajax-form" method="post" action="{{ url_for('admin.create_user') }}" id="userCreateForm" data-kind="user-create">
+          <input type="hidden" name="scope_mode" id="userScopeModeSelect" value="restricted">
+          <input type="hidden" name="machine_group_id" id="userMachineGroupSelect" value="">
+          <input type="hidden" name="department_id" id="userDepartmentSelect" value="">
+          <input type="hidden" name="scope_machine_ids" id="userScopeMachineIdsInput" value="">
+          <input type="hidden" name="scope_machine_group_ids" id="userScopeMachineGroupIdsInput" value="">
+          <input type="hidden" name="scope_department_ids" id="userScopeDepartmentIdsInput" value="">
+          <div class="admin-user-form-grid">
+            <div class="admin-user-form-group">
+              <div class="admin-user-form-group__header">
+                <p class="eyebrow mb-1">Step 1</p>
+                <h3 class="h6 mb-0">User Basics</h3>
+              </div>
+              <div class="row g-2">
+                <div class="col-md-4">
+                  <label class="form-label">Username</label>
+                  <input class="form-control" name="username" placeholder="username">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Password</label>
+                  <input class="form-control" name="password" type="password" placeholder="Required for new account">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Work ID</label>
+                  <input class="form-control" name="work_id" placeholder="Work ID">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Name</label>
+                  <input class="form-control" name="display_name" placeholder="Display name" required>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Email</label>
+                  <input class="form-control" name="email" type="email" placeholder="name@company.com">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Phone</label>
+                  <input class="form-control" name="phone_number" placeholder="Phone number">
+                </div>
+              </div>
+            </div>
+            <div class="admin-user-form-group">
+              <div class="admin-user-form-group__header">
+                <p class="eyebrow mb-1">Step 2</p>
+                <h3 class="h6 mb-0">Role & Machine Access</h3>
+              </div>
+              <div class="row g-2 mb-2">
+                <div class="col-md-4">
+                  <label class="form-label">Role</label>
+                  <select class="form-select" name="role" id="userRoleSelect" required>
+                    {% for role in user_roles %}
+                      <option value="{{ role }}"{% if role == "Operator" %} selected{% endif %}>{{ role }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-md-8 d-flex align-items-end">
+                  <div class="admin-user-scope-tip" id="userScopeRoleHint">Pick one or more machine groups, then choose machines in those groups.</div>
+                </div>
+              </div>
+              <div class="admin-scope-controls">
+                <div>
+                  <label class="form-label">Machine Groups</label>
+                  <div class="admin-scope-group-list" id="userScopeGroupList">
+                    {% for group in machine_groups %}
+                    <label class="admin-scope-pill">
+                      <input type="checkbox" class="js-user-scope-group" value="{{ group.id }}" data-group-name="{{ group.name }}">
+                      <span>{{ group.name }}</span>
+                    </label>
+                    {% endfor %}
+                  </div>
+                </div>
+                <div>
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <label class="form-label mb-0">Machines</label>
+                    <label class="admin-scope-check mb-0">
+                      <input type="checkbox" id="userScopeAllMachines">
+                      <span>All machines in selected groups</span>
+                    </label>
+                  </div>
+                  <div class="admin-scope-machine-list" id="userScopeMachineList"></div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="col-md-1">
-            <label class="form-label">Group</label>
-            <select class="form-select" name="machine_group_id" id="userMachineGroupSelect">
-              <option value="">All</option>
-              {% for group in machine_groups %}
-                <option value="{{ group.id }}">{{ group.name }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="col-md-1">
-            <label class="form-label">Dept</label>
-            <select class="form-select" name="department_id" id="userDepartmentSelect">
-              <option value="">All</option>
-              {% for department in departments %}
-                <option value="{{ department.id }}">{{ department.name }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Scope Machines</label>
-            <input class="form-control" name="scope_machine_ids" placeholder="IDs: 1,2,3">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Scope Groups</label>
-            <input class="form-control" name="scope_machine_group_ids" placeholder="Group IDs: 1,3">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Scope Depts</label>
-            <input class="form-control" name="scope_department_ids" placeholder="Dept IDs: 2,4">
-          </div>
-          <div class="col-md-1 d-flex align-items-end">
-            <button class="btn btn-primary w-100">Add</button>
+          <div class="d-flex justify-content-end mt-3">
+            <button class="btn btn-primary px-4">Add User</button>
           </div>
         </form>
         <div class="table-responsive">
           <table class="table table-sm table-dark table-striped align-middle">
-            <thead><tr><th>Username</th><th>Password</th><th>Work ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Scope</th><th>Group</th><th>Department</th><th>Machine IDs</th><th>Group IDs</th><th>Dept IDs</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Username</th><th>Password</th><th>Work ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Scope</th><th>Scope Details</th><th>Status</th><th></th></tr></thead>
             <tbody id="userTableBody">
               {% for user in users %}
-              <tr id="user-row-{{ user.id }}" data-user-id="{{ user.id }}" data-user-role="{{ user.role or '' }}" data-user-scope-mode="{{ user.scope_mode or '' }}" data-user-machine-group-id="{{ user.machine_group_id or '' }}" data-user-department-id="{{ user.department_id or '' }}" data-user-scope-machine-ids="{{ (user.scope_machine_ids or [])|join(',') }}" data-user-scope-machine-group-ids="{{ (user.scope_machine_group_ids or [])|join(',') }}" data-user-scope-department-ids="{{ (user.scope_department_ids or [])|join(',') }}">
+              <tr id="user-row-{{ user.id }}" data-user-id="{{ user.id }}" data-user-role="{{ user.role or '' }}" data-user-scope-mode="{{ user.scope_mode or '' }}" data-user-machine-group-id="{{ user.machine_group_id or '' }}" data-user-department-id="{{ user.department_id or '' }}" data-user-scope-machine-ids="{{ (user.scope_machine_ids or [])|join(',') }}" data-user-scope-machine-group-ids="{{ (user.scope_machine_group_ids or [])|join(',') }}" data-user-scope-department-ids="{{ (user.scope_department_ids or [])|join(',') }}" data-user-display-name="{{ user.display_name }}">
                 <td>
                   <input class="form-control form-control-sm js-user-field" data-user-field="username" name="username" value="{{ user.username or '' }}" placeholder="username">
                 </td>
@@ -379,29 +402,12 @@
                   </select>
                 </td>
                 <td>
-                  <select class="form-select form-select-sm js-user-field" data-user-field="machine_group_id" name="machine_group_id">
-                    <option value="">All</option>
-                    {% for group in machine_groups %}
-                      <option value="{{ group.id }}" {% if user.machine_group_id == group.id %}selected{% endif %}>{{ group.name }}</option>
-                    {% endfor %}
-                  </select>
-                </td>
-                <td>
-                  <select class="form-select form-select-sm js-user-field" data-user-field="department_id" name="department_id">
-                    <option value="">All</option>
-                    {% for department in departments %}
-                      <option value="{{ department.id }}" {% if user.department_id == department.id %}selected{% endif %}>{{ department.name }}</option>
-                    {% endfor %}
-                  </select>
-                </td>
-                <td>
-                  <input class="form-control form-control-sm js-user-field" data-user-field="scope_machine_ids" name="scope_machine_ids" value="{{ (user.scope_machine_ids or [])|join(',') }}" placeholder="1,2,3">
-                </td>
-                <td>
-                  <input class="form-control form-control-sm js-user-field" data-user-field="scope_machine_group_ids" name="scope_machine_group_ids" value="{{ (user.scope_machine_group_ids or [])|join(',') }}" placeholder="1,3">
-                </td>
-                <td>
-                  <input class="form-control form-control-sm js-user-field" data-user-field="scope_department_ids" name="scope_department_ids" value="{{ (user.scope_department_ids or [])|join(',') }}" placeholder="2,4">
+                  <div class="small text-secondary js-user-scope-summary">Machines: {{ (user.scope_machine_ids or [])|length }}, Groups: {{ (user.scope_machine_group_ids or [])|length }}</div>
+                  <input type="hidden" class="js-user-field" data-user-field="machine_group_id" name="machine_group_id" value="{{ user.machine_group_id or '' }}">
+                  <input type="hidden" class="js-user-field" data-user-field="department_id" name="department_id" value="{{ user.department_id or '' }}">
+                  <input type="hidden" class="js-user-field" data-user-field="scope_machine_ids" name="scope_machine_ids" value="{{ (user.scope_machine_ids or [])|join(',') }}">
+                  <input type="hidden" class="js-user-field" data-user-field="scope_machine_group_ids" name="scope_machine_group_ids" value="{{ (user.scope_machine_group_ids or [])|join(',') }}">
+                  <input type="hidden" class="js-user-field" data-user-field="scope_department_ids" name="scope_department_ids" value="{{ (user.scope_department_ids or [])|join(',') }}">
                 </td>
                 <td class="user-status">{{ "Active" if user.is_active else "Inactive" }}</td>
                 <td class="text-end d-flex justify-content-end gap-2">
@@ -461,9 +467,17 @@
   const userTableBody = document.getElementById("userTableBody");
   const userCreateForm = document.getElementById("userCreateForm");
   const userRoleSelect = document.getElementById("userRoleSelect");
+  const userGroupingModeSelect = document.getElementById("userGroupingModeSelect");
   const userScopeModeSelect = document.getElementById("userScopeModeSelect");
   const userMachineGroupSelect = document.getElementById("userMachineGroupSelect");
   const userDepartmentSelect = document.getElementById("userDepartmentSelect");
+  const userScopeGroupList = document.getElementById("userScopeGroupList");
+  const userScopeMachineList = document.getElementById("userScopeMachineList");
+  const userScopeAllMachines = document.getElementById("userScopeAllMachines");
+  const userScopeMachineIdsInput = document.getElementById("userScopeMachineIdsInput");
+  const userScopeMachineGroupIdsInput = document.getElementById("userScopeMachineGroupIdsInput");
+  const userScopeDepartmentIdsInput = document.getElementById("userScopeDepartmentIdsInput");
+  const userScopeRoleHint = document.getElementById("userScopeRoleHint");
   const machineGroupFilterChip = document.getElementById("machineGroupFilterChip");
   const machineGroupFilterChipValue = document.getElementById("machineGroupFilterChipValue");
   const clearMachineGroupFilter = document.getElementById("clearMachineGroupFilter");
@@ -477,11 +491,47 @@
   const adminDeleteModalMessage = document.getElementById("adminDeleteModalMessage");
   const adminDeleteModalConfirm = document.getElementById("adminDeleteModalConfirm");
   const adminDeleteModal = adminDeleteModalElement && window.bootstrap ? new bootstrap.Modal(adminDeleteModalElement) : null;
+  let machineScopeCatalog = {{ machine_scope_catalog|tojson }};
+  const userRoleValues = {{ user_roles|tojson }};
+  const userScopeModeValues = {{ user_scope_modes|tojson }};
+  const machineGroupsCatalog = {{ machine_groups|tojson }};
+  const departmentsCatalog = {{ departments_catalog|tojson }};
   const csrfHeaders = (headers = {}) => window.AndonSecurity?.withCsrfHeaders(headers) || headers;
+  const collapsedGroupState = {
+    machines: {},
+    issues: {},
+    users: {},
+  };
   let pendingDeleteForm = null;
-  if (!filter || !issueTableBody || !departmentTableBody || !issueForm || !machineGroupTableBody || !machineTableBody || !machineGroupSelect || !escalationRuleTableBody || !userTableBody || !userCreateForm || !userRoleSelect || !userScopeModeSelect || !userMachineGroupSelect || !userDepartmentSelect) return;
+  if (!filter || !issueTableBody || !departmentTableBody || !issueForm || !machineGroupTableBody || !machineTableBody || !machineGroupSelect || !escalationRuleTableBody || !userTableBody || !userCreateForm || !userRoleSelect || !userGroupingModeSelect || !userScopeModeSelect || !userMachineGroupSelect || !userDepartmentSelect || !userScopeGroupList || !userScopeMachineList || !userScopeAllMachines || !userScopeMachineIdsInput || !userScopeMachineGroupIdsInput || !userScopeDepartmentIdsInput || !userScopeRoleHint) return;
   function notifyAndonRefresh() {
     window.AndonRefreshBus?.notify();
+  }
+
+  function machineGroupNameForId(groupId) {
+    const normalized = Number(groupId);
+    const match = machineGroupsCatalog.find((group) => Number(group.id) === normalized);
+    return match?.name || "";
+  }
+
+  function departmentNameForId(departmentId) {
+    const normalized = Number(departmentId);
+    const match = departmentsCatalog.find((department) => Number(department.id) === normalized);
+    return match?.name || "";
+  }
+
+  function groupHeaderRow(kind, key, label, count, colspan, collapsed) {
+    const chevron = collapsed ? "▸" : "▾";
+    return `<tr class="admin-group-header-row" data-group-header="${escapeHtml(kind)}" data-group-key="${escapeHtml(String(key))}"><td colspan="${colspan}"><button type="button" class="admin-group-header-btn" data-group-toggle="${escapeHtml(kind)}" data-group-key="${escapeHtml(String(key))}"><span class="admin-group-header-btn__icon">${chevron}</span><span class="admin-group-header-btn__label">${escapeHtml(label)}</span><span class="admin-group-header-btn__count">${Number(count || 0)}</span></button></td></tr>`;
+  }
+
+  function isGroupCollapsed(kind, key) {
+    return Boolean(collapsedGroupState[kind]?.[String(key)]);
+  }
+
+  function toggleGroupCollapsed(kind, key) {
+    const normalizedKey = String(key);
+    collapsedGroupState[kind][normalizedKey] = !collapsedGroupState[kind][normalizedKey];
   }
 
   function showAdminSection(sectionName) {
@@ -593,17 +643,42 @@
 
   function applyFilter() {
     const selected = filter.value;
+    const visibleCountByGroup = {};
     issueTableBody.querySelectorAll("tr[data-department-id]").forEach((row) => {
-      row.style.display = selected === "all" || row.dataset.departmentId === selected ? "" : "none";
+      const groupKey = String(row.dataset.groupKey || row.dataset.departmentId || "");
+      const collapsed = isGroupCollapsed("issues", groupKey);
+      const matchesFilter = selected === "all" || row.dataset.departmentId === selected;
+      const visible = matchesFilter && !collapsed;
+      row.style.display = visible ? "" : "none";
+      if (matchesFilter) {
+        visibleCountByGroup[groupKey] = (visibleCountByGroup[groupKey] || 0) + 1;
+      }
+    });
+    issueTableBody.querySelectorAll('tr[data-group-header="issues"]').forEach((header) => {
+      const groupKey = String(header.dataset.groupKey || "");
+      const count = Number(visibleCountByGroup[groupKey] || 0);
+      header.style.display = count > 0 ? "" : "none";
     });
     updateDepartmentFilterChip();
   }
 
   function applyMachineGroupFilter() {
     const selectedGroup = machineGroupSelect.value;
-    machineTableBody.querySelectorAll("tr[data-machine-group]").forEach((row) => {
-      const rowGroup = row.dataset.machineGroup || "";
-      row.style.display = !selectedGroup || rowGroup === selectedGroup ? "" : "none";
+    const visibleCountByGroup = {};
+    machineTableBody.querySelectorAll("tr[data-machine-id]").forEach((row) => {
+      const rowGroup = String(row.dataset.machineGroup || "Ungrouped");
+      const collapsed = isGroupCollapsed("machines", rowGroup);
+      const matchesFilter = !selectedGroup || rowGroup === selectedGroup;
+      const visible = matchesFilter && !collapsed;
+      row.style.display = visible ? "" : "none";
+      if (matchesFilter) {
+        visibleCountByGroup[rowGroup] = (visibleCountByGroup[rowGroup] || 0) + 1;
+      }
+    });
+    machineTableBody.querySelectorAll('tr[data-group-header="machines"]').forEach((header) => {
+      const groupKey = String(header.dataset.groupKey || "");
+      const count = Number(visibleCountByGroup[groupKey] || 0);
+      header.style.display = count > 0 ? "" : "none";
     });
     updateMachineGroupFilterChip();
   }
@@ -686,16 +761,311 @@
     });
   }
 
-  function buildUserSelectOptions(selectElement, selectedValue) {
-    return Array.from(selectElement.options)
-      .map((option) => {
-        if (!option.value) {
-          return '<option value="">Select</option>';
-        }
-        const selected = String(option.value) === String(selectedValue || "") ? " selected" : "";
-        return `<option value="${escapeHtml(option.value)}"${selected}>${escapeHtml(option.textContent.trim())}</option>`;
+  function buildSimpleSelectOptions(values, selectedValue) {
+    return (values || [])
+      .map((value) => {
+        const selected = String(value) === String(selectedValue || "") ? " selected" : "";
+        return `<option value="${escapeHtml(value)}"${selected}>${escapeHtml(value)}</option>`;
       })
       .join("");
+  }
+
+  function parseCsvIds(value) {
+    return String(value || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item && /^\d+$/.test(item))
+      .map((item) => Number(item));
+  }
+
+  function uniqueSortedIds(values) {
+    return Array.from(new Set((values || []).map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))).sort((a, b) => a - b);
+  }
+
+  function currentScopeGroupIds() {
+    return Array.from(userScopeGroupList.querySelectorAll(".js-user-scope-group:checked"))
+      .map((input) => Number(input.value))
+      .filter((value) => Number.isInteger(value) && value > 0);
+  }
+
+  function roleScopeHint(role) {
+    if (role === "Operator") {
+      return "Operator: pick one or more machines. Groups are just a filter helper.";
+    }
+    if (role === "Viewer") {
+      return "Viewer: pick one or more machine groups. Machines can be specific or all in each selected group.";
+    }
+    if (role === "Manager") {
+      return "Manager: pick machine groups and/or specific machines for dashboard access.";
+    }
+    return "Admin gets full access and does not need scope picks.";
+  }
+
+  function applyRoleScopeState() {
+    const role = userRoleSelect.value || "Operator";
+    const disabled = role === "Admin";
+    userScopeRoleHint.textContent = roleScopeHint(role);
+    userScopeGroupList.querySelectorAll("input").forEach((input) => {
+      input.disabled = disabled;
+      if (disabled) {
+        input.checked = false;
+      }
+    });
+    userScopeAllMachines.disabled = disabled;
+    if (disabled) {
+      userScopeAllMachines.checked = false;
+    }
+    userScopeModeSelect.value = disabled ? "all" : "restricted";
+  }
+
+  function buildScopeMachineRow(machine, selectedMachineIds) {
+    const checked = selectedMachineIds.has(machine.id) ? " checked" : "";
+    const machineCode = machine.machine_code ? ` (${escapeHtml(machine.machine_code)})` : "";
+    const dept = machine.department_name ? ` • ${escapeHtml(machine.department_name)}` : "";
+    return `<label class="admin-scope-machine-row"><input type="checkbox" class="js-user-scope-machine" value="${machine.id}" data-department-id="${machine.department_id || ""}"${checked}><span>${escapeHtml(machine.name)}${machineCode}<small>${escapeHtml(machine.machine_group_name || "")}${dept}</small></span></label>`;
+  }
+
+  function renderScopeMachines() {
+    const selectedGroupIds = new Set(currentScopeGroupIds());
+    const selectedMachineIds = new Set(parseCsvIds(userScopeMachineIdsInput.value));
+    const filteredMachines = machineScopeCatalog
+      .filter((machine) => machine && machine.id)
+      .filter((machine) => selectedGroupIds.size === 0 || selectedGroupIds.has(Number(machine.machine_group_id)));
+    if (!filteredMachines.length) {
+      userScopeMachineList.innerHTML = '<div class="admin-scope-empty">Select a machine group to load machines.</div>';
+      syncScopeHiddenInputs();
+      return;
+    }
+    userScopeMachineList.innerHTML = filteredMachines
+      .map((machine) => buildScopeMachineRow(machine, selectedMachineIds))
+      .join("");
+    if (userScopeAllMachines.checked) {
+      userScopeMachineList.querySelectorAll(".js-user-scope-machine").forEach((checkbox) => {
+        checkbox.checked = true;
+      });
+    }
+    syncScopeHiddenInputs();
+  }
+
+  function syncScopeHiddenInputs() {
+    const selectedGroupIds = uniqueSortedIds(currentScopeGroupIds());
+    const selectedMachineCheckboxes = Array.from(userScopeMachineList.querySelectorAll(".js-user-scope-machine:checked"));
+    const selectedMachineIds = uniqueSortedIds(selectedMachineCheckboxes.map((input) => Number(input.value)));
+    const selectedDepartmentIds = uniqueSortedIds(
+      selectedMachineCheckboxes
+        .map((input) => Number(input.dataset.departmentId || ""))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    );
+    userScopeMachineGroupIdsInput.value = selectedGroupIds.join(",");
+    userScopeMachineIdsInput.value = selectedMachineIds.join(",");
+    userScopeDepartmentIdsInput.value = selectedDepartmentIds.join(",");
+  }
+
+  function scopeSummaryFromUser(user) {
+    const machineCount = Array.isArray(user.scope_machine_ids) ? user.scope_machine_ids.length : parseCsvIds(user.scope_machine_ids).length;
+    const groupCount = Array.isArray(user.scope_machine_group_ids) ? user.scope_machine_group_ids.length : parseCsvIds(user.scope_machine_group_ids).length;
+    return `Machines: ${machineCount}, Groups: ${groupCount}`;
+  }
+
+  function scopeGroupNameById(groupId) {
+    const input = userScopeGroupList.querySelector(`.js-user-scope-group[value="${CSS.escape(String(groupId))}"]`);
+    return input?.dataset.groupName || "";
+  }
+
+  function scopeGroupIdByName(groupName) {
+    const input = Array.from(userScopeGroupList.querySelectorAll(".js-user-scope-group"))
+      .find((item) => (item.dataset.groupName || "") === String(groupName || ""));
+    return input ? Number(input.value) : null;
+  }
+
+  function appendScopeGroupChoice(group) {
+    if (!group?.id || !group?.name) return;
+    if (userScopeGroupList.querySelector(`.js-user-scope-group[value="${CSS.escape(String(group.id))}"]`)) {
+      return;
+    }
+    const label = document.createElement("label");
+    label.className = "admin-scope-pill";
+    label.innerHTML = `<input type="checkbox" class="js-user-scope-group" value="${escapeHtml(group.id)}" data-group-name="${escapeHtml(group.name)}"><span>${escapeHtml(group.name)}</span>`;
+    userScopeGroupList.appendChild(label);
+  }
+
+  function renameScopeGroupChoice(group) {
+    if (!group?.id || !group?.name) return;
+    const input = userScopeGroupList.querySelector(`.js-user-scope-group[value="${CSS.escape(String(group.id))}"]`);
+    if (!input) return;
+    input.dataset.groupName = group.name;
+    const label = input.closest("label");
+    const text = label?.querySelector("span");
+    if (text) {
+      text.textContent = group.name;
+    }
+  }
+
+  function removeScopeGroupChoice(groupId) {
+    const input = userScopeGroupList.querySelector(`.js-user-scope-group[value="${CSS.escape(String(groupId))}"]`);
+    input?.closest("label")?.remove();
+  }
+
+  function upsertMachineScopeCatalog(machine) {
+    if (!machine?.id) return;
+    const groupId = scopeGroupIdByName(machine.machine_group || machine.machine_type || "");
+    const index = machineScopeCatalog.findIndex((entry) => Number(entry.id) === Number(machine.id));
+    const payload = {
+      id: machine.id,
+      name: machine.name,
+      machine_code: machine.machine_code,
+      machine_group_name: machine.machine_group || machine.machine_type || null,
+      machine_group_id: groupId,
+      department_id: machine.department_id,
+      department_name: machine.department_name,
+      is_active: machine.is_active,
+    };
+    if (index >= 0) {
+      machineScopeCatalog[index] = payload;
+    } else {
+      machineScopeCatalog.push(payload);
+    }
+  }
+
+  function removeMachineFromScopeCatalog(machineId) {
+    const index = machineScopeCatalog.findIndex((entry) => Number(entry.id) === Number(machineId));
+    if (index >= 0) {
+      machineScopeCatalog.splice(index, 1);
+    }
+  }
+
+  function removeScopeMachinesForGroupName(groupName) {
+    const normalized = String(groupName || "");
+    for (let idx = machineScopeCatalog.length - 1; idx >= 0; idx -= 1) {
+      const entry = machineScopeCatalog[idx];
+      if ((entry.machine_group_name || "") === normalized) {
+        machineScopeCatalog.splice(idx, 1);
+      }
+    }
+  }
+
+  function applyUserCreateDefaults() {
+    userRoleSelect.value = "Operator";
+    userScopeAllMachines.checked = false;
+    userScopeMachineIdsInput.value = "";
+    userScopeMachineGroupIdsInput.value = "";
+    userScopeDepartmentIdsInput.value = "";
+    userScopeGroupList.querySelectorAll(".js-user-scope-group").forEach((input) => {
+      input.checked = false;
+    });
+    applyRoleScopeState();
+    renderScopeMachines();
+  }
+
+  function regroupMachines() {
+    const rows = Array.from(machineTableBody.querySelectorAll("tr[data-machine-id]"));
+    const grouped = new Map();
+    rows.forEach((row) => {
+      const groupName = String(row.dataset.machineGroup || "Ungrouped").trim() || "Ungrouped";
+      if (!grouped.has(groupName)) {
+        grouped.set(groupName, []);
+      }
+      grouped.get(groupName).push(row);
+    });
+    const orderedGroups = Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b));
+    machineTableBody.innerHTML = "";
+    orderedGroups.forEach((groupName) => {
+      const machineRows = grouped.get(groupName) || [];
+      machineRows.sort((left, right) => {
+        const leftName = (left.dataset.machineName || left.querySelector(".machine-name")?.textContent || "").trim();
+        const rightName = (right.dataset.machineName || right.querySelector(".machine-name")?.textContent || "").trim();
+        return leftName.localeCompare(rightName);
+      });
+      machineTableBody.insertAdjacentHTML("beforeend", groupHeaderRow("machines", groupName, groupName, machineRows.length, 5, isGroupCollapsed("machines", groupName)));
+      machineRows.forEach((row) => {
+        row.dataset.groupKey = groupName;
+        machineTableBody.appendChild(row);
+      });
+    });
+    applyMachineGroupFilter();
+  }
+
+  function regroupIssues() {
+    const rows = Array.from(issueTableBody.querySelectorAll("tr[data-department-id]"));
+    const grouped = new Map();
+    rows.forEach((row) => {
+      const deptId = String(row.dataset.departmentId || "");
+      const deptName = String(row.dataset.departmentName || row.querySelector(".issue-department")?.textContent || "Unassigned").trim() || "Unassigned";
+      const key = deptId || `name:${deptName}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, { label: deptName, rows: [] });
+      }
+      grouped.get(key).rows.push(row);
+    });
+    const orderedGroups = Array.from(grouped.entries()).sort((left, right) => left[1].label.localeCompare(right[1].label));
+    issueTableBody.innerHTML = "";
+    orderedGroups.forEach(([groupKey, group]) => {
+      group.rows.sort((left, right) => {
+        const leftName = (left.querySelector("td:nth-child(2)")?.textContent || "").trim();
+        const rightName = (right.querySelector("td:nth-child(2)")?.textContent || "").trim();
+        return leftName.localeCompare(rightName);
+      });
+      issueTableBody.insertAdjacentHTML("beforeend", groupHeaderRow("issues", groupKey, group.label, group.rows.length, 4, isGroupCollapsed("issues", groupKey)));
+      group.rows.forEach((row) => {
+        row.dataset.groupKey = groupKey;
+        issueTableBody.appendChild(row);
+      });
+    });
+    applyFilter();
+  }
+
+  function userGroupInfo(row) {
+    const scopeGroupIds = uniqueSortedIds(parseCsvIds(row.dataset.userScopeMachineGroupIds || ""));
+    const scopeDeptIds = uniqueSortedIds(parseCsvIds(row.dataset.userScopeDepartmentIds || ""));
+    const groupNames = scopeGroupIds.map((id) => machineGroupNameForId(id)).filter(Boolean);
+    const deptNames = scopeDeptIds.map((id) => departmentNameForId(id)).filter(Boolean);
+    const mode = userGroupingModeSelect.value || "combined";
+    if (mode === "machine-group") {
+      const label = groupNames.length ? groupNames.join(", ") : "No Machine Group Scope";
+      return { key: `mg:${label}`, label };
+    }
+    if (mode === "department") {
+      const label = deptNames.length ? deptNames.join(", ") : "No Department Scope";
+      return { key: `dept:${label}`, label };
+    }
+    const groupLabel = groupNames.length ? groupNames.join(", ") : "No Machine Group";
+    const deptLabel = deptNames.length ? deptNames.join(", ") : "No Department";
+    return {
+      key: `combo:${groupLabel}|${deptLabel}`,
+      label: `${groupLabel} • ${deptLabel}`,
+    };
+  }
+
+  function regroupUsers() {
+    const rows = Array.from(userTableBody.querySelectorAll("tr[data-user-id]"));
+    const mode = userGroupingModeSelect.value || "combined";
+    rows.sort((left, right) => {
+      const leftName = (left.dataset.userDisplayName || left.querySelector('[name="display_name"]')?.value || "").trim();
+      const rightName = (right.dataset.userDisplayName || right.querySelector('[name="display_name"]')?.value || "").trim();
+      return leftName.localeCompare(rightName);
+    });
+    userTableBody.innerHTML = "";
+    if (mode === "none") {
+      rows.forEach((row) => userTableBody.appendChild(row));
+      return;
+    }
+    const grouped = new Map();
+    rows.forEach((row) => {
+      const group = userGroupInfo(row);
+      if (!grouped.has(group.key)) {
+        grouped.set(group.key, { label: group.label, rows: [] });
+      }
+      grouped.get(group.key).rows.push(row);
+    });
+    const orderedGroups = Array.from(grouped.entries()).sort((left, right) => left[1].label.localeCompare(right[1].label));
+    orderedGroups.forEach(([groupKey, group]) => {
+      userTableBody.insertAdjacentHTML("beforeend", groupHeaderRow("users", groupKey, group.label, group.rows.length, 11, isGroupCollapsed("users", groupKey)));
+      group.rows.forEach((row) => {
+        row.dataset.groupKey = groupKey;
+        row.style.display = isGroupCollapsed("users", groupKey) ? "none" : "";
+        userTableBody.appendChild(row);
+      });
+    });
   }
 
   function syncIssueDepartmentOptions() {
@@ -720,7 +1090,7 @@
 
   function issueRowHtml(problem) {
     return `
-      <tr id="issue-row-${problem.id}" data-department-id="${problem.department_id}">
+      <tr id="issue-row-${problem.id}" data-department-id="${problem.department_id}" data-department-name="${escapeHtml(problem.department_name || "")}">
         <td class="issue-department">
           <div class="admin-filter-link fw-semibold" data-department-filter="${problem.department_id}" role="button" tabindex="0" title="Click to filter issues">${escapeHtml(problem.department_name)}</div>
         </td>
@@ -776,7 +1146,7 @@
 
   function machineRowHtml(machine) {
     return `
-      <tr id="machine-row-${machine.id}" data-machine-id="${machine.id}" data-machine-group="${escapeHtml(machine.machine_group || machine.machine_type || "")}">
+      <tr id="machine-row-${machine.id}" data-machine-id="${machine.id}" data-machine-group="${escapeHtml(machine.machine_group || machine.machine_type || "")}" data-machine-name="${escapeHtml(machine.name || "")}">
         <td class="machine-group">${escapeHtml(machine.machine_group || machine.machine_type || "-")}</td>
         <td class="machine-name">${escapeHtml(machine.name)}</td>
         <td class="machine-code">${escapeHtml(machine.machine_code || "-")}</td>
@@ -797,7 +1167,7 @@
     const scopeMachineGroupIds = Array.isArray(user.scope_machine_group_ids) ? user.scope_machine_group_ids.join(",") : (user.scope_machine_group_ids || "");
     const scopeDepartmentIds = Array.isArray(user.scope_department_ids) ? user.scope_department_ids.join(",") : (user.scope_department_ids || "");
     return `
-      <tr id="user-row-${user.id}" data-user-id="${user.id}" data-user-role="${escapeHtml(user.role || "")}" data-user-scope-mode="${escapeHtml(user.scope_mode || "")}" data-user-machine-group-id="${user.machine_group_id || ""}" data-user-department-id="${user.department_id || ""}" data-user-scope-machine-ids="${escapeHtml(scopeMachineIds)}" data-user-scope-machine-group-ids="${escapeHtml(scopeMachineGroupIds)}" data-user-scope-department-ids="${escapeHtml(scopeDepartmentIds)}">
+      <tr id="user-row-${user.id}" data-user-id="${user.id}" data-user-role="${escapeHtml(user.role || "")}" data-user-scope-mode="${escapeHtml(user.scope_mode || "")}" data-user-machine-group-id="${user.machine_group_id || ""}" data-user-department-id="${user.department_id || ""}" data-user-scope-machine-ids="${escapeHtml(scopeMachineIds)}" data-user-scope-machine-group-ids="${escapeHtml(scopeMachineGroupIds)}" data-user-scope-department-ids="${escapeHtml(scopeDepartmentIds)}" data-user-display-name="${escapeHtml(user.display_name || "")}">
         <td><input class="form-control form-control-sm js-user-field" data-user-field="username" name="username" value="${escapeHtml(user.username || "")}" placeholder="username"></td>
         <td><input class="form-control form-control-sm js-user-field" data-user-field="password" name="password" type="password" placeholder="${user.has_password ? "Leave blank" : "Set password"}"></td>
         <td><input class="form-control form-control-sm js-user-field" data-user-field="work_id" name="work_id" value="${escapeHtml(user.work_id || "")}" placeholder="Work ID"></td>
@@ -806,27 +1176,22 @@
         <td><input class="form-control form-control-sm js-user-field" data-user-field="phone_number" name="phone_number" value="${escapeHtml(user.phone_number || "")}" placeholder="Phone number"></td>
         <td>
           <select class="form-select form-select-sm js-user-field" data-user-field="role" name="role" required>
-            ${buildUserSelectOptions(userRoleSelect, user.role)}
+            ${buildSimpleSelectOptions(userRoleValues, user.role)}
           </select>
         </td>
         <td>
           <select class="form-select form-select-sm js-user-field" data-user-field="scope_mode" name="scope_mode" required>
-            ${buildUserSelectOptions(userScopeModeSelect, user.scope_mode)}
+            ${buildSimpleSelectOptions(userScopeModeValues, user.scope_mode)}
           </select>
         </td>
         <td>
-          <select class="form-select form-select-sm js-user-field" data-user-field="machine_group_id" name="machine_group_id">
-            ${buildUserSelectOptions(userMachineGroupSelect, user.machine_group_id)}
-          </select>
+          <div class="small text-secondary js-user-scope-summary">${escapeHtml(scopeSummaryFromUser(user))}</div>
+          <input type="hidden" class="js-user-field" data-user-field="machine_group_id" name="machine_group_id" value="${escapeHtml(user.machine_group_id || "")}">
+          <input type="hidden" class="js-user-field" data-user-field="department_id" name="department_id" value="${escapeHtml(user.department_id || "")}">
+          <input type="hidden" class="js-user-field" data-user-field="scope_machine_ids" name="scope_machine_ids" value="${escapeHtml(scopeMachineIds)}">
+          <input type="hidden" class="js-user-field" data-user-field="scope_machine_group_ids" name="scope_machine_group_ids" value="${escapeHtml(scopeMachineGroupIds)}">
+          <input type="hidden" class="js-user-field" data-user-field="scope_department_ids" name="scope_department_ids" value="${escapeHtml(scopeDepartmentIds)}">
         </td>
-        <td>
-          <select class="form-select form-select-sm js-user-field" data-user-field="department_id" name="department_id">
-            ${buildUserSelectOptions(userDepartmentSelect, user.department_id)}
-          </select>
-        </td>
-        <td><input class="form-control form-control-sm js-user-field" data-user-field="scope_machine_ids" name="scope_machine_ids" value="${escapeHtml(scopeMachineIds)}" placeholder="1,2,3"></td>
-        <td><input class="form-control form-control-sm js-user-field" data-user-field="scope_machine_group_ids" name="scope_machine_group_ids" value="${escapeHtml(scopeMachineGroupIds)}" placeholder="1,3"></td>
-        <td><input class="form-control form-control-sm js-user-field" data-user-field="scope_department_ids" name="scope_department_ids" value="${escapeHtml(scopeDepartmentIds)}" placeholder="2,4"></td>
         <td class="user-status">${user.is_active ? "Active" : "Inactive"}</td>
         <td class="text-end d-flex justify-content-end gap-2">
           <form class="js-ajax-form" method="post" action="/andon/admin/user/${user.id}/toggle" data-kind="user-toggle">
@@ -904,6 +1269,7 @@
     const row = document.getElementById(`machine-row-${machine.id}`);
     if (!row) return;
     row.dataset.machineGroup = machine.machine_group || machine.machine_type || "";
+    row.dataset.machineName = machine.name || "";
     row.querySelector(".machine-name").textContent = machine.name;
     row.querySelector(".machine-group").textContent = machine.machine_group || machine.machine_type || "-";
     row.querySelector(".machine-code").textContent = machine.machine_code || "-";
@@ -923,6 +1289,7 @@
     row.dataset.userScopeMachineIds = Array.isArray(user.scope_machine_ids) ? user.scope_machine_ids.join(",") : "";
     row.dataset.userScopeMachineGroupIds = Array.isArray(user.scope_machine_group_ids) ? user.scope_machine_group_ids.join(",") : "";
     row.dataset.userScopeDepartmentIds = Array.isArray(user.scope_department_ids) ? user.scope_department_ids.join(",") : "";
+    row.dataset.userDisplayName = user.display_name || "";
     row.querySelector('[name="username"]').value = user.username || "";
     row.querySelector('[name="password"]').value = "";
     row.querySelector('[name="work_id"]').value = user.work_id || "";
@@ -936,6 +1303,10 @@
     row.querySelector('[name="scope_machine_ids"]').value = Array.isArray(user.scope_machine_ids) ? user.scope_machine_ids.join(",") : "";
     row.querySelector('[name="scope_machine_group_ids"]').value = Array.isArray(user.scope_machine_group_ids) ? user.scope_machine_group_ids.join(",") : "";
     row.querySelector('[name="scope_department_ids"]').value = Array.isArray(user.scope_department_ids) ? user.scope_department_ids.join(",") : "";
+    const scopeSummary = row.querySelector(".js-user-scope-summary");
+    if (scopeSummary) {
+      scopeSummary.textContent = scopeSummaryFromUser(user);
+    }
     row.querySelector(".user-status").textContent = user.is_active ? "Active" : "Inactive";
   }
 
@@ -991,6 +1362,7 @@
     }
     if (data.user) {
       updateUserRow(data.user);
+      regroupUsers();
     }
   }
 
@@ -1023,6 +1395,7 @@
     const row = document.getElementById(`issue-row-${problem.id}`);
     if (!row) return;
     row.dataset.departmentId = String(problem.department_id ?? "");
+    row.dataset.departmentName = String(problem.department_name || "");
     row.querySelector(".issue-department").textContent = problem.department_name || "";
     row.querySelector(".issue-status").textContent = problem.is_active ? "Active" : "Inactive";
     applyFilter();
@@ -1070,8 +1443,11 @@
       const payload = await submitAjaxForm(form);
       if (form.dataset.kind === "department-create" && payload.department) {
         departmentTableBody.insertAdjacentHTML("beforeend", departmentRowHtml(payload.department));
+        departmentsCatalog.push({ id: payload.department.id, name: payload.department.name });
         appendDepartmentOption(payload.department);
         appendUserDepartmentOption(payload.department);
+        regroupIssues();
+        regroupUsers();
         form.reset();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "department-toggle" && payload.department) {
@@ -1091,6 +1467,12 @@
         issueTableBody.querySelectorAll(`tr[data-department-id="${payload.department.id}"] .admin-filter-link`).forEach((cell) => {
           cell.textContent = payload.department.name;
         });
+        issueTableBody.querySelectorAll(`tr[data-department-id="${payload.department.id}"] .issue-department`).forEach((cell) => {
+          cell.textContent = payload.department.name;
+        });
+        issueTableBody.querySelectorAll(`tr[data-department-id="${payload.department.id}"]`).forEach((issueRow) => {
+          issueRow.dataset.departmentName = payload.department.name;
+        });
         document.querySelectorAll(`#issueDepartmentSelect option[value="${payload.department.id}"]`).forEach((option) => {
           option.textContent = payload.department.name;
         });
@@ -1099,6 +1481,12 @@
             option.textContent = payload.department.name;
           }
         });
+        const deptIndex = departmentsCatalog.findIndex((department) => Number(department.id) === Number(payload.department.id));
+        if (deptIndex >= 0) {
+          departmentsCatalog[deptIndex].name = payload.department.name;
+        }
+        regroupIssues();
+        regroupUsers();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "department-delete") {
         const row = form.closest("tr");
@@ -1114,13 +1502,24 @@
           } else {
             applyFilter();
           }
+          const deptIndex = departmentsCatalog.findIndex((department) => Number(department.id) === Number(departmentId));
+          if (deptIndex >= 0) {
+            departmentsCatalog.splice(deptIndex, 1);
+          }
+          regroupIssues();
+          regroupUsers();
           notifyAndonRefresh();
         }
       } else if (form.dataset.kind === "machine-group-create" && payload.machine_group) {
         machineGroupTableBody.insertAdjacentHTML("beforeend", machineGroupRowHtml(payload.machine_group));
+        machineGroupsCatalog.push({ id: payload.machine_group.id, name: payload.machine_group.name, is_active: payload.machine_group.is_active, machine_count: payload.machine_group.machine_count });
         appendMachineGroupOption(payload.machine_group);
         appendUserMachineGroupOption(payload.machine_group);
+        appendScopeGroupChoice(payload.machine_group);
         form.reset();
+        regroupMachines();
+        regroupUsers();
+        renderScopeMachines();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "machine-group-toggle" && payload.machine_group) {
         const row = document.getElementById(`machine-group-row-${payload.machine_group.id}`);
@@ -1156,7 +1555,21 @@
               option.textContent = payload.machine_group.name;
             }
           });
+          const groupIndex = machineGroupsCatalog.findIndex((group) => Number(group.id) === Number(payload.machine_group.id));
+          if (groupIndex >= 0) {
+            machineGroupsCatalog[groupIndex].name = payload.machine_group.name;
+          }
+          machineScopeCatalog.forEach((entry) => {
+            if ((entry.machine_group_name || "") === oldName) {
+              entry.machine_group_name = payload.machine_group.name;
+              entry.machine_group_id = payload.machine_group.id;
+            }
+          });
         }
+        renameScopeGroupChoice(payload.machine_group);
+        regroupMachines();
+        regroupUsers();
+        renderScopeMachines();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "machine-group-delete") {
         const row = form.closest("tr");
@@ -1168,24 +1581,36 @@
         removeMachinesByIds(payload.affected_machine_ids);
         removeUserMachineGroupOption(groupId);
         clearUserMachineGroupById(String(groupId));
+        removeScopeGroupChoice(String(groupId));
         if (groupName) {
           removeMachineGroupOption(groupName);
           removeMachinesForGroup(groupName);
+          removeScopeMachinesForGroupName(groupName);
+        }
+        const groupIndex = machineGroupsCatalog.findIndex((group) => Number(group.id) === Number(groupId));
+        if (groupIndex >= 0) {
+          machineGroupsCatalog.splice(groupIndex, 1);
         }
         if (machineGroupSelect.value === groupName) {
           machineGroupSelect.value = "";
           applyMachineGroupFilter();
         }
+        regroupMachines();
+        regroupUsers();
+        renderScopeMachines();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "machine-create" && payload.machine) {
         const selectedGroup = machineGroupSelect.value;
         appendMachineRow(payload.machine);
+        upsertMachineScopeCatalog(payload.machine);
         if (payload.machine.machine_group) {
           bumpMachineGroupCount(payload.machine.machine_group, 1);
         }
         form.reset();
         machineGroupSelect.value = selectedGroup;
+        regroupMachines();
         applyMachineGroupFilter();
+        renderScopeMachines();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "escalation-update" && payload.rule) {
         updateEscalationRow(payload.rule);
@@ -1195,6 +1620,9 @@
         notifyAndonRefresh();
       } else if (form.dataset.kind === "machine-toggle" && payload.machine) {
         updateMachineRow(payload.machine);
+        upsertMachineScopeCatalog(payload.machine);
+        regroupMachines();
+        renderScopeMachines();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "machine-delete") {
         const row = form.closest("tr");
@@ -1202,13 +1630,17 @@
         const machineGroup = row?.dataset.machineGroup || payload.machine_group;
         if (machineId) {
           removeMachineRow(machineId);
+          removeMachineFromScopeCatalog(machineId);
         }
         if (machineGroup) {
           bumpMachineGroupCount(machineGroup, -1);
         }
+        regroupMachines();
+        renderScopeMachines();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "issue-create" && payload.problem) {
         appendIssueRow(payload.problem);
+        regroupIssues();
         const nameInput = form.querySelector('input[name="name"]');
         if (nameInput) {
           nameInput.value = "";
@@ -1217,20 +1649,22 @@
         notifyAndonRefresh();
       } else if (form.dataset.kind === "issue-toggle" && payload.problem) {
         updateIssueRow(payload.problem);
+        regroupIssues();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "issue-delete") {
         const row = form.closest("tr");
         row?.remove();
-        applyFilter();
+        regroupIssues();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "user-create" && payload.user) {
         appendUserRow(payload.user);
+        regroupUsers();
         form.reset();
-        userRoleSelect.value = "Operator";
-        userScopeModeSelect.value = "restricted";
+        applyUserCreateDefaults();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "user-toggle" && payload.user) {
         updateUserRow(payload.user);
+        regroupUsers();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "user-delete") {
         const row = form.closest("tr");
@@ -1238,6 +1672,7 @@
         if (userId) {
           document.getElementById(`user-row-${userId}`)?.remove();
         }
+        regroupUsers();
         notifyAndonRefresh();
       }
     } catch (error) {
@@ -1252,9 +1687,22 @@
   });
 
   issueTableBody.addEventListener("click", (event) => {
+    const toggle = event.target.closest('[data-group-toggle="issues"]');
+    if (toggle) {
+      toggleGroupCollapsed("issues", toggle.dataset.groupKey || "");
+      regroupIssues();
+      return;
+    }
     const cell = event.target.closest("[data-department-filter]");
     if (!cell) return;
     filterIssuesByDepartment(cell.dataset.departmentFilter);
+  });
+
+  machineTableBody.addEventListener("click", (event) => {
+    const toggle = event.target.closest('[data-group-toggle="machines"]');
+    if (!toggle) return;
+    toggleGroupCollapsed("machines", toggle.dataset.groupKey || "");
+    regroupMachines();
   });
 
   machineGroupTableBody.addEventListener("click", (event) => {
@@ -1273,6 +1721,63 @@
       notifyAndonRefresh();
     } catch (error) {
       alert(error.message || "Request failed");
+    }
+  });
+
+  userTableBody.addEventListener("click", (event) => {
+    const toggle = event.target.closest('[data-group-toggle="users"]');
+    if (!toggle) return;
+    toggleGroupCollapsed("users", toggle.dataset.groupKey || "");
+    regroupUsers();
+  });
+
+  userGroupingModeSelect.addEventListener("change", () => {
+    regroupUsers();
+  });
+
+  userRoleSelect.addEventListener("change", () => {
+    applyRoleScopeState();
+    renderScopeMachines();
+  });
+
+  userScopeGroupList.addEventListener("change", (event) => {
+    if (!event.target.closest(".js-user-scope-group")) return;
+    renderScopeMachines();
+  });
+
+  userScopeMachineList.addEventListener("change", (event) => {
+    if (!event.target.closest(".js-user-scope-machine")) return;
+    if (!event.target.checked) {
+      userScopeAllMachines.checked = false;
+    }
+    syncScopeHiddenInputs();
+  });
+
+  userScopeAllMachines.addEventListener("change", () => {
+    userScopeMachineList.querySelectorAll(".js-user-scope-machine").forEach((checkbox) => {
+      checkbox.checked = userScopeAllMachines.checked;
+    });
+    syncScopeHiddenInputs();
+  });
+
+  userCreateForm.addEventListener("submit", (event) => {
+    syncScopeHiddenInputs();
+    const role = userRoleSelect.value || "";
+    const machineIds = parseCsvIds(userScopeMachineIdsInput.value);
+    const groupIds = parseCsvIds(userScopeMachineGroupIdsInput.value);
+    if (role === "Operator" && machineIds.length === 0) {
+      event.preventDefault();
+      alert("Operator must have at least one machine selected.");
+      return;
+    }
+    if (role === "Viewer" && groupIds.length === 0) {
+      event.preventDefault();
+      alert("Viewer must have at least one machine group selected.");
+      return;
+    }
+    if (role === "Manager" && groupIds.length === 0 && machineIds.length === 0) {
+      event.preventDefault();
+      alert("Manager must have at least one machine group or machine selected.");
     }
   });
 
@@ -1304,9 +1809,11 @@
       appendUserMachineGroupOption({ id, name });
     }
   });
+  applyUserCreateDefaults();
+  regroupMachines();
+  regroupIssues();
+  regroupUsers();
   restoreAdminSection();
-  applyFilter();
-  applyMachineGroupFilter();
 })();
 </script>
 {% endblock %}

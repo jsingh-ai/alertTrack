@@ -647,6 +647,127 @@ body.admin-screen-shell .admin-section .btn-outline-danger:focus-visible {
   color: #a50f1a;
 }
 
+body.admin-screen-shell .admin-user-form-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+@media (min-width: 1100px) {
+  body.admin-screen-shell .admin-user-form-grid {
+    grid-template-columns: 1.15fr 1fr;
+  }
+}
+
+body.admin-screen-shell .admin-user-form-group {
+  border: 1px solid rgba(13, 110, 253, 0.14);
+  border-radius: 0.95rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+body.admin-screen-shell .admin-user-form-group__header {
+  margin-bottom: 0.55rem;
+}
+
+body.admin-screen-shell .admin-user-scope-tip {
+  font-size: 0.72rem;
+  color: rgba(24, 50, 79, 0.72);
+  background: rgba(13, 110, 253, 0.08);
+  border: 1px solid rgba(13, 110, 253, 0.15);
+  border-radius: 0.65rem;
+  padding: 0.45rem 0.55rem;
+  width: 100%;
+}
+
+body.admin-screen-shell .admin-scope-controls {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+@media (min-width: 900px) {
+  body.admin-screen-shell .admin-scope-controls {
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.35fr);
+  }
+}
+
+body.admin-screen-shell .admin-scope-group-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  max-height: 11.8rem;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+body.admin-screen-shell .admin-scope-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  border: 1px solid rgba(13, 110, 253, 0.18);
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.3rem 0.56rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #1d3d67;
+}
+
+body.admin-screen-shell .admin-scope-pill input {
+  margin: 0;
+}
+
+body.admin-screen-shell .admin-scope-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  color: rgba(24, 50, 79, 0.8);
+}
+
+body.admin-screen-shell .admin-scope-machine-list {
+  border: 1px solid rgba(13, 110, 253, 0.18);
+  border-radius: 0.72rem;
+  background: #fff;
+  max-height: 12rem;
+  overflow: auto;
+  padding: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+body.admin-screen-shell .admin-scope-machine-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  font-size: 0.75rem;
+  color: #16314d;
+  line-height: 1.2;
+}
+
+body.admin-screen-shell .admin-scope-machine-row input {
+  margin-top: 0.16rem;
+}
+
+body.admin-screen-shell .admin-scope-machine-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+body.admin-screen-shell .admin-scope-machine-row small {
+  color: rgba(24, 50, 79, 0.62);
+  font-size: 0.66rem;
+}
+
+body.admin-screen-shell .admin-scope-empty {
+  color: rgba(24, 50, 79, 0.68);
+  font-size: 0.74rem;
+  padding: 0.22rem;
+}
+
 body.admin-screen-shell .admin-filter-link {
   color: #1c4f93;
   cursor: pointer;
@@ -738,6 +859,295 @@ body.admin-screen-shell .table-dark th {
 
 body.admin-screen-shell .table-dark tbody tr:hover {
   background: rgba(13, 110, 253, 0.05);
+}
+
+body.admin-screen-shell .admin-group-header-row td {
+  background: rgba(13, 110, 253, 0.08) !important;
+  border-top: 1px solid rgba(13, 110, 253, 0.12);
+  border-bottom: 1px solid rgba(13, 110, 253, 0.1);
+  padding: 0.2rem 0.45rem;
+}
+
+body.admin-screen-shell .admin-group-header-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 0;
+  background: transparent;
+  color: #163d73;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 0.2rem 0.12rem;
+  text-align: left;
+}
+
+body.admin-screen-shell .admin-group-header-btn__icon {
+  width: 0.75rem;
+  display: inline-flex;
+  justify-content: center;
+  color: #0a58ca;
+}
+
+body.admin-screen-shell .admin-group-header-btn__label {
+  flex: 1;
+}
+
+body.admin-screen-shell .admin-group-header-btn__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.55rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: rgba(13, 110, 253, 0.14);
+  color: #0a58ca;
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+body.admin-screen-shell {
+  --admin-ui-text: #18324f;
+  --admin-ui-muted: rgba(24, 50, 79, 0.72);
+  --admin-ui-accent: #1c4f93;
+  --admin-ui-accent-strong: #0a58ca;
+  --admin-ui-panel-start: rgba(255, 255, 255, 0.98);
+  --admin-ui-panel-end: rgba(244, 248, 253, 0.98);
+  --admin-ui-panel-border: rgba(13, 110, 253, 0.14);
+  --admin-ui-form-bg: #fbfdff;
+  --admin-ui-form-border: rgba(13, 110, 253, 0.16);
+  --admin-ui-form-focus: rgba(13, 110, 253, 0.4);
+  --admin-ui-scope-pill-bg: #ffffff;
+  --admin-ui-scope-pill-border: rgba(13, 110, 253, 0.22);
+  --admin-ui-scope-pill-text: #1d3d67;
+  --admin-ui-scope-list-bg: #ffffff;
+  --admin-ui-scope-list-border: rgba(13, 110, 253, 0.2);
+  --admin-ui-chip-bg: #dbeafe;
+  --admin-ui-chip-border: rgba(29, 78, 216, 0.28);
+  --admin-ui-chip-text: #133a6c;
+  --admin-ui-chip-muted: #2b5f9a;
+  --admin-ui-chip-clear-bg: #c7dcff;
+  --admin-ui-chip-clear-hover-bg: #b6d1ff;
+  --admin-ui-chip-clear-text: #133a6c;
+  --admin-ui-table-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 248, 253, 0.98));
+  --admin-ui-table-color: #18324f;
+  --admin-ui-table-striped: rgba(13, 110, 253, 0.03);
+  --admin-ui-table-head-bg: rgba(13, 110, 253, 0.05);
+  --admin-ui-table-border: rgba(13, 110, 253, 0.12);
+  --admin-ui-table-border-soft: rgba(13, 110, 253, 0.08);
+  --admin-ui-table-row-hover: rgba(13, 110, 253, 0.05);
+  --admin-ui-group-header-bg: rgba(13, 110, 253, 0.08);
+  --admin-ui-group-header-border: rgba(13, 110, 253, 0.12);
+  --admin-ui-group-header-text: #163d73;
+  --admin-ui-group-count-bg: rgba(13, 110, 253, 0.16);
+  --admin-ui-group-count-text: #0a58ca;
+  --admin-ui-outline-btn-bg: rgba(255, 255, 255, 0.95);
+  --admin-ui-outline-btn-text: #18324f;
+  --admin-ui-outline-btn-border: rgba(24, 50, 79, 0.16);
+  --admin-ui-outline-btn-hover-bg: rgba(13, 110, 253, 0.12);
+  --admin-ui-outline-btn-hover-text: #17407a;
+}
+
+html[data-theme="dark"] body.admin-screen-shell {
+  --admin-ui-text: #e5eefc;
+  --admin-ui-muted: rgba(214, 226, 247, 0.78);
+  --admin-ui-accent: #bfdbfe;
+  --admin-ui-accent-strong: #eff6ff;
+  --admin-ui-panel-start: rgba(15, 23, 39, 0.98);
+  --admin-ui-panel-end: rgba(10, 16, 28, 0.98);
+  --admin-ui-panel-border: rgba(148, 163, 184, 0.28);
+  --admin-ui-form-bg: rgba(8, 14, 26, 0.92);
+  --admin-ui-form-border: rgba(147, 197, 253, 0.28);
+  --admin-ui-form-focus: rgba(147, 197, 253, 0.62);
+  --admin-ui-scope-pill-bg: rgba(17, 28, 47, 0.96);
+  --admin-ui-scope-pill-border: rgba(147, 197, 253, 0.34);
+  --admin-ui-scope-pill-text: #dbeafe;
+  --admin-ui-scope-list-bg: rgba(9, 16, 29, 0.9);
+  --admin-ui-scope-list-border: rgba(147, 197, 253, 0.32);
+  --admin-ui-chip-bg: rgba(59, 130, 246, 0.24);
+  --admin-ui-chip-border: rgba(147, 197, 253, 0.48);
+  --admin-ui-chip-text: #eff6ff;
+  --admin-ui-chip-muted: #dbeafe;
+  --admin-ui-chip-clear-bg: rgba(147, 197, 253, 0.35);
+  --admin-ui-chip-clear-hover-bg: rgba(147, 197, 253, 0.5);
+  --admin-ui-chip-clear-text: #eff6ff;
+  --admin-ui-table-bg: linear-gradient(180deg, rgba(14, 22, 37, 0.98), rgba(9, 15, 27, 0.98));
+  --admin-ui-table-color: #e5eefc;
+  --admin-ui-table-striped: rgba(96, 165, 250, 0.08);
+  --admin-ui-table-head-bg: rgba(59, 130, 246, 0.22);
+  --admin-ui-table-border: rgba(148, 163, 184, 0.3);
+  --admin-ui-table-border-soft: rgba(148, 163, 184, 0.24);
+  --admin-ui-table-row-hover: rgba(96, 165, 250, 0.14);
+  --admin-ui-group-header-bg: rgba(59, 130, 246, 0.22);
+  --admin-ui-group-header-border: rgba(147, 197, 253, 0.34);
+  --admin-ui-group-header-text: #e8f1ff;
+  --admin-ui-group-count-bg: rgba(147, 197, 253, 0.28);
+  --admin-ui-group-count-text: #eff6ff;
+  --admin-ui-outline-btn-bg: rgba(17, 28, 47, 0.94);
+  --admin-ui-outline-btn-text: #dbeafe;
+  --admin-ui-outline-btn-border: rgba(148, 163, 184, 0.42);
+  --admin-ui-outline-btn-hover-bg: rgba(59, 130, 246, 0.28);
+  --admin-ui-outline-btn-hover-text: #eff6ff;
+}
+
+body.admin-screen-shell .admin-section-header .h4,
+body.admin-screen-shell .admin-section-header .h5,
+body.admin-screen-shell .admin-section .text-secondary,
+body.admin-screen-shell .machine-group-status,
+body.admin-screen-shell .department-status,
+body.admin-screen-shell .issue-status,
+body.admin-screen-shell .escalation-status,
+body.admin-screen-shell .user-status,
+body.admin-screen-shell .admin-delete-modal__target {
+  color: var(--admin-ui-text) !important;
+}
+
+body.admin-screen-shell .admin-section-header .text-secondary,
+body.admin-screen-shell .admin-user-scope-tip,
+body.admin-screen-shell .admin-scope-check,
+body.admin-screen-shell .admin-scope-machine-row small,
+body.admin-screen-shell .admin-scope-empty,
+body.admin-screen-shell .admin-group-header-btn__label,
+body.admin-screen-shell .admin-filter-chip__label {
+  color: var(--admin-ui-muted) !important;
+}
+
+body.admin-screen-shell .admin-section .form-label,
+body.admin-screen-shell .admin-scope-machine-row {
+  color: var(--admin-ui-text);
+}
+
+body.admin-screen-shell .admin-user-scope-tip {
+  background: var(--admin-ui-chip-bg);
+  border-color: var(--admin-ui-chip-border);
+}
+
+body.admin-screen-shell .admin-section .andon-panel {
+  background: linear-gradient(180deg, var(--admin-ui-panel-start), var(--admin-ui-panel-end)) !important;
+  border-color: var(--admin-ui-panel-border) !important;
+  color: var(--admin-ui-text) !important;
+}
+
+body.admin-screen-shell .admin-user-form-group {
+  background: var(--admin-ui-panel-start);
+  border-color: var(--admin-ui-panel-border);
+}
+
+body.admin-screen-shell .admin-section .form-control,
+body.admin-screen-shell .admin-section .form-select,
+body.admin-screen-shell .admin-scope-machine-list {
+  background-color: var(--admin-ui-form-bg);
+  border-color: var(--admin-ui-form-border);
+  color: var(--admin-ui-text);
+}
+
+body.admin-screen-shell .admin-section .form-control::placeholder {
+  color: var(--admin-ui-muted);
+}
+
+body.admin-screen-shell .admin-section .form-control:focus,
+body.admin-screen-shell .admin-section .form-select:focus {
+  border-color: var(--admin-ui-form-focus);
+}
+
+body.admin-screen-shell .admin-section .btn-outline-light {
+  background: var(--admin-ui-outline-btn-bg);
+  color: var(--admin-ui-outline-btn-text);
+  border-color: var(--admin-ui-outline-btn-border);
+}
+
+body.admin-screen-shell .admin-section .btn-outline-light:hover,
+body.admin-screen-shell .admin-section .btn-outline-light:focus-visible {
+  background: var(--admin-ui-outline-btn-hover-bg);
+  color: var(--admin-ui-outline-btn-hover-text);
+}
+
+body.admin-screen-shell .admin-filter-link {
+  color: var(--admin-ui-accent);
+}
+
+body.admin-screen-shell .admin-filter-link:hover,
+body.admin-screen-shell .admin-filter-link:focus-visible {
+  color: var(--admin-ui-accent-strong);
+}
+
+body.admin-screen-shell .admin-filter-chip {
+  background: var(--admin-ui-chip-bg);
+  border-color: var(--admin-ui-chip-border);
+  color: var(--admin-ui-chip-text);
+}
+
+body.admin-screen-shell .admin-filter-chip__label {
+  color: var(--admin-ui-chip-muted) !important;
+}
+
+body.admin-screen-shell .admin-filter-chip__value {
+  color: var(--admin-ui-chip-text);
+}
+
+body.admin-screen-shell .admin-filter-chip__clear {
+  background: var(--admin-ui-chip-clear-bg);
+  color: var(--admin-ui-chip-clear-text);
+}
+
+body.admin-screen-shell .admin-filter-chip__clear:hover,
+body.admin-screen-shell .admin-filter-chip__clear:focus-visible {
+  background: var(--admin-ui-chip-clear-hover-bg);
+}
+
+body.admin-screen-shell .admin-scope-pill {
+  background: var(--admin-ui-scope-pill-bg);
+  border-color: var(--admin-ui-scope-pill-border);
+  color: var(--admin-ui-scope-pill-text);
+}
+
+body.admin-screen-shell .table-dark {
+  --bs-table-bg: transparent;
+  --bs-table-striped-bg: var(--admin-ui-table-striped);
+  --bs-table-striped-color: var(--admin-ui-table-color);
+  --bs-table-color: var(--admin-ui-table-color);
+  color: var(--admin-ui-table-color) !important;
+  background: var(--admin-ui-table-bg);
+  border-color: var(--admin-ui-table-border);
+}
+
+body.admin-screen-shell .table-dark thead th {
+  background: var(--admin-ui-table-head-bg);
+  color: var(--admin-ui-table-color);
+  border-bottom-color: var(--admin-ui-table-border);
+}
+
+body.admin-screen-shell .table-dark td,
+body.admin-screen-shell .table-dark th {
+  border-color: var(--admin-ui-table-border-soft);
+  color: var(--admin-ui-table-color);
+}
+
+body.admin-screen-shell .table-dark tbody tr:hover {
+  background: var(--admin-ui-table-row-hover);
+}
+
+body.admin-screen-shell .admin-group-header-row td {
+  background: var(--admin-ui-group-header-bg) !important;
+  border-top-color: var(--admin-ui-group-header-border);
+  border-bottom-color: var(--admin-ui-group-header-border);
+}
+
+body.admin-screen-shell .admin-group-header-btn,
+body.admin-screen-shell .admin-group-header-btn__icon {
+  color: var(--admin-ui-group-header-text);
+}
+
+body.admin-screen-shell .admin-group-header-btn__count {
+  background: var(--admin-ui-group-count-bg);
+  color: var(--admin-ui-group-count-text);
+}
+
+body.admin-screen-shell .admin-delete-modal .modal-content {
+  background: linear-gradient(180deg, var(--admin-ui-panel-start), var(--admin-ui-panel-end));
+  border: 1px solid var(--admin-ui-panel-border);
+  color: var(--admin-ui-text);
 }
 
 .board-builder-shell {
