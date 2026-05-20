@@ -8618,9 +8618,19 @@ body.board-screen-shell #departmentBoardShell .card.andon-panel {
 }
 
 body.board-screen-shell #departmentBoardShell .board-alert-card {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
   height: auto;
   max-height: none;
-  overflow: visible;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.board-screen-shell #departmentBoardShell .board-alert-card--inline-open,
+body.board-screen-shell #departmentBoardShell .board-alert-card.status-open,
+body.board-screen-shell #departmentBoardShell .board-alert-card.status-acknowledged {
+  min-height: 0;
 }
 
 body.board-screen-shell .board-group-panel .board-alert-card.status-open {
