@@ -46,16 +46,20 @@
         <nav class="app-nav">
         {% set nav_items = [] %}
         {% if current_membership %}
+          {% if current_membership.role == "Admin" %}
+            {% set _ = nav_items.append(("pages.custom_boards_page", "Custom Boards", "bi-layout-text-window-reverse")) %}
+          {% endif %}
           {% if current_membership.role == "Admin" or current_membership.role == "Manager" %}
             {% set _ = nav_items.append(("pages.management_page", "Management", "bi-clipboard-data")) %}
-            {% set _ = nav_items.append(("pages.board_page", "Board", "bi-display")) %}
-            {% set _ = nav_items.append(("pages.reports_page", "Reports", "bi-graph-up")) %}
           {% endif %}
           {% if current_membership.role == "Admin" or current_membership.role == "Operator" %}
             {% set _ = nav_items.append(("pages.operator_page", "Operator", "bi-house-door")) %}
           {% endif %}
+          {% if current_membership.role == "Admin" or current_membership.role == "Manager" %}
+            {% set _ = nav_items.append(("pages.board_page", "Department", "bi-display")) %}
+            {% set _ = nav_items.append(("pages.reports_page", "Reports", "bi-graph-up")) %}
+          {% endif %}
           {% if current_membership.role == "Admin" %}
-            {% set _ = nav_items.append(("pages.custom_boards_page", "Custom Boards", "bi-layout-text-window-reverse")) %}
             {% set _ = nav_items.append(("pages.admin_page", "Admin", "bi-gear")) %}
           {% endif %}
         {% endif %}

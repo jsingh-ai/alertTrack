@@ -158,13 +158,13 @@ def board_state():
 
 @api_bp.get("/operator-snapshot")
 def operator_snapshot():
-    _require_any_page_access(PAGE_OPERATOR)
+    _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     return jsonify({"success": True, "data": build_operator_snapshot()})
 
 
 @api_bp.get("/operator-metadata")
 def operator_metadata():
-    _require_any_page_access(PAGE_OPERATOR)
+    _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     return jsonify({"success": True, "data": build_operator_metadata()})
 
 

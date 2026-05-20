@@ -312,19 +312,13 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
     effective_membership = membership or get_current_membership()
     if effective_membership is None:
         return {"company_id": None, "department_id": None, "machine_group_name": None, "restricted": False}
-    if effective_membership.role == "Admin" or effective_membership.scope_mode == "all":
-        return {
-            "company_id": effective_membership.company_id,
-            "department_id": None,
-            "machine_group_name": None,
-            "restricted": False,
-        }
-    machine_group_name = effective_membership.machine_group.name if effective_membership.machine_group else None
+    # Company is always the hard boundary. Department/machine-group visibility is
+    # controlled by page filters, not per-user scope restrictions.
     return {
         "company_id": effective_membership.company_id,
-        "department_id": effective_membership.department_id,
-        "machine_group_name": machine_group_name,
-        "restricted": True,
+        "department_id": None,
+        "machine_group_name": None,
+        "restricted": False,
     }
 
 

@@ -1,24 +1,57 @@
 {% extends "andon/base.html" %}
-{% block body_class %}board-screen-shell{% endblock %}
+{% block body_class %}button-board-shell operator-shell{% endblock %}
 {% block content %}
-<div class="container-fluid board-page-shell">
-  {% set page_title = "Live Board" %}
-  {% set page_subtitle = "Displays the last board you opened in the builder." %}
+<div class="container-fluid button-board-shell">
+  {% set page_title = "Board View" %}
+  {% set page_subtitle = "" %}
+  {% set page_action_html %}
+    <button class="btn btn-light btn-sm operator-page-header__badge" type="button" data-bs-toggle="collapse" data-bs-target="#operatorViewPanel" aria-expanded="false" aria-controls="operatorViewPanel">
+      <i class="bi bi-funnel-fill"></i>
+      <span>Filter View</span>
+    </button>
+  {% endset %}
   {% include "andon/_page_header.html" %}
-  <div id="boardStatusDock" class="operator-status-dock" aria-live="polite"></div>
-  <div class="card andon-panel board-live-shell">
-    <div class="card-body">
-      <div class="board-live-shell__header">
-        <div>
-          <div class="board-live-shell__eyebrow">Saved Layout</div>
-          <div class="board-live-shell__title" id="boardTitle">Loading board...</div>
+  <div class="operator-layout-shell">
+    <div class="operator-view-shell mb-0">
+      <div class="collapse" id="operatorViewPanel">
+        <div class="card operator-view-panel andon-panel">
+          <div class="card-body">
+            <div class="operator-view-panel__header">
+              <div>
+                <div class="section-heading mb-0">Display Filter</div>
+              </div>
+            </div>
+            <div class="operator-view-panel__controls">
+              <div class="operator-view-panel__field">
+                <label class="form-label small text-uppercase text-secondary mb-0" for="operatorMachineGroup">Machine Group</label>
+                <select class="form-select" id="operatorMachineGroup">
+                  <option value="">All Groups</option>
+                </select>
+              </div>
+              <div class="operator-view-panel__field">
+                <label class="form-label small text-uppercase text-secondary mb-0" for="operatorMachine">Machine</label>
+                <select class="form-select" id="operatorMachine">
+                  <option value="">All Machines</option>
+                </select>
+              </div>
+              <div class="operator-view-panel__field operator-view-panel__field--action">
+                <button class="btn btn-warning w-100" id="operatorLockView" type="button">Lock View</button>
+              </div>
+              <div class="operator-view-panel__field operator-view-panel__field--clear">
+                <button class="btn btn-outline-secondary w-100" id="operatorClearView" type="button">Clear View</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-      <div id="boardGrid" class="board-live-grid"></div>
+    </div>
+    <div class="operator-board-shell mt-0">
+      <div id="machineBoard" class="vstack gap-1"></div>
+      <div id="operatorStatusDock" class="operator-status-dock" aria-live="polite"></div>
     </div>
   </div>
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', filename='andon/js/board.js') }}" defer></script>
+<script src="{{ url_for('static', filename='andon/js/operator.js') }}" defer></script>
 {% endblock %}
