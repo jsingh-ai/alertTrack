@@ -82,7 +82,7 @@ SEEDED_USERS = [
         "memberships": [
             {
                 "company_slug": "five-star",
-                "role": "Manager",
+                "role": "Viewer",
                 "scope_mode": "restricted",
                 "department_name": "Shipping",
                 "machine_group_name": "Converting",

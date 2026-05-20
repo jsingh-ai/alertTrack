@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 import threading
 import time
 from zoneinfo import ZoneInfo
@@ -327,8 +328,11 @@ def reports_page():
         Machine.machine_type.isnot(None),
         Machine.machine_type != "",
     )
+    machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+    if machine_ids:
+        query = query.filter(Machine.id.in_(machine_ids))
     if department_ids:
         query = query.filter(Machine.department_id.in_(department_ids))
     if machine_group_names:
@@ -372,6 +376,10 @@ def admin_page():
         if access.user is None:
             continue
         user_payload = access.user.to_dict()
+        try:
+            scope_config = json.loads(access.scope_config_json or "{}")
+        except json.JSONDecodeError:
+            scope_config = {}
         user_payload.update(
             {
                 "role": access.role,
@@ -380,6 +388,9 @@ def admin_page():
                 "department_name": access.department.name if access.department else None,
                 "machine_group_id": access.machine_group_id,
                 "machine_group_name": access.machine_group.name if access.machine_group else None,
+                "scope_machine_ids": scope_config.get("machine_ids") or [],
+                "scope_machine_group_ids": scope_config.get("machine_group_ids") or [],
+                "scope_department_ids": scope_config.get("department_ids") or [],
                 "is_active": access.is_active,
             }
         )

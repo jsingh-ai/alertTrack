@@ -13,6 +13,7 @@ from sqlalchemy.orm import joinedload, load_only, noload
 
 from .extensions import db
 from .models.company import Company
+from .models.machine import Machine
 from .models.machine_group import MachineGroup
 from .models.user import User, UserCompanyAccess, UserViewPreference
 
@@ -30,17 +31,18 @@ PAGE_BOARD = "board"
 PAGE_MANAGEMENT = "management"
 PAGE_REPORTS = "reports"
 PAGE_ADMIN = "admin"
-VIEWER_DEMO_USERNAME = "viewer.demo"
 
 ROLE_PAGE_ACCESS = {
     "Admin": {PAGE_HOME, PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT, PAGE_REPORTS, PAGE_ADMIN},
-    "Manager": {PAGE_HOME, PAGE_BOARD, PAGE_MANAGEMENT, PAGE_REPORTS},
+    "Manager": {PAGE_HOME, PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT, PAGE_REPORTS},
     "Operator": {PAGE_HOME, PAGE_OPERATOR},
+    "Viewer": {PAGE_HOME, PAGE_BOARD},
 }
 ROLE_LANDING_PAGE = {
     "Admin": "pages.management_page",
     "Manager": "pages.management_page",
     "Operator": "pages.operator_page",
+    "Viewer": "pages.board_page",
 }
 PREFERENCE_ALLOWED_PAGE_KEYS = {PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT, PAGE_REPORTS, PAGE_ADMIN}
 
@@ -325,9 +327,6 @@ def get_default_membership(user: User | None = None) -> UserCompanyAccess | None
 
 
 def get_default_landing_endpoint(user: User | None = None, membership: UserCompanyAccess | None = None) -> str:
-    effective_user = user or get_authenticated_user()
-    if effective_user and str(effective_user.username or "").strip().lower() == VIEWER_DEMO_USERNAME:
-        return "pages.board_page"
     effective_membership = membership or get_default_membership(user)
     if effective_membership is None:
         return "pages.home_page"
@@ -409,9 +408,6 @@ def require_authentication() -> User:
 
 
 def user_can_access_page(page_key: str, membership: UserCompanyAccess | None = None) -> bool:
-    user = get_authenticated_user()
-    if user and str(user.username or "").strip().lower() == VIEWER_DEMO_USERNAME:
-        return page_key in {PAGE_HOME, PAGE_BOARD}
     effective_membership = membership or get_current_membership()
     if effective_membership is None:
         return False
@@ -476,30 +472,7 @@ def get_authorized_company_id() -> int | None:
 
 
 def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
-    if membership is not None:
-        if not membership.is_restricted:
-            return {
-                "company_id": membership.company_id,
-                "department_id": None,
-                "department_ids": [],
-                "machine_group_name": None,
-                "machine_group_names": [],
-                "restricted": False,
-            }
-        department_ids = [membership.department_id] if membership.department_id is not None else []
-        machine_group_names = []
-        if membership.machine_group and membership.machine_group.name:
-            machine_group_names.append(membership.machine_group.name)
-        return {
-            "company_id": membership.company_id,
-            "department_id": department_ids[0] if len(department_ids) == 1 else None,
-            "department_ids": department_ids,
-            "machine_group_name": machine_group_names[0] if len(machine_group_names) == 1 else None,
-            "machine_group_names": machine_group_names,
-            "restricted": True,
-        }
-
-    effective_membership = get_current_membership()
+    effective_membership = membership or get_current_membership()
     if effective_membership is None:
         return {
             "company_id": None,
@@ -507,51 +480,118 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
             "department_ids": [],
             "machine_group_name": None,
             "machine_group_names": [],
+            "machine_ids": [],
             "restricted": False,
         }
 
     company_id = effective_membership.company_id
-    company_memberships = [
-        item
-        for item in get_user_memberships(active_only=True)
-        if item.company_id == company_id
-    ]
-    if not company_memberships:
-        company_memberships = [effective_membership]
-
-    # If any membership for this company is all-scope (or Admin), treat the user as unrestricted.
-    if any(not item.is_restricted for item in company_memberships):
+    if not effective_membership.is_restricted:
         return {
             "company_id": company_id,
             "department_id": None,
             "department_ids": [],
             "machine_group_name": None,
             "machine_group_names": [],
+            "machine_ids": [],
             "restricted": False,
         }
 
-    department_ids = sorted({item.department_id for item in company_memberships if item.department_id is not None})
-    machine_group_ids = sorted({item.machine_group_id for item in company_memberships if item.machine_group_id is not None})
-    machine_group_names = []
-    if machine_group_ids:
-        rows = (
+    current_user = get_authenticated_user()
+    access = None
+    if current_user is not None:
+        access = UserCompanyAccess.query.options(
+            noload(UserCompanyAccess.user),
+            noload(UserCompanyAccess.company),
+            noload(UserCompanyAccess.department),
+            noload(UserCompanyAccess.machine_group),
+        ).filter_by(user_id=current_user.id, company_id=company_id, is_active=True).one_or_none()
+
+    raw_config = {}
+    if access and access.scope_config_json:
+        try:
+            raw_config = json.loads(access.scope_config_json) if isinstance(access.scope_config_json, str) else {}
+        except json.JSONDecodeError:
+            raw_config = {}
+    elif membership and getattr(membership, "scope_config_json", None):
+        try:
+            raw_config = json.loads(membership.scope_config_json) if isinstance(membership.scope_config_json, str) else {}
+        except json.JSONDecodeError:
+            raw_config = {}
+
+    config_machine_ids = sorted({int(item) for item in (raw_config.get("machine_ids") or []) if str(item).isdigit()})
+    config_group_ids = sorted({int(item) for item in (raw_config.get("machine_group_ids") or []) if str(item).isdigit()})
+    config_department_ids = sorted({int(item) for item in (raw_config.get("department_ids") or []) if str(item).isdigit()})
+
+    legacy_department_ids = [effective_membership.department_id] if effective_membership.department_id is not None else []
+    legacy_group_ids = [effective_membership.machine_group_id] if effective_membership.machine_group_id is not None else []
+    all_department_ids = sorted(set(legacy_department_ids + config_department_ids))
+    all_group_ids = sorted(set(legacy_group_ids + config_group_ids))
+
+    machine_query = Machine.query.options(noload("*")).with_entities(
+        Machine.id,
+        Machine.department_id,
+        Machine.machine_type,
+    ).filter(Machine.company_id == company_id, Machine.is_active.is_(True))
+
+    candidate_machine_ids = set(config_machine_ids)
+    if all_group_ids:
+        group_name_rows = (
             MachineGroup.query.options(noload("*"))
             .with_entities(MachineGroup.name)
             .filter(
                 MachineGroup.company_id == company_id,
-                MachineGroup.id.in_(machine_group_ids),
+                MachineGroup.id.in_(all_group_ids),
                 MachineGroup.is_active.is_(True),
             )
             .all()
         )
-        machine_group_names = sorted({row.name for row in rows if row.name})
+        group_names = sorted({row.name for row in group_name_rows if row.name})
+    else:
+        group_names = []
+
+    scoped_machines = []
+    if all_department_ids or group_names:
+        scoped_query = machine_query
+        if all_department_ids:
+            scoped_query = scoped_query.filter(Machine.department_id.in_(all_department_ids))
+        if group_names:
+            scoped_query = scoped_query.filter(Machine.machine_type.in_(group_names))
+        scoped_machines = scoped_query.all()
+        candidate_machine_ids.update({row.id for row in scoped_machines if row.id is not None})
+
+    # If no explicit config exists, retain legacy single-scope behavior.
+    if not candidate_machine_ids and (legacy_department_ids or legacy_group_ids):
+        fallback_query = machine_query
+        if legacy_department_ids:
+            fallback_query = fallback_query.filter(Machine.department_id.in_(legacy_department_ids))
+        if group_names:
+            fallback_query = fallback_query.filter(Machine.machine_type.in_(group_names))
+        fallback_rows = fallback_query.all()
+        candidate_machine_ids.update({row.id for row in fallback_rows if row.id is not None})
+        if not all_department_ids:
+            all_department_ids = sorted({row.department_id for row in fallback_rows if row.department_id is not None})
+
+    machine_ids = sorted(candidate_machine_ids)
+    if machine_ids:
+        dept_rows = (
+            Machine.query.options(noload("*"))
+            .with_entities(Machine.department_id, Machine.machine_type)
+            .filter(Machine.company_id == company_id, Machine.id.in_(machine_ids))
+            .all()
+        )
+        machine_group_names = sorted({row.machine_type for row in dept_rows if row.machine_type})
+        resolved_department_ids = sorted({row.department_id for row in dept_rows if row.department_id is not None})
+    else:
+        machine_group_names = group_names
+        resolved_department_ids = all_department_ids
 
     return {
         "company_id": company_id,
-        "department_id": department_ids[0] if len(department_ids) == 1 else None,
-        "department_ids": department_ids,
+        "department_id": resolved_department_ids[0] if len(resolved_department_ids) == 1 else None,
+        "department_ids": resolved_department_ids,
         "machine_group_name": machine_group_names[0] if len(machine_group_names) == 1 else None,
         "machine_group_names": machine_group_names,
+        "machine_ids": machine_ids,
         "restricted": True,
     }
 

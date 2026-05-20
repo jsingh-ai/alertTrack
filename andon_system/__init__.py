@@ -106,7 +106,7 @@ def _ensure_auth_schema() -> None:
             text(
                 "ALTER TABLE users "
                 "ADD CONSTRAINT ck_users_role_allowed "
-                "CHECK (role IN ('Admin', 'Manager', 'Operator'))"
+                "CHECK (role IN ('Admin', 'Manager', 'Operator', 'Viewer'))"
             )
         )
 
@@ -138,8 +138,8 @@ def _ensure_auth_schema() -> None:
         db.session.execute(
             text(
                 "INSERT INTO user_company_access "
-                "(user_id, company_id, role, scope_mode, department_id, machine_group_id, is_active) "
-                "VALUES (:user_id, :company_id, :role, :scope_mode, :department_id, :machine_group_id, :is_active)"
+                "(user_id, company_id, role, scope_mode, department_id, machine_group_id, scope_config_json, is_active) "
+                "VALUES (:user_id, :company_id, :role, :scope_mode, :department_id, :machine_group_id, :scope_config_json, :is_active)"
             ),
             {
                 "user_id": row["id"],
@@ -148,10 +148,26 @@ def _ensure_auth_schema() -> None:
                 "scope_mode": "all" if legacy_role == "Admin" else "restricted",
                 "department_id": row["department_id"],
                 "machine_group_id": row["machine_group_id"],
+                "scope_config_json": "{}",
                 "is_active": row["is_active"],
             },
         )
+    existing_access_columns = {column["name"] for column in inspector.get_columns("user_company_access")}
+    if "scope_config_json" not in existing_access_columns:
+        db.session.execute(text("ALTER TABLE user_company_access ADD COLUMN scope_config_json TEXT DEFAULT '{}'"))
+        db.session.execute(text("UPDATE user_company_access SET scope_config_json = '{}' WHERE scope_config_json IS NULL"))
+    if dialect_name == "postgresql":
+        db.session.execute(text("UPDATE user_company_access SET role = 'Manager' WHERE role = 'Supervisor'"))
+        db.session.execute(text("ALTER TABLE user_company_access DROP CONSTRAINT IF EXISTS ck_user_company_access_role"))
+        db.session.execute(
+            text(
+                "ALTER TABLE user_company_access "
+                "ADD CONSTRAINT ck_user_company_access_role "
+                "CHECK (role IN ('Admin', 'Manager', 'Operator', 'Viewer'))"
+            )
+        )
     db.session.commit()
+    _ensure_sqlite_user_role_constraints()
     _ensure_sqlite_active_alert_unique_index()
 
 
@@ -200,6 +216,152 @@ def _ensure_sqlite_active_alert_unique_index() -> None:
         )
     )
     db.session.commit()
+
+
+def _ensure_sqlite_user_role_constraints() -> None:
+    if db.engine.dialect.name != "sqlite":
+        return
+
+    inspector = inspect(db.engine)
+    table_names = set(inspector.get_table_names())
+    if "users" not in table_names or "user_company_access" not in table_names:
+        return
+
+    users_sql = db.session.execute(
+        text("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'")
+    ).scalar() or ""
+    access_sql = db.session.execute(
+        text("SELECT sql FROM sqlite_master WHERE type='table' AND name='user_company_access'")
+    ).scalar() or ""
+
+    users_ok = "ROLE IN ('ADMIN', 'MANAGER', 'OPERATOR', 'VIEWER')" in users_sql.upper()
+    access_ok = "ROLE IN ('ADMIN', 'MANAGER', 'OPERATOR', 'VIEWER')" in access_sql.upper()
+    has_scope_config = "scope_config_json" in {column["name"] for column in inspector.get_columns("user_company_access")}
+    if users_ok and access_ok and has_scope_config:
+        return
+
+    db.session.execute(text("PRAGMA foreign_keys=OFF"))
+    db.session.execute(text("BEGIN"))
+    try:
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE users_new (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    company_id INTEGER NOT NULL,
+                    employee_id VARCHAR(64),
+                    display_name VARCHAR(160) NOT NULL,
+                    username VARCHAR(80),
+                    role VARCHAR(80) NOT NULL,
+                    email VARCHAR(160),
+                    phone_number VARCHAR(32),
+                    password_hash VARCHAR(255),
+                    department_id INTEGER,
+                    machine_group_id INTEGER,
+                    is_active BOOLEAN NOT NULL DEFAULT 1,
+                    last_login_at DATETIME,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_users_company_username UNIQUE (company_id, username),
+                    CONSTRAINT ck_users_role_allowed CHECK (role IN ('Admin', 'Manager', 'Operator', 'Viewer')),
+                    FOREIGN KEY(company_id) REFERENCES companies (id),
+                    FOREIGN KEY(department_id) REFERENCES departments (id),
+                    FOREIGN KEY(machine_group_id) REFERENCES machine_groups (id)
+                )
+                """
+            )
+        )
+        db.session.execute(
+            text(
+                """
+                INSERT INTO users_new
+                (id, company_id, employee_id, display_name, username, role, email, phone_number, password_hash, department_id, machine_group_id, is_active, last_login_at, created_at)
+                SELECT id, company_id, employee_id, display_name, username,
+                    CASE WHEN role = 'Supervisor' THEN 'Manager' ELSE role END,
+                    email, phone_number, password_hash, department_id, machine_group_id, is_active, last_login_at, created_at
+                FROM users
+                """
+            )
+        )
+        db.session.execute(text("DROP TABLE users"))
+        db.session.execute(text("ALTER TABLE users_new RENAME TO users"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_company_id ON users (company_id)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_department_id ON users (department_id)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_machine_group_id ON users (machine_group_id)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_is_active ON users (is_active)"))
+        db.session.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON users (username)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_email ON users (email)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_role ON users (role)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_phone_number ON users (phone_number)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_employee_id ON users (employee_id)"))
+
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE user_company_access_new (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    company_id INTEGER NOT NULL,
+                    role VARCHAR(80) NOT NULL,
+                    scope_mode VARCHAR(32) NOT NULL,
+                    department_id INTEGER,
+                    machine_group_id INTEGER,
+                    scope_config_json TEXT NOT NULL DEFAULT '{}',
+                    is_active BOOLEAN NOT NULL DEFAULT 1,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_user_company_access_user_company UNIQUE (user_id, company_id),
+                    CONSTRAINT ck_user_company_access_role CHECK (role IN ('Admin', 'Manager', 'Operator', 'Viewer')),
+                    CONSTRAINT ck_user_company_access_scope_mode CHECK (scope_mode IN ('all', 'restricted')),
+                    FOREIGN KEY(user_id) REFERENCES users (id),
+                    FOREIGN KEY(company_id) REFERENCES companies (id),
+                    FOREIGN KEY(department_id) REFERENCES departments (id),
+                    FOREIGN KEY(machine_group_id) REFERENCES machine_groups (id)
+                )
+                """
+            )
+        )
+        if has_scope_config:
+            db.session.execute(
+                text(
+                    """
+                    INSERT INTO user_company_access_new
+                    (id, user_id, company_id, role, scope_mode, department_id, machine_group_id, scope_config_json, is_active, created_at, updated_at)
+                    SELECT id, user_id, company_id,
+                        CASE WHEN role = 'Supervisor' THEN 'Manager' ELSE role END,
+                        scope_mode, department_id, machine_group_id,
+                        COALESCE(scope_config_json, '{}'),
+                        is_active, created_at, updated_at
+                    FROM user_company_access
+                    """
+                )
+            )
+        else:
+            db.session.execute(
+                text(
+                    """
+                    INSERT INTO user_company_access_new
+                    (id, user_id, company_id, role, scope_mode, department_id, machine_group_id, scope_config_json, is_active, created_at, updated_at)
+                    SELECT id, user_id, company_id,
+                        CASE WHEN role = 'Supervisor' THEN 'Manager' ELSE role END,
+                        scope_mode, department_id, machine_group_id, '{}',
+                        is_active, created_at, updated_at
+                    FROM user_company_access
+                    """
+                )
+            )
+        db.session.execute(text("DROP TABLE user_company_access"))
+        db.session.execute(text("ALTER TABLE user_company_access_new RENAME TO user_company_access"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_user_id ON user_company_access (user_id)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_user_active_company ON user_company_access (user_id, is_active, company_id)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_company_id ON user_company_access (company_id)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_is_active ON user_company_access (is_active)"))
+        db.session.execute(text("COMMIT"))
+    except Exception:
+        db.session.execute(text("ROLLBACK"))
+        raise
+    finally:
+        db.session.execute(text("PRAGMA foreign_keys=ON"))
+        db.session.commit()
 
 
 def create_app(config_name: str | None = None) -> Flask:

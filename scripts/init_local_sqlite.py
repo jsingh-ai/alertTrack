@@ -119,7 +119,7 @@ def _ensure_demo_users():
             "display_name": "Line Manager",
             "password": DEMO_PASSWORDS["viewer.demo"],
             "memberships": [
-                ("five-star", "Manager", "restricted", "Shipping", "Converting"),
+                ("five-star", "Viewer", "restricted", "Shipping", "Converting"),
             ],
         },
     ]

@@ -64,11 +64,14 @@ def _ensure_aware(value):
 def list_active_alerts(status: str | None = None):
     company_id = get_current_company_id()
     scope = get_scope_filters()
+    machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
     query = AndonAlert.query
     if company_id:
         query = query.filter(AndonAlert.company_id == company_id)
+    if machine_ids:
+        query = query.filter(AndonAlert.machine_id.in_(machine_ids))
     if department_ids:
         query = query.filter(AndonAlert.department_id.in_(department_ids))
     if machine_group_names:
@@ -83,11 +86,14 @@ def list_active_alerts(status: str | None = None):
 def get_alert(alert_id: int):
     company_id = get_current_company_id()
     scope = get_scope_filters()
+    machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
     query = AndonAlert.query.filter(AndonAlert.id == alert_id)
     if company_id:
         query = query.filter(AndonAlert.company_id == company_id)
+    if machine_ids:
+        query = query.filter(AndonAlert.machine_id.in_(machine_ids))
     if department_ids:
         query = query.filter(AndonAlert.department_id.in_(department_ids))
     if machine_group_names:
@@ -101,6 +107,7 @@ def get_alert(alert_id: int):
 def create_alert(payload: dict):
     company_id = get_current_company_id()
     scope = get_scope_filters()
+    machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
     machine_query = Machine.query.options(
@@ -140,6 +147,8 @@ def create_alert(payload: dict):
 
     if not machine:
         raise AlertServiceError("Valid machine_id is required")
+    if machine_ids and machine.id not in set(machine_ids):
+        raise AlertServiceError("Machine is outside your assigned scope", status_code=403)
     if company_id and machine.company_id != company_id:
         raise AlertServiceError("Machine does not belong to the selected company")
     if department_ids and machine.department_id not in set(department_ids):

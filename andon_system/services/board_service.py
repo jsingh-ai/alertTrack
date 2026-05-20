@@ -169,6 +169,7 @@ def build_operator_metadata():
 
 def _load_board_context(company_id, include_alerts: bool, include_metadata: bool = True):
     scope = get_scope_filters()
+    machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
     machine_query = Machine.query.options(
@@ -251,6 +252,9 @@ def _load_board_context(company_id, include_alerts: bool, include_metadata: bool
             issue_query = issue_query.filter(IssueCategory.company_id == company_id)
             user_query = user_query.filter(UserCompanyAccess.company_id == company_id)
         alert_query = alert_query.filter(AndonAlert.company_id == company_id)
+    if machine_ids:
+        machine_query = machine_query.filter(Machine.id.in_(machine_ids))
+        alert_query = alert_query.filter(AndonAlert.machine_id.in_(machine_ids))
     if department_ids:
         machine_query = machine_query.filter(Machine.department_id.in_(department_ids))
         if include_metadata:

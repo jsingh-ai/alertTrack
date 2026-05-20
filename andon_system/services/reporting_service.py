@@ -246,12 +246,15 @@ def _filtered_alerts(filters):
 def _base_alert_query(filters):
     company_id = get_current_company_id()
     scope = get_scope_filters()
+    machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
     query = AndonAlert.query
     conditions = []
     if company_id:
         conditions.append(AndonAlert.company_id == company_id)
+    if machine_ids:
+        conditions.append(AndonAlert.machine_id.in_(machine_ids))
     if department_ids:
         conditions.append(AndonAlert.department_id.in_(department_ids))
     if machine_group_names:

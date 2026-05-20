@@ -82,8 +82,11 @@ def machines():
     ).filter_by(is_active=True)
     if company_id:
         query = query.filter(Machine.company_id == company_id)
+    machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+    if machine_ids:
+        query = query.filter(Machine.id.in_(machine_ids))
     if department_ids:
         query = query.filter(Machine.department_id.in_(department_ids))
     if machine_group_names:
@@ -186,15 +189,26 @@ def users():
     ).filter_by(is_active=True)
     if company_id:
         query = query.filter(UserCompanyAccess.company_id == company_id)
+    machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
     if department_ids:
         query = query.filter(UserCompanyAccess.department_id.in_(department_ids))
     if machine_group_names:
         query = query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
+    allowed_machine_groups = set()
+    if machine_ids and company_id:
+        machine_rows = Machine.query.options(noload("*")).with_entities(Machine.machine_type).filter(
+            Machine.company_id == company_id,
+            Machine.id.in_(machine_ids),
+        ).all()
+        allowed_machine_groups = {row.machine_type for row in machine_rows if row.machine_type}
     data = []
     for access in query.order_by(UserCompanyAccess.id.asc()).all():
         if access.user and access.user.is_active:
+            access_group_name = access.machine_group.name if access.machine_group else None
+            if machine_ids and access_group_name and allowed_machine_groups and access_group_name not in allowed_machine_groups:
+                continue
             data.append(
                 {
                     "id": access.user.id,
@@ -662,8 +676,11 @@ def _get_scoped_machine(machine_id: int | str):
     company_id = get_current_company_id()
     scope = get_scope_filters()
     query = Machine.query.options(noload("*")).filter_by(id=int(machine_id), company_id=company_id)
+    machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+    if machine_ids:
+        query = query.filter(Machine.id.in_(machine_ids))
     if department_ids:
         query = query.filter(Machine.department_id.in_(department_ids))
     if machine_group_names:
@@ -675,8 +692,11 @@ def _resolve_bulk_machine_ids(source_type: str, source_value: str) -> list[int]:
     company_id = get_current_company_id()
     scope = get_scope_filters()
     query = Machine.query.options(load_only(Machine.id, Machine.name, Machine.machine_type, Machine.department_id), noload("*")).filter(Machine.company_id == company_id)
+    machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+    if machine_ids:
+        query = query.filter(Machine.id.in_(machine_ids))
     if department_ids:
         query = query.filter(Machine.department_id.in_(department_ids))
     if machine_group_names:

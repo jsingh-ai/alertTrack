@@ -1,9 +1,11 @@
+import json
+
 from sqlalchemy import func
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..extensions import db
 
-USER_ROLES = ("Admin", "Manager", "Operator")
+USER_ROLES = ("Admin", "Manager", "Operator", "Viewer")
 USER_SCOPE_MODES = ("restricted", "all")
 
 
@@ -11,7 +13,7 @@ class User(db.Model):
     __tablename__ = "users"
     __table_args__ = (
         db.UniqueConstraint("company_id", "username", name="uq_users_company_username"),
-        db.CheckConstraint("role IN ('Admin', 'Manager', 'Operator')", name="ck_users_role_allowed"),
+        db.CheckConstraint("role IN ('Admin', 'Manager', 'Operator', 'Viewer')", name="ck_users_role_allowed"),
         db.Index("ix_users_company_id", "company_id"),
         db.Index("ix_users_department_id", "department_id"),
         db.Index("ix_users_machine_group_id", "machine_group_id"),
@@ -96,7 +98,7 @@ class UserCompanyAccess(db.Model):
     __tablename__ = "user_company_access"
     __table_args__ = (
         db.UniqueConstraint("user_id", "company_id", name="uq_user_company_access_user_company"),
-        db.CheckConstraint("role IN ('Admin', 'Manager', 'Operator')", name="ck_user_company_access_role"),
+        db.CheckConstraint("role IN ('Admin', 'Manager', 'Operator', 'Viewer')", name="ck_user_company_access_role"),
         db.CheckConstraint("scope_mode IN ('all', 'restricted')", name="ck_user_company_access_scope_mode"),
         db.Index("ix_user_company_access_user_id", "user_id"),
         db.Index("ix_user_company_access_user_active_company", "user_id", "is_active", "company_id"),
@@ -111,6 +113,7 @@ class UserCompanyAccess(db.Model):
     scope_mode = db.Column(db.String(32), nullable=False, default="restricted")
     department_id = db.Column(db.Integer, db.ForeignKey("departments.id"), nullable=True)
     machine_group_id = db.Column(db.Integer, db.ForeignKey("machine_groups.id"), nullable=True)
+    scope_config_json = db.Column(db.Text, nullable=False, default="{}")
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
@@ -129,6 +132,10 @@ class UserCompanyAccess(db.Model):
         return self.scope_mode == "restricted" and not self.is_admin
 
     def to_dict(self):
+        try:
+            scope_config = json.loads(self.scope_config_json or "{}")
+        except json.JSONDecodeError:
+            scope_config = {}
         return {
             "id": self.id,
             "user_id": self.user_id,
@@ -140,6 +147,7 @@ class UserCompanyAccess(db.Model):
             "department_name": self.department.name if self.department else None,
             "machine_group_id": self.machine_group_id,
             "machine_group_name": self.machine_group.name if self.machine_group else None,
+            "scope_config": scope_config,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
