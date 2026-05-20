@@ -8592,12 +8592,35 @@ body.board-screen-shell #departmentBoardShell .operator-status-dock {
   margin-bottom: 0.45rem !important;
 }
 
+body.board-screen-shell .app-main:has(#departmentBoardShell) {
+  overflow: auto;
+}
+
+body.board-screen-shell #departmentBoardShell {
+  height: auto;
+  min-height: calc(100vh - 0.75rem);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 0.35rem;
+}
+
 body.board-screen-shell #departmentBoardShell .card.andon-panel .card-body {
   padding-top: 0.65rem;
+  overflow: visible;
 }
 
 body.board-screen-shell #departmentBoardShell .department-alert-list {
   margin-top: 0.1rem;
+}
+
+body.board-screen-shell #departmentBoardShell .card.andon-panel {
+  overflow: visible;
+}
+
+body.board-screen-shell #departmentBoardShell .board-alert-card {
+  height: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 body.board-screen-shell .board-group-panel .board-alert-card.status-open {

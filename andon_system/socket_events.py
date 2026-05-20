@@ -51,7 +51,7 @@ def register_socket_events(socketio):
         room = room_name(company_id, room_type)
         try:
             join_room(room)
-        except ValueError:
+        except (ValueError, KeyError):
             current_app.logger.warning(
                 "Socket.IO join_room skipped for disconnected sid=%s namespace=%s room=%s",
                 getattr(request, "sid", None),
@@ -81,7 +81,7 @@ def register_socket_events(socketio):
         room = room_name(company_id, room_type)
         try:
             leave_room(room)
-        except ValueError:
+        except (ValueError, KeyError):
             current_app.logger.debug(
                 "Socket.IO leave_room skipped for disconnected sid=%s namespace=%s room=%s",
                 getattr(request, "sid", None),
