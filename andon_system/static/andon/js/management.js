@@ -75,7 +75,7 @@ function getHealth(machine) {
   const alertStatus = String(machine?.active_alert?.status || "").toUpperCase();
   if (alertStatus === "OPEN") return { label: "Alert Open", className: "status-open" };
   if (alertStatus === "ACKNOWLEDGED" || alertStatus === "ARRIVED") return { label: "Being Worked", className: "status-acknowledged" };
-  return { label: "Healthy", className: "status-healthy" };
+  return { label: "machine running healthy", className: "status-healthy" };
 }
 
 function renderRadiusGroup(machine) {
@@ -123,11 +123,10 @@ function renderMachineCard(machine) {
   const elapsedBase = Number(active?.elapsed_seconds || 0);
 
   return `
-    <article class="management-machine-card board-live-tile" data-machine-id="${machine.id}">
+    <article class="management-machine-card management-machine-card--clickable board-live-tile" data-machine-id="${machine.id}" role="button" tabindex="0">
       <div class="management-machine-card__hero management-machine-card__hero--${health.className}">
         <div class="management-machine-card__title-row">
           <div class="management-machine-card__title">${escapeHtml(machine.name || "Machine")}</div>
-          <span class="board-builder-tile__meta">${escapeHtml(machine.machine_type || "Unassigned")}</span>
         </div>
         <div class="management-machine-card__hero-status">
           <span class="management-machine-card__hero-text">${escapeHtml(health.label)}</span>
@@ -388,6 +387,16 @@ managementClearFiltersBtn?.addEventListener("click", () => {
 managementOverviewGrid?.addEventListener("click", (event) => {
   const tile = event.target.closest("[data-machine-id]");
   if (!tile) return;
+  const machine = state.machines.find((item) => Number(item.id) === Number(tile.dataset.machineId));
+  if (!machine) return;
+  openDetailModal(machine);
+});
+
+managementOverviewGrid?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const tile = event.target.closest("[data-machine-id]");
+  if (!tile) return;
+  event.preventDefault();
   const machine = state.machines.find((item) => Number(item.id) === Number(tile.dataset.machineId));
   if (!machine) return;
   openDetailModal(machine);

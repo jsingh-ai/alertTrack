@@ -6071,7 +6071,7 @@ html[data-sidebar="collapsed"] .app-content {
 }
 
 .app-logout-btn i {
-  font-size: 1rem;
+  font-size: 1.1rem;
   line-height: 1;
 }
 
@@ -6198,8 +6198,12 @@ html[data-sidebar="collapsed"] .app-theme-toggle {
 html[data-sidebar="collapsed"] .app-logout-btn {
   width: 100%;
   min-height: 2.75rem;
-  padding: 0.55rem 0;
+  padding: 0;
   justify-content: center;
+}
+
+html[data-sidebar="collapsed"] .app-logout-btn i {
+  font-size: 1.2rem;
 }
 
 html[data-sidebar="collapsed"] .app-sidebar__toggle {

@@ -35,7 +35,7 @@ ROLE_PAGE_ACCESS = {
 }
 ROLE_LANDING_PAGE = {
     "Admin": "pages.management_page",
-    "Manager": "pages.board_page",
+    "Manager": "pages.management_page",
     "Operator": "pages.operator_page",
 }
 
