@@ -6,32 +6,22 @@
   {% set page_subtitle = "Active alerts for acknowledge, assignment, and closure." %}
   {% include "andon/_page_header.html" %}
 
-  <div id="boardStatusDock" class="operator-status-dock mb-2" aria-live="polite"></div>
+  <div id="boardStatusDock" class="operator-status-dock mb-1" aria-live="polite"></div>
 
   <div class="row g-2">
     <div class="col-12 col-xl-6">
       <section class="card andon-panel h-100">
         <div class="card-body">
-          <div class="board-live-shell__header">
-            <div>
-              <div class="board-live-shell__eyebrow">Department Queue</div>
-              <div class="board-live-shell__title" id="openAlertsTitle">Open Alerts</div>
-            </div>
-          </div>
-          <div id="openAlertsList" class="vstack gap-2"></div>
+          <h2 class="h5 mb-2" id="openAlertsTitle">Open Alerts</h2>
+          <div id="openAlertsList" class="vstack gap-2 department-alert-list"></div>
         </div>
       </section>
     </div>
     <div class="col-12 col-xl-6">
       <section class="card andon-panel h-100">
         <div class="card-body">
-          <div class="board-live-shell__header">
-            <div>
-              <div class="board-live-shell__eyebrow">Department Queue</div>
-              <div class="board-live-shell__title" id="workingAlertsTitle">Working On It</div>
-            </div>
-          </div>
-          <div id="workingAlertsList" class="vstack gap-2"></div>
+          <h2 class="h5 mb-2" id="workingAlertsTitle">Working On It</h2>
+          <div id="workingAlertsList" class="vstack gap-2 department-alert-list"></div>
         </div>
       </section>
     </div>

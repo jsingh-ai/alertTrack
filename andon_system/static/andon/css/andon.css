@@ -8587,6 +8587,18 @@ body.board-screen-shell .board-alert-card.status-cancelled {
   color: var(--andon-text) !important;
 }
 
+body.board-screen-shell #departmentBoardShell .operator-status-dock {
+  margin-bottom: 0.45rem !important;
+}
+
+body.board-screen-shell #departmentBoardShell .card.andon-panel .card-body {
+  padding-top: 0.65rem;
+}
+
+body.board-screen-shell #departmentBoardShell .department-alert-list {
+  margin-top: 0.1rem;
+}
+
 body.board-screen-shell .board-group-panel .board-alert-card.status-open {
   box-shadow: 0 10px 22px rgba(224, 49, 49, 0.08);
 }

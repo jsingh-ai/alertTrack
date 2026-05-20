@@ -10,6 +10,8 @@ const state = {
   alerts: [],
   users: [],
   loadedAt: Date.now(),
+  selectedResponderByAlert: {},
+  appendNoteByAlert: {},
 };
 
 let timerIntervalId = null;
@@ -49,54 +51,73 @@ function getSection(alert) {
   return "closed";
 }
 
-function userOptions(selectedUserId) {
-  const options = ['<option value="">Select responder</option>'];
-  for (const user of state.users) {
-    const selected = Number(selectedUserId) === Number(user.id) ? " selected" : "";
-    options.push(`<option value="${user.id}"${selected}>${escapeHtml(user.display_name || user.username || `User ${user.id}`)}</option>`);
+function getScopedUsers(alert) {
+  const machineGroupName = String(alert?.machine?.machine_type || "");
+  const departmentId = Number(alert?.department?.id || alert?.department_id || 0);
+  return (state.users || []).filter((user) => {
+    const userDepartmentId = Number(user.department_id || 0);
+    const userMachineGroup = String(user.machine_group_name || "");
+    const matchesDepartment = departmentId ? userDepartmentId === departmentId : true;
+    const matchesMachineGroup = machineGroupName ? userMachineGroup === machineGroupName : true;
+    return matchesDepartment && matchesMachineGroup;
+  });
+}
+
+function renderUserChips(alert, kind) {
+  const users = getScopedUsers(alert);
+  const activeResponderId = state.selectedResponderByAlert[alert.id] || alert.responder_user_id || null;
+  if (!users.length) {
+    return '<div class="problem-empty">No users found for this machine group and department.</div>';
   }
-  return options.join("");
+  return `
+    <div class="board-alert-card__chip-grid">
+      ${users
+        .map((user) => `
+          <button type="button" class="user-chip board-alert-card__user-chip ${Number(activeResponderId) === Number(user.id) ? "is-selected" : ""}" data-action="pick-user" data-alert-id="${alert.id}" data-user-id="${user.id}" data-kind="${kind}">
+            <span class="user-chip__name">${escapeHtml(user.display_name || user.username || `User ${user.id}`)}</span>
+            <span class="user-chip__meta">${escapeHtml(user.work_id || "")}</span>
+          </button>
+        `)
+        .join("")}
+    </div>`;
 }
 
 function renderOpenCard(alert) {
   const machineName = alert.machine?.name || "Machine";
   const issueName = alert.issue_problem?.name || alert.issue_category?.name || "Unassigned";
-  const departmentName = alert.department?.name || "Unassigned";
   const elapsed = elapsedSince(alert.created_at);
+  const existingNote = String(alert.note || "").trim();
+  const appendValue = state.appendNoteByAlert[alert.id] || "";
+
   return `
-    <article class="management-machine-card" data-alert-id="${alert.id}">
-      <div class="management-machine-card__hero management-machine-card__hero--status-open">
-        <div class="management-machine-card__title-row">
-          <div class="management-machine-card__title">${escapeHtml(machineName)}</div>
-        </div>
-        <div class="management-machine-card__hero-status">
-          <span class="management-machine-card__hero-text">${escapeHtml(departmentName)}</span>
+    <article class="board-alert-card board-alert-card--inline-open status-open" data-alert-id="${alert.id}">
+      <div class="board-alert-card__top">
+        <div class="board-alert-card__title-row">
+          <h3 class="board-alert-card__title">${escapeHtml(machineName)}</h3>
         </div>
       </div>
-      <div class="management-machine-card__section management-machine-card__section--status">
-        <div class="management-machine-card__body">
-          <div class="management-machine-card__state-row management-machine-card__state-row--two">
-            <div class="management-machine-card__state management-machine-card__state--issue-open">
-              <div class="management-machine-card__state-label">Issue</div>
-              <div class="management-machine-card__state-value">${escapeHtml(issueName)}</div>
-            </div>
-            <div class="management-machine-card__state management-machine-card__state--timer-open">
-              <div class="management-machine-card__state-label">Elapsed</div>
-              <div class="management-machine-card__state-value" data-live-seconds="${elapsed}" data-live-type="open">${formatElapsedDuration(elapsed)}</div>
-            </div>
-          </div>
-          <div class="mt-2">
-            <select class="form-select form-select-sm" data-field="responder_user_id">
-              ${userOptions(alert.responder_user_id)}
-            </select>
-          </div>
-          <div class="mt-2">
-            <input class="form-control form-control-sm" data-field="note" maxlength="255" placeholder="Optional note" value="${escapeHtml(alert.note || "")}">
-          </div>
-          <div class="mt-2 d-flex gap-2">
-            <button class="btn btn-warning btn-sm flex-grow-1" type="button" data-action="acknowledge">Acknowledge</button>
-          </div>
+
+      <div class="board-alert-card__issue">
+        <div class="board-alert-card__issue-value">${escapeHtml(issueName)}</div>
+      </div>
+
+      ${existingNote ? `
+        <div class="board-alert-card__note">
+          <div class="board-alert-card__note-label">Operator Note</div>
+          <div class="board-alert-card__note-value">${escapeHtml(existingNote)}</div>
         </div>
+      ` : ""}
+
+      <div class="board-alert-card__timer-box">
+        <div class="board-alert-card__timer-label">Elapsed</div>
+        <div class="board-alert-card__timer" data-live-seconds="${elapsed}">${formatElapsedDuration(elapsed)}</div>
+      </div>
+
+      <div class="board-alert-card__actions">
+        <div class="board-alert-card__action-title">Select Responder</div>
+        ${renderUserChips(alert, "open")}
+        <input class="form-control board-alert-card__note-input" data-action="append-note" data-alert-id="${alert.id}" maxlength="255" placeholder="Append response to operator text" value="${escapeHtml(appendValue)}">
+        <button class="btn board-alert-card__ack-btn" type="button" data-action="acknowledge" data-alert-id="${alert.id}">Acknowledge</button>
       </div>
     </article>`;
 }
@@ -107,39 +128,43 @@ function renderWorkingCard(alert) {
   const responder = alert.responder_name_text || "No responder assigned";
   const startedAt = alert.acknowledged_at || alert.created_at;
   const elapsed = elapsedSince(startedAt);
+  const currentNote = String(alert.note || "").trim();
+  const appendValue = state.appendNoteByAlert[alert.id] || "";
+
   return `
-    <article class="management-machine-card" data-alert-id="${alert.id}">
-      <div class="management-machine-card__hero management-machine-card__hero--status-acknowledged">
-        <div class="management-machine-card__title-row">
-          <div class="management-machine-card__title">${escapeHtml(machineName)}</div>
-        </div>
-        <div class="management-machine-card__hero-status">
-          <span class="management-machine-card__hero-text">Working</span>
+    <article class="board-alert-card status-acknowledged" data-alert-id="${alert.id}">
+      <div class="board-alert-card__top">
+        <div class="board-alert-card__title-row">
+          <h3 class="board-alert-card__title">${escapeHtml(machineName)}</h3>
         </div>
       </div>
-      <div class="management-machine-card__section management-machine-card__section--status">
-        <div class="management-machine-card__body">
-          <div class="management-machine-card__state-row management-machine-card__state-row--two">
-            <div class="management-machine-card__state management-machine-card__state--issue-working">
-              <div class="management-machine-card__state-label">Issue</div>
-              <div class="management-machine-card__state-value">${escapeHtml(issueName)}</div>
-            </div>
-            <div class="management-machine-card__state management-machine-card__state--responder">
-              <div class="management-machine-card__state-label">Responder</div>
-              <div class="management-machine-card__state-value">${escapeHtml(responder)}</div>
-            </div>
-          </div>
-          <div class="management-machine-card__state management-machine-card__state--timer-working management-machine-card__state--elapsed-full">
-            <div class="management-machine-card__state-label">Working Time</div>
-            <div class="management-machine-card__state-value management-machine-card__state-value--elapsed" data-live-seconds="${elapsed}" data-live-type="working">${formatElapsedDuration(elapsed)}</div>
-          </div>
-          <div class="mt-2">
-            <input class="form-control form-control-sm" data-field="note" maxlength="255" placeholder="Resolution note" value="${escapeHtml(alert.note || "")}">
-          </div>
-          <div class="mt-2 d-flex gap-2">
-            <button class="btn btn-success btn-sm flex-grow-1" type="button" data-action="resolve">Close Alert</button>
-          </div>
+
+      <div class="board-alert-card__issue">
+        <div class="board-alert-card__issue-value">${escapeHtml(issueName)}</div>
+      </div>
+
+      <div class="board-alert-card__responder">
+        <div class="board-alert-card__note-label">Responder</div>
+        <div class="board-alert-card__responder-value">${escapeHtml(responder)}</div>
+      </div>
+
+      ${currentNote ? `
+        <div class="board-alert-card__note board-alert-card__note--responding">
+          <div class="board-alert-card__note-label">Current Note</div>
+          <div class="board-alert-card__note-value">${escapeHtml(currentNote)}</div>
         </div>
+      ` : ""}
+
+      <div class="board-alert-card__timer-box">
+        <div class="board-alert-card__timer-label">Working Time</div>
+        <div class="board-alert-card__timer" data-live-seconds="${elapsed}">${formatElapsedDuration(elapsed)}</div>
+      </div>
+
+      <div class="board-alert-card__working-actions">
+        <div class="board-alert-card__action-title">Update Responder (Optional)</div>
+        ${renderUserChips(alert, "working")}
+        <input class="form-control board-alert-card__note-input" data-action="append-note" data-alert-id="${alert.id}" maxlength="255" placeholder="Append additional response text" value="${escapeHtml(appendValue)}">
+        <button class="btn board-alert-card__close-btn" type="button" data-action="resolve" data-alert-id="${alert.id}">Close Alert</button>
       </div>
     </article>`;
 }
@@ -195,47 +220,79 @@ async function loadState() {
   state.users = metadata.users || [];
 }
 
-function payloadFromCard(card) {
-  const responderUserId = card.querySelector('[data-field="responder_user_id"]')?.value || "";
-  const note = card.querySelector('[data-field="note"]')?.value || "";
-  const payload = {};
-  if (responderUserId) payload.responder_user_id = Number(responderUserId);
-  if (note.trim()) payload.note = note.trim();
-  return payload;
+function buildCombinedNote(alert) {
+  const existing = String(alert.note || "").trim();
+  const append = String(state.appendNoteByAlert[alert.id] || "").trim();
+  if (!append) return existing;
+  if (!existing) return append;
+  return `${existing}\n${append}`;
 }
 
-async function acknowledgeAlert(alertId, card) {
-  const payload = payloadFromCard(card);
+async function acknowledgeAlert(alert) {
+  const alertId = Number(alert.id);
+  const responderUserId = state.selectedResponderByAlert[alertId] || alert.responder_user_id || null;
+  const payload = {};
+  if (responderUserId) payload.responder_user_id = Number(responderUserId);
+  const combinedNote = buildCombinedNote(alert);
+  if (combinedNote) payload.note = combinedNote;
+
   await fetchJson(`/api/andon/alerts/${alertId}/acknowledge`, {
     method: "POST",
     headers: csrfHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
+
+  state.appendNoteByAlert[alertId] = "";
 }
 
-async function resolveAlert(alertId, card) {
-  const payload = payloadFromCard(card);
+async function resolveAlert(alert) {
+  const alertId = Number(alert.id);
+  const responderUserId = state.selectedResponderByAlert[alertId] || alert.responder_user_id || null;
+  const payload = {};
+  if (responderUserId) payload.responder_user_id = Number(responderUserId);
+  const combinedNote = buildCombinedNote(alert);
+  if (combinedNote) payload.note = combinedNote;
+
   await fetchJson(`/api/andon/alerts/${alertId}/resolve`, {
     method: "POST",
     headers: csrfHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
+
+  state.appendNoteByAlert[alertId] = "";
+}
+
+function onListInput(event) {
+  const input = event.target.closest('[data-action="append-note"]');
+  if (!input) return;
+  const alertId = Number(input.dataset.alertId);
+  if (!alertId) return;
+  state.appendNoteByAlert[alertId] = input.value || "";
 }
 
 async function onListClick(event) {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
-  const card = event.target.closest("[data-alert-id]");
-  if (!card) return;
-  const alertId = Number(card.dataset.alertId);
+  const action = button.dataset.action;
+  const alertId = Number(button.dataset.alertId);
   if (!alertId) return;
+
+  if (action === "pick-user") {
+    const userId = Number(button.dataset.userId);
+    state.selectedResponderByAlert[alertId] = Number.isFinite(userId) ? userId : null;
+    render();
+    return;
+  }
+
+  const alert = state.alerts.find((item) => Number(item.id) === alertId);
+  if (!alert) return;
 
   button.disabled = true;
   try {
-    if (button.dataset.action === "acknowledge") {
-      await acknowledgeAlert(alertId, card);
-    } else if (button.dataset.action === "resolve") {
-      await resolveAlert(alertId, card);
+    if (action === "acknowledge") {
+      await acknowledgeAlert(alert);
+    } else if (action === "resolve") {
+      await resolveAlert(alert);
     }
     await refresh();
   } catch (error) {
@@ -266,6 +323,9 @@ async function refresh() {
 async function boot() {
   openAlertsList?.addEventListener("click", (event) => { void onListClick(event); });
   workingAlertsList?.addEventListener("click", (event) => { void onListClick(event); });
+  openAlertsList?.addEventListener("input", onListInput);
+  workingAlertsList?.addEventListener("input", onListInput);
+
   window.AndonRefreshBus?.onRefresh(() => {
     void refresh();
   });
@@ -274,6 +334,7 @@ async function boot() {
       void refresh();
     }
   });
+
   await refresh();
   startTimer();
 }
