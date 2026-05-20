@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..extensions import db
 from ..company_context import get_current_company_id
@@ -74,7 +75,7 @@ def list_active_alerts(status: str | None = None):
         query = query.filter(AndonAlert.status.in_([ALERT_STATUS_OPEN, ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED]))
     elif status:
         query = query.filter(AndonAlert.status == status)
-    return query.order_by(AndonAlert.priority.desc(), AndonAlert.created_at.asc()).all()
+    return query.options(*_alert_response_options()).order_by(AndonAlert.priority.desc(), AndonAlert.created_at.asc()).all()
 
 
 def get_alert(alert_id: int):
@@ -87,7 +88,7 @@ def get_alert(alert_id: int):
         query = query.filter(AndonAlert.department_id == scope["department_id"])
     if scope["machine_group_name"]:
         query = query.filter(AndonAlert.machine.has(Machine.machine_type == scope["machine_group_name"]))
-    alert = query.one_or_none()
+    alert = query.options(*_alert_response_options()).one_or_none()
     if not alert:
         raise AlertServiceError("Alert not found")
     return alert
@@ -96,7 +97,10 @@ def get_alert(alert_id: int):
 def create_alert(payload: dict):
     company_id = get_current_company_id()
     scope = get_scope_filters()
-    machine_query = Machine.query.filter(Machine.id == payload.get("machine_id"))
+    machine_query = Machine.query.options(
+        joinedload(Machine.department).load_only(Department.id, Department.name),
+        noload(Machine.alerts),
+    ).filter(Machine.id == payload.get("machine_id"))
     if company_id:
         machine_query = machine_query.filter(Machine.company_id == company_id)
     machine_query = machine_query.with_for_update()
@@ -104,17 +108,26 @@ def create_alert(payload: dict):
     department_id = payload.get("department_id")
     issue_category = None
     if payload.get("issue_category_id"):
-        category_query = IssueCategory.query.filter(IssueCategory.id == payload.get("issue_category_id"))
+        category_query = IssueCategory.query.options(
+            joinedload(IssueCategory.department).load_only(Department.id, Department.name),
+            noload(IssueCategory.alerts),
+        ).filter(IssueCategory.id == payload.get("issue_category_id"))
         if company_id:
             category_query = category_query.filter(IssueCategory.company_id == company_id)
         issue_category = category_query.one_or_none()
-    problem_query = IssueProblem.query.filter(IssueProblem.id == payload.get("issue_problem_id"))
+    problem_query = IssueProblem.query.options(
+        joinedload(IssueProblem.category).load_only(IssueCategory.id, IssueCategory.name, IssueCategory.department_id),
+        noload(IssueProblem.alerts),
+    ).filter(IssueProblem.id == payload.get("issue_problem_id"))
     if company_id:
         problem_query = problem_query.filter(IssueProblem.company_id == company_id)
     issue_problem = problem_query.one_or_none()
     operator_user = None
     if payload.get("operator_user_id"):
-        operator_query = User.query.filter(User.id == payload.get("operator_user_id"))
+        operator_query = User.query.options(
+            load_only(User.id, User.company_id, User.display_name, User.is_active),
+            noload("*"),
+        ).filter(User.id == payload.get("operator_user_id"))
         if company_id:
             operator_query = operator_query.filter(User.company_id == company_id)
         operator_user = operator_query.one_or_none()
@@ -169,9 +182,10 @@ def create_alert(payload: dict):
 
     department_id = issue_category.department_id
 
+    resolved_company_id = company_id or machine.company_id
     alert_number = f"AL-{utc_now():%Y%m%d%H%M%S}-{uuid4().hex[:6].upper()}"
     alert = AndonAlert(
-        company_id=company_id or machine.company_id,
+        company_id=resolved_company_id,
         alert_number=alert_number,
         machine_id=machine.id,
         department_id=department_id,
@@ -183,29 +197,36 @@ def create_alert(payload: dict):
         operator_name_text=payload.get("operator_name_text"),
         note=payload.get("note"),
     )
-    db.session.add(alert)
-    db.session.flush()
-
-    _add_event(
-        alert,
-        EVENT_CREATED,
-        user=operator_user,
-        user_name_text=payload.get("operator_name_text") or (operator_user.display_name if operator_user else None),
-        message="Alert created",
-        metadata={"note": payload.get("note")},
-    )
     try:
+        db.session.add(alert)
+        db.session.flush()
+
+        _add_event(
+            alert,
+            EVENT_CREATED,
+            user=operator_user,
+            user_name_text=payload.get("operator_name_text") or (operator_user.display_name if operator_user else None),
+            message="Alert created",
+            metadata={"note": payload.get("note")},
+        )
         db.session.commit()
     except IntegrityError as exc:
         db.session.rollback()
-        existing_alert = _get_active_alert_for_machine(machine.id, company_id or machine.company_id)
+        existing_alert = _get_active_alert_for_machine(machine.id, resolved_company_id)
         if existing_alert:
             raise AlertServiceError(
                 "An active alert already exists for this machine",
                 status_code=409,
                 data={"existing_alert": existing_alert.to_dict()},
             ) from exc
-        raise
+        existing_any = _get_latest_alert_for_machine(machine.id, resolved_company_id)
+        if existing_any:
+            raise AlertServiceError(
+                "A machine-level alert uniqueness rule blocked this alert. Close or cancel the existing alert for this machine and try again.",
+                status_code=409,
+                data={"existing_alert": existing_any.to_dict()},
+            ) from exc
+        raise AlertServiceError("Unable to create alert due to a database constraint", status_code=409) from exc
     _invalidate_live_caches(alert.company_id)
     emit_alert_created(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status)
     return alert
@@ -369,7 +390,10 @@ def _resolve_user(user_id):
     if not user_id:
         return None
     company_id = get_current_company_id()
-    query = User.query.filter(User.id == user_id)
+    query = User.query.options(
+        load_only(User.id, User.display_name, User.is_active),
+        noload("*"),
+    ).filter(User.id == user_id)
     user = query.one_or_none()
     if user is None:
         return None
@@ -422,6 +446,7 @@ def _invalidate_live_caches(company_id):
     invalidate_cache("board_state", company_id)
     invalidate_cache("report_summary", company_id)
     invalidate_cache("report_machine_details", company_id)
+    invalidate_cache("report_machine_stats", company_id)
     invalidate_cache("report_problem_details", company_id)
 
 
@@ -432,4 +457,65 @@ def _get_active_alert_for_machine(machine_id, company_id):
     )
     if company_id:
         query = query.filter(AndonAlert.company_id == company_id)
-    return query.order_by(AndonAlert.created_at.desc()).first()
+    return query.options(*_alert_response_options()).order_by(AndonAlert.created_at.desc()).first()
+
+
+def _get_latest_alert_for_machine(machine_id, company_id):
+    query = AndonAlert.query.filter(AndonAlert.machine_id == machine_id)
+    if company_id:
+        query = query.filter(AndonAlert.company_id == company_id)
+    return query.options(*_alert_response_options()).order_by(AndonAlert.created_at.desc()).first()
+
+
+def _alert_response_options():
+    return (
+        joinedload(AndonAlert.machine)
+        .load_only(
+            Machine.id,
+            Machine.company_id,
+            Machine.machine_code,
+            Machine.name,
+            Machine.machine_type,
+            Machine.radius_machine_id,
+            Machine.area,
+            Machine.line,
+            Machine.department_id,
+            Machine.description,
+            Machine.is_active,
+            Machine.created_at,
+        )
+        .joinedload(Machine.department)
+        .load_only(Department.id, Department.name),
+        joinedload(AndonAlert.department).load_only(Department.id, Department.name),
+        joinedload(AndonAlert.issue_category)
+        .load_only(
+            IssueCategory.id,
+            IssueCategory.company_id,
+            IssueCategory.name,
+            IssueCategory.department_id,
+            IssueCategory.color,
+            IssueCategory.priority_default,
+            IssueCategory.is_active,
+            IssueCategory.created_at,
+        )
+        .joinedload(IssueCategory.department)
+        .load_only(Department.id, Department.name),
+        joinedload(AndonAlert.issue_problem)
+        .load_only(
+            IssueProblem.id,
+            IssueProblem.company_id,
+            IssueProblem.category_id,
+            IssueProblem.name,
+            IssueProblem.description,
+            IssueProblem.severity_default,
+            IssueProblem.is_active,
+            IssueProblem.created_at,
+        )
+        .joinedload(IssueProblem.category)
+        .load_only(IssueCategory.id, IssueCategory.name, IssueCategory.department_id),
+        noload(AndonAlert.company),
+        noload(AndonAlert.operator_user),
+        noload(AndonAlert.responder_user),
+        noload(AndonAlert.events),
+        noload(AndonAlert.escalations),
+    )

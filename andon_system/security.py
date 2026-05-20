@@ -4,11 +4,12 @@ import json
 import secrets
 import time
 from hmac import compare_digest
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from flask import abort, current_app, g, has_request_context, request, session
 from sqlalchemy import or_
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, load_only, noload
 
 from .extensions import db
 from .models.company import Company
@@ -18,6 +19,7 @@ USER_SESSION_KEY = "andon_user_id"
 COMPANY_SESSION_KEY = "andon_company_id"
 WORKSPACE_NEXT_SESSION_KEY = "andon_workspace_next"
 WORKSPACE_OPTIONS_SESSION_KEY = "andon_workspace_options"
+MEMBERSHIPS_SESSION_KEY = "andon_memberships_snapshot"
 ADMIN_SESSION_KEY = "andon_admin_authenticated"
 CSRF_SESSION_KEY = "andon_csrf_token"
 DEV_SECRET_KEY = "dev-andon-secret-key"
@@ -38,6 +40,7 @@ ROLE_LANDING_PAGE = {
     "Manager": "pages.management_page",
     "Operator": "pages.operator_page",
 }
+PREFERENCE_ALLOWED_PAGE_KEYS = {PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT, PAGE_REPORTS, PAGE_ADMIN}
 
 
 def _perf_enabled() -> bool:
@@ -84,7 +87,24 @@ def get_authenticated_user() -> User | None:
         _perf_log("get_authenticated_user(cache)", started_at, user_id=getattr(cached, "id", None))
         return cached
     user_id = session.get(USER_SESSION_KEY)
-    user = User.query.filter_by(id=user_id).one_or_none() if user_id else None
+    user = (
+        User.query.options(
+            load_only(
+                User.id,
+                User.company_id,
+                User.display_name,
+                User.username,
+                User.role,
+                User.email,
+                User.is_active,
+            ),
+            noload("*"),
+        )
+        .filter_by(id=user_id)
+        .one_or_none()
+        if user_id
+        else None
+    )
     g.authenticated_user = user
     _perf_log("get_authenticated_user(db)", started_at, user_id=user_id, found=bool(user))
     return user
@@ -96,18 +116,15 @@ def is_authenticated() -> bool:
 
 
 def login_user(user: User) -> None:
+    session.clear()
     session[USER_SESSION_KEY] = user.id
     session.pop(ADMIN_SESSION_KEY, None)
+    session[CSRF_SESSION_KEY] = secrets.token_urlsafe(32)
     g.authenticated_user = user
 
 
 def logout_user() -> None:
-    session.pop(USER_SESSION_KEY, None)
-    session.pop(ADMIN_SESSION_KEY, None)
-    session.pop(COMPANY_SESSION_KEY, None)
-    session.pop(WORKSPACE_NEXT_SESSION_KEY, None)
-    session.pop(WORKSPACE_OPTIONS_SESSION_KEY, None)
-    session.pop("andon_company_slug", None)
+    session.clear()
     if has_request_context():
         g.authenticated_user = None
         g.current_user_membership = None
@@ -119,9 +136,24 @@ def authenticate_user(identity: str | None, password: str | None) -> User | None
     normalized_identity = str(identity or "").strip()
     if not normalized_identity:
         return None
-    user = User.query.filter(
-        or_(User.username == normalized_identity, User.email == normalized_identity)
-    ).one_or_none()
+    user = (
+        User.query.options(
+            load_only(
+                User.id,
+                User.company_id,
+                User.display_name,
+                User.username,
+                User.role,
+                User.email,
+                User.password_hash,
+                User.is_active,
+                User.last_login_at,
+            ),
+            noload("*"),
+        )
+        .filter(or_(User.username == normalized_identity, User.email == normalized_identity))
+        .one_or_none()
+    )
     if not user or not user.is_active:
         return None
     if not user.check_password(password):
@@ -146,19 +178,109 @@ def get_user_memberships(user: User | None = None, active_only: bool = True) -> 
             memberships = cache[cache_key]
             _perf_log("get_user_memberships(cache)", started_at, total=len(memberships), active=len(memberships))
             return memberships
+        session_memberships = _memberships_from_session(current_user, active_only)
+        if session_memberships is not None:
+            cache[cache_key] = session_memberships
+            _perf_log("get_user_memberships(session)", started_at, total=len(session_memberships), active=len(session_memberships))
+            return session_memberships
     query = UserCompanyAccess.query.filter_by(user_id=current_user.id)
     if active_only:
         query = query.filter_by(is_active=True)
     memberships = (
-        query.options(joinedload(UserCompanyAccess.company))
+        query.options(
+            load_only(
+                UserCompanyAccess.id,
+                UserCompanyAccess.user_id,
+                UserCompanyAccess.company_id,
+                UserCompanyAccess.role,
+                UserCompanyAccess.scope_mode,
+                UserCompanyAccess.department_id,
+                UserCompanyAccess.machine_group_id,
+                UserCompanyAccess.is_active,
+            ),
+            joinedload(UserCompanyAccess.company).load_only(
+                Company.id,
+                Company.name,
+                Company.slug,
+                Company.is_active,
+            ),
+            noload(UserCompanyAccess.user),
+            noload(UserCompanyAccess.department),
+            noload(UserCompanyAccess.machine_group),
+        )
         .order_by(UserCompanyAccess.company_id.asc())
         .all()
     )
     filtered = [membership for membership in memberships if membership.company and membership.company.is_active]
     if has_request_context():
         g.user_memberships_cache[(current_user.id, bool(active_only))] = filtered
+        _store_memberships_in_session(current_user, filtered, active_only)
     _perf_log("get_user_memberships(db)", started_at, total=len(memberships), active=len(filtered))
     return filtered
+
+
+def _memberships_from_session(user: User, active_only: bool) -> list[SimpleNamespace] | None:
+    if not active_only:
+        return None
+    snapshot = session.get(MEMBERSHIPS_SESSION_KEY)
+    if not snapshot or snapshot.get("user_id") != user.id:
+        return None
+    memberships = []
+    for item in snapshot.get("memberships") or []:
+        company_data = item.get("company") or {}
+        company = SimpleNamespace(
+            id=company_data.get("id"),
+            name=company_data.get("name"),
+            slug=company_data.get("slug"),
+            is_active=company_data.get("is_active", True),
+        )
+        memberships.append(
+            SimpleNamespace(
+                id=item.get("id"),
+                user_id=item.get("user_id"),
+                company_id=item.get("company_id"),
+                role=item.get("role"),
+                scope_mode=item.get("scope_mode"),
+                department_id=item.get("department_id"),
+                machine_group_id=item.get("machine_group_id"),
+                is_active=item.get("is_active", True),
+                is_admin=item.get("role") == "Admin",
+                is_restricted=item.get("scope_mode") == "restricted" and item.get("role") != "Admin",
+                company=company,
+                department=None,
+                machine_group=None,
+            )
+        )
+    return memberships
+
+
+def _store_memberships_in_session(user: User, memberships: list[UserCompanyAccess], active_only: bool) -> None:
+    if not active_only or session.get(USER_SESSION_KEY) != user.id:
+        return
+    session[MEMBERSHIPS_SESSION_KEY] = {
+        "user_id": user.id,
+        "memberships": [
+            {
+                "id": membership.id,
+                "user_id": membership.user_id,
+                "company_id": membership.company_id,
+                "role": membership.role,
+                "scope_mode": membership.scope_mode,
+                "department_id": membership.department_id,
+                "machine_group_id": membership.machine_group_id,
+                "is_active": membership.is_active,
+                "company": {
+                    "id": membership.company.id,
+                    "name": membership.company.name,
+                    "slug": membership.company.slug,
+                    "is_active": membership.company.is_active,
+                }
+                if membership.company
+                else None,
+            }
+            for membership in memberships
+        ],
+    }
 
 
 def get_accessible_companies(user: User | None = None) -> list[Company]:
@@ -188,9 +310,10 @@ def get_current_membership(user: User | None = None, company: Company | None = N
     if not has_request_context():
         return None
     cached = getattr(g, "current_user_membership", None)
-    if cached is not None and user is None and company is None:
-        _perf_log("get_current_membership(cache)", started_at, found=True)
-        return cached
+    if cached is not None and company is None:
+        if user is None or user.id == session.get(USER_SESSION_KEY):
+            _perf_log("get_current_membership(cache)", started_at, found=True)
+            return cached
     current_user = user or get_authenticated_user()
     if current_user is None:
         _perf_log("get_current_membership(skip_no_user)", started_at)
@@ -278,6 +401,9 @@ def validate_production_security_config(config: dict) -> None:
     secret_key = config.get("SECRET_KEY")
     if not secret_key or str(secret_key).strip() == DEV_SECRET_KEY:
         raise RuntimeError("Production requires a non-default SECRET_KEY.")
+    admin_password = config.get("ADMIN_PASSWORD")
+    if not admin_password or len(str(admin_password)) < 12:
+        raise RuntimeError("Production requires a strong ANDON_ADMIN_PASSWORD.")
 
 
 def require_admin_authentication() -> None:
@@ -297,6 +423,9 @@ def is_safe_redirect_target(target: str | None) -> bool:
 
 def get_authorized_company_id() -> int | None:
     if not has_request_context():
+        return None
+    if not is_authenticated():
+        request.andon_authorized_company = None
         return None
     company = getattr(request, "andon_authorized_company", None)
     if company is not None:
@@ -323,9 +452,12 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
 
 
 def get_view_preference(page_key: str, company_id: int | None = None, user: User | None = None) -> dict:
+    page_key = _validate_preference_page_key(page_key)
     current_user = user or get_authenticated_user()
     if current_user is None:
         return {}
+    if not user_can_access_page(page_key):
+        abort(403)
     resolved_company_id = company_id
     if resolved_company_id is None:
         membership = get_current_membership(user=current_user)
@@ -344,9 +476,14 @@ def get_view_preference(page_key: str, company_id: int | None = None, user: User
 
 
 def save_view_preference(page_key: str, payload: dict, company_id: int | None = None, user: User | None = None) -> dict:
+    page_key = _validate_preference_page_key(page_key)
     current_user = user or get_authenticated_user()
     if current_user is None:
         abort(403)
+    if not user_can_access_page(page_key):
+        abort(403)
+    if not isinstance(payload, dict):
+        abort(400, description="Invalid preference payload")
     resolved_company_id = company_id
     if resolved_company_id is None:
         membership = get_current_membership(user=current_user)
@@ -356,7 +493,10 @@ def save_view_preference(page_key: str, payload: dict, company_id: int | None = 
         company_id=resolved_company_id,
         page_key=page_key,
     ).one_or_none()
-    serialized = json.dumps(payload or {})
+    serialized = json.dumps(payload or {}, separators=(",", ":"), sort_keys=True)
+    max_bytes = int(current_app.config.get("PREFERENCE_PAYLOAD_MAX_BYTES", 16384))
+    if len(serialized.encode("utf-8")) > max_bytes:
+        abort(413, description="Preference payload is too large")
     if preference is None:
         preference = UserViewPreference(
             user_id=current_user.id,
@@ -369,3 +509,10 @@ def save_view_preference(page_key: str, payload: dict, company_id: int | None = 
         preference.preferences_json = serialized
     db.session.commit()
     return payload or {}
+
+
+def _validate_preference_page_key(page_key: str) -> str:
+    normalized = str(page_key or "").strip().lower()
+    if normalized not in PREFERENCE_ALLOWED_PAGE_KEYS:
+        abort(400, description="Unknown preference page key")
+    return normalized

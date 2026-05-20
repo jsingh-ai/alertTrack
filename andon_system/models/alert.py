@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import func, text
 
 from ..extensions import db
@@ -43,6 +45,7 @@ class AndonAlert(db.Model):
             "machine_id",
             unique=True,
             postgresql_where=text("status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')"),
+            sqlite_where=text("status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')"),
         ),
     )
 
@@ -100,6 +103,7 @@ class AndonAlert(db.Model):
             "responder_name_text": self.responder_name_text,
             "note": self.note,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "elapsed_seconds": self.elapsed_seconds,
             "acknowledged_at": self.acknowledged_at.isoformat() if self.acknowledged_at else None,
             "acknowledged_seconds": self.acknowledged_seconds,
             "arrived_at": self.arrived_at.isoformat() if self.arrived_at else None,
@@ -132,6 +136,30 @@ class AndonAlert(db.Model):
     @property
     def total_resolution_seconds(self):
         return _duration_seconds(self.created_at, self.resolved_at)
+
+    @property
+    def elapsed_seconds(self):
+        created_at = _ensure_aware(self.created_at)
+        if not created_at:
+            return None
+
+        if self.status in (ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED):
+            start = _ensure_aware(self.acknowledged_at) or created_at
+        elif self.status == ALERT_STATUS_RESOLVED:
+            end = _ensure_aware(self.resolved_at)
+            if not end:
+                return None
+            return max(0, int((end - created_at).total_seconds()))
+        elif self.status == ALERT_STATUS_CANCELLED:
+            end = _ensure_aware(self.cancelled_at)
+            if not end:
+                return None
+            return max(0, int((end - created_at).total_seconds()))
+        else:
+            start = created_at
+
+        now = datetime.now(timezone.utc)
+        return max(0, int((now - start).total_seconds()))
 
 
 class AndonAlertEvent(db.Model):
@@ -174,5 +202,17 @@ class AndonAlertEvent(db.Model):
 def _duration_seconds(start, end):
     if not start or not end:
         return None
-    delta = end - start
+    start_aware = _ensure_aware(start)
+    end_aware = _ensure_aware(end)
+    if not start_aware or not end_aware:
+        return None
+    delta = end_aware - start_aware
     return int(delta.total_seconds())
+
+
+def _ensure_aware(value):
+    if not value:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)

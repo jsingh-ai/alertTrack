@@ -1,5 +1,7 @@
 (function () {
   const config = window.AndonRealtimeConfig || {};
+  const asyncMode = String(config.asyncMode || "").toLowerCase();
+  const forcePollingOnly = Boolean(config.forcePolling) || asyncMode === "threading";
   const eventName = "andon-realtime-event";
   const statusEventName = "andon-realtime-status";
   const events = [
@@ -42,7 +44,8 @@
   }
 
   const socket = window.io({
-    transports: ["websocket", "polling"],
+    transports: forcePollingOnly ? ["polling"] : ["websocket", "polling"],
+    upgrade: !forcePollingOnly,
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 500,

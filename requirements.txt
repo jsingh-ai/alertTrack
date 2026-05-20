@@ -3,6 +3,8 @@ Flask-SQLAlchemy
 Flask-Migrate
 Flask-SocketIO
 simple-websocket
+gevent
+gevent-websocket
 python-dotenv
 pymysql
 psycopg[binary]

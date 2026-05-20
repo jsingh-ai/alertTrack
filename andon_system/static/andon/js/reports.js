@@ -19,14 +19,25 @@ let reportRefreshTimeoutId = null;
 let reportLoadRequestId = 0;
 let reportsStaleWhileHidden = false;
 
-async function loadReportPreferences() {
+async function loadReportPreferences(defaultStartValue, defaultEndValue) {
   try {
     const saved = await window.AndonPreferences?.load?.("reports");
     if (!saved || !Object.keys(saved).length) return;
-    if (saved.start && reportStart) reportStart.value = saved.start;
-    if (saved.end && reportEnd) reportEnd.value = saved.end;
+
+    const savedStart = typeof saved.start === "string" ? saved.start : "";
+    const savedEnd = typeof saved.end === "string" ? saved.end : "";
+    const hasLegacyNonMidnightRange = (savedStart && !isMidnightLocalInput(savedStart))
+      || (savedEnd && !isMidnightLocalInput(savedEnd));
+    const resolvedStart = hasLegacyNonMidnightRange ? defaultStartValue : savedStart;
+    const resolvedEnd = hasLegacyNonMidnightRange ? defaultEndValue : savedEnd;
+
+    if (resolvedStart && reportStart) reportStart.value = resolvedStart;
+    if (resolvedEnd && reportEnd) reportEnd.value = resolvedEnd;
     if (typeof saved.machineGroup === "string") {
       setSelectedMachineGroup(saved.machineGroup);
+    }
+    if (hasLegacyNonMidnightRange) {
+      saveReportPreferences();
     }
   } catch (_error) {
     // Ignore preference fetch errors and continue with defaults.
@@ -133,18 +144,35 @@ function formatDateTimeLocalInput(date) {
   return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 }
 
-function defaultReportStartValue() {
-  const now = new Date();
-  const date = new Date(now);
-  if (now.getHours() < 6) {
-    date.setDate(date.getDate() - 1);
+function parseLocalInputToDate(value) {
+  if (!value) return null;
+  const [datePart, timePart = "00:00:00"] = String(value).split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour = 0, minute = 0, second = 0] = timePart.split(":").map(Number);
+  if (![year, month, day, hour, minute, second].every(Number.isFinite)) {
+    return null;
   }
+  const local = new Date(year, month - 1, day, hour, minute, second, 0);
+  return Number.isNaN(local.getTime()) ? null : local;
+}
+
+function isMidnightLocalInput(value) {
+  const date = parseLocalInputToDate(value);
+  if (!date) return false;
+  return date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0;
+}
+
+function defaultReportStartValue() {
+  const date = new Date();
   date.setHours(0, 0, 0, 0);
   return formatDateTimeLocalInput(date);
 }
 
 function defaultReportEndValue() {
-  return formatDateTimeLocalInput(new Date());
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + 1);
+  return formatDateTimeLocalInput(date);
 }
 
 function datetimeLocalToIso(value) {
@@ -472,14 +500,15 @@ problemTable?.addEventListener("click", (event) => {
   if (!row) return;
   openDetailModal("Problem Detail", row, "problem");
 });
+const defaultStartDate = defaultReportStartValue();
 const defaultEndDate = defaultReportEndValue();
-if (reportStart && !reportStart.value) reportStart.value = defaultReportStartValue();
+if (reportStart && !reportStart.value) reportStart.value = defaultStartDate;
 if (reportEnd && !reportEnd.value) reportEnd.value = defaultEndDate;
 if (reportMachineGroupButtons) {
   setSelectedMachineGroup("");
 }
-loadReportPreferences().finally(() => {
-  if (!reportStart.value) reportStart.value = defaultReportStartValue();
+loadReportPreferences(defaultStartDate, defaultEndDate).finally(() => {
+  if (!reportStart.value) reportStart.value = defaultStartDate;
   if (!reportEnd.value) reportEnd.value = defaultEndDate;
   loadReports();
 });

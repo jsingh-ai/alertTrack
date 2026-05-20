@@ -9,7 +9,7 @@ const csrfHeaders = (headers = {}) => window.AndonSecurity?.withCsrfHeaders(head
 const state = {
   alerts: [],
   users: [],
-  loadedAt: Date.now(),
+  timerSnapshotByAlert: {},
   selectedResponderByAlert: {},
   appendNoteByAlert: {},
 };
@@ -51,6 +51,45 @@ function getSection(alert) {
   return "closed";
 }
 
+function getTimerOrigin(alert, section) {
+  if (section === "working") {
+    return String(alert?.acknowledged_at || alert?.created_at || "");
+  }
+  return String(alert?.created_at || "");
+}
+
+function getTimerSeed(alert, section) {
+  const alertId = Number(alert?.id || 0);
+  const origin = getTimerOrigin(alert, section);
+  const elapsedFromOrigin = elapsedSince(origin);
+  const elapsedFromApi = Math.max(0, Math.floor(Number(alert?.elapsed_seconds) || 0));
+  let seed = Math.max(elapsedFromOrigin, elapsedFromApi);
+
+  const snapshot = state.timerSnapshotByAlert[alertId];
+  if (snapshot && snapshot.section === section && snapshot.origin === origin) {
+    seed = Math.max(seed, Math.floor(Number(snapshot.seconds) || 0));
+  }
+  return seed;
+}
+
+function syncTimerSnapshotFromDom() {
+  document.querySelectorAll(".board-alert-card__timer[data-live-alert-id]").forEach((node) => {
+    const alertId = Number(node.getAttribute("data-live-alert-id") || 0);
+    if (!alertId) return;
+    const section = String(node.getAttribute("data-live-section") || "");
+    const origin = String(node.getAttribute("data-live-origin") || "");
+    const base = Math.max(0, Math.floor(Number(node.getAttribute("data-live-seconds") || 0)));
+    const anchorMs = Number(node.getAttribute("data-live-anchor-ms") || 0);
+    const elapsedSinceAnchor = anchorMs ? Math.max(0, Math.floor((Date.now() - anchorMs) / 1000)) : 0;
+    const rendered = base + elapsedSinceAnchor;
+    state.timerSnapshotByAlert[alertId] = {
+      seconds: rendered,
+      section,
+      origin,
+    };
+  });
+}
+
 function getScopedUsers(alert) {
   const machineGroupName = String(alert?.machine?.machine_type || "");
   const departmentId = Number(alert?.department?.id || alert?.department_id || 0);
@@ -85,7 +124,9 @@ function renderUserChips(alert, kind) {
 function renderOpenCard(alert) {
   const machineName = alert.machine?.name || "Machine";
   const issueName = alert.issue_problem?.name || alert.issue_category?.name || "Unassigned";
-  const elapsed = elapsedSince(alert.created_at);
+  const section = "open";
+  const origin = getTimerOrigin(alert, section);
+  const elapsed = getTimerSeed(alert, section);
   const existingNote = String(alert.note || "").trim();
   const appendValue = state.appendNoteByAlert[alert.id] || "";
 
@@ -110,12 +151,20 @@ function renderOpenCard(alert) {
 
       <div class="board-alert-card__timer-box">
         <div class="board-alert-card__timer-label">Elapsed</div>
-        <div class="board-alert-card__timer" data-live-seconds="${elapsed}">${formatElapsedDuration(elapsed)}</div>
+        <div
+          class="board-alert-card__timer"
+          data-live-seconds="${elapsed}"
+          data-live-alert-id="${alert.id}"
+          data-live-section="${section}"
+          data-live-origin="${escapeHtml(origin)}"
+          data-live-anchor-ms="${Date.now()}"
+        >${formatElapsedDuration(elapsed)}</div>
       </div>
 
       <div class="board-alert-card__actions">
         <div class="board-alert-card__action-title">Select Responder</div>
         ${renderUserChips(alert, "open")}
+        <div class="board-alert-card__action-title board-alert-card__action-title--notes">Notes</div>
         <input class="form-control board-alert-card__note-input" data-action="append-note" data-alert-id="${alert.id}" maxlength="255" placeholder="Append response to operator text" value="${escapeHtml(appendValue)}">
         <button class="btn board-alert-card__ack-btn" type="button" data-action="acknowledge" data-alert-id="${alert.id}">Acknowledge</button>
       </div>
@@ -126,8 +175,9 @@ function renderWorkingCard(alert) {
   const machineName = alert.machine?.name || "Machine";
   const issueName = alert.issue_problem?.name || alert.issue_category?.name || "Unassigned";
   const responder = alert.responder_name_text || "No responder assigned";
-  const startedAt = alert.acknowledged_at || alert.created_at;
-  const elapsed = elapsedSince(startedAt);
+  const section = "working";
+  const origin = getTimerOrigin(alert, section);
+  const elapsed = getTimerSeed(alert, section);
   const currentNote = String(alert.note || "").trim();
   const appendValue = state.appendNoteByAlert[alert.id] || "";
 
@@ -157,12 +207,18 @@ function renderWorkingCard(alert) {
 
       <div class="board-alert-card__timer-box">
         <div class="board-alert-card__timer-label">Working Time</div>
-        <div class="board-alert-card__timer" data-live-seconds="${elapsed}">${formatElapsedDuration(elapsed)}</div>
+        <div
+          class="board-alert-card__timer"
+          data-live-seconds="${elapsed}"
+          data-live-alert-id="${alert.id}"
+          data-live-section="${section}"
+          data-live-origin="${escapeHtml(origin)}"
+          data-live-anchor-ms="${Date.now()}"
+        >${formatElapsedDuration(elapsed)}</div>
       </div>
 
       <div class="board-alert-card__working-actions">
-        <div class="board-alert-card__action-title">Update Responder (Optional)</div>
-        ${renderUserChips(alert, "working")}
+        <div class="board-alert-card__action-title board-alert-card__action-title--notes">Notes</div>
         <input class="form-control board-alert-card__note-input" data-action="append-note" data-alert-id="${alert.id}" maxlength="255" placeholder="Append additional response text" value="${escapeHtml(appendValue)}">
         <button class="btn board-alert-card__close-btn" type="button" data-action="resolve" data-alert-id="${alert.id}">Close Alert</button>
       </div>
@@ -187,6 +243,7 @@ function renderStatusDock() {
 }
 
 function render() {
+  syncTimerSnapshotFromDom();
   const openAlerts = state.alerts.filter((alert) => getSection(alert) === "open");
   const workingAlerts = state.alerts.filter((alert) => getSection(alert) === "working");
 
@@ -199,7 +256,15 @@ function render() {
     : '<div class="board-builder-empty"><div class="h5 mb-1">No active work.</div><div class="small text-secondary">Acknowledged alerts move here.</div></div>';
 
   renderStatusDock();
-  state.loadedAt = Date.now();
+
+  const activeAlertIds = new Set([...openAlerts, ...workingAlerts].map((alert) => Number(alert.id)).filter(Boolean));
+  Object.keys(state.timerSnapshotByAlert).forEach((id) => {
+    if (!activeAlertIds.has(Number(id))) {
+      delete state.timerSnapshotByAlert[id];
+    }
+  });
+
+  tickTimers();
 }
 
 async function fetchJson(url, options = {}) {
@@ -211,13 +276,23 @@ async function fetchJson(url, options = {}) {
   return data.data;
 }
 
-async function loadState() {
-  const [alertsData, metadata] = await Promise.all([
-    fetchJson(alertsUrl),
-    fetchJson(operatorMetadataUrl),
-  ]);
+async function loadAlerts() {
+  const alertsData = await fetchJson(alertsUrl);
   state.alerts = Array.isArray(alertsData) ? alertsData : [];
+}
+
+async function loadOperatorMetadata() {
+  const metadata = await fetchJson(operatorMetadataUrl);
   state.users = metadata.users || [];
+}
+
+async function loadState(options = {}) {
+  const includeMetadata = Boolean(options.includeMetadata);
+  if (includeMetadata || !state.users.length) {
+    await Promise.all([loadAlerts(), loadOperatorMetadata()]);
+    return;
+  }
+  await loadAlerts();
 }
 
 function buildCombinedNote(alert) {
@@ -236,13 +311,14 @@ async function acknowledgeAlert(alert) {
   const combinedNote = buildCombinedNote(alert);
   if (combinedNote) payload.note = combinedNote;
 
-  await fetchJson(`/api/andon/alerts/${alertId}/acknowledge`, {
+  const updatedAlert = await fetchJson(`/api/andon/alerts/${alertId}/acknowledge`, {
     method: "POST",
     headers: csrfHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
 
   state.appendNoteByAlert[alertId] = "";
+  return updatedAlert;
 }
 
 async function resolveAlert(alert) {
@@ -253,13 +329,38 @@ async function resolveAlert(alert) {
   const combinedNote = buildCombinedNote(alert);
   if (combinedNote) payload.note = combinedNote;
 
-  await fetchJson(`/api/andon/alerts/${alertId}/resolve`, {
+  const updatedAlert = await fetchJson(`/api/andon/alerts/${alertId}/resolve`, {
     method: "POST",
     headers: csrfHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
 
   state.appendNoteByAlert[alertId] = "";
+  return updatedAlert;
+}
+
+function mergeAlertPayload(updatedAlert, fallbackAlert) {
+  if (!updatedAlert) return fallbackAlert;
+  return {
+    ...(fallbackAlert || {}),
+    ...updatedAlert,
+    machine: updatedAlert.machine ?? fallbackAlert?.machine ?? null,
+    department: updatedAlert.department ?? fallbackAlert?.department ?? null,
+    issue_category: updatedAlert.issue_category ?? fallbackAlert?.issue_category ?? null,
+    issue_problem: updatedAlert.issue_problem ?? fallbackAlert?.issue_problem ?? null,
+  };
+}
+
+function applyAlertUpdate(updatedAlert, fallbackAlert) {
+  if (!updatedAlert && !fallbackAlert) return;
+  const merged = mergeAlertPayload(updatedAlert, fallbackAlert);
+  const alertId = Number(merged?.id || fallbackAlert?.id || 0);
+  if (!alertId) return;
+
+  state.alerts = state.alerts.filter((item) => Number(item.id) !== alertId);
+  if (getSection(merged) !== "closed") {
+    state.alerts.unshift(merged);
+  }
 }
 
 function onListInput(event) {
@@ -278,6 +379,7 @@ async function onListClick(event) {
   if (!alertId) return;
 
   if (action === "pick-user") {
+    if (button.dataset.kind !== "open") return;
     const userId = Number(button.dataset.userId);
     state.selectedResponderByAlert[alertId] = Number.isFinite(userId) ? userId : null;
     render();
@@ -290,11 +392,16 @@ async function onListClick(event) {
   button.disabled = true;
   try {
     if (action === "acknowledge") {
-      await acknowledgeAlert(alert);
+      const updated = await acknowledgeAlert(alert);
+      applyAlertUpdate(updated, alert);
+      render();
+      void refresh();
     } else if (action === "resolve") {
-      await resolveAlert(alert);
+      const updated = await resolveAlert(alert);
+      applyAlertUpdate(updated, alert);
+      render();
+      void refresh();
     }
-    await refresh();
   } catch (error) {
     window.alert(error.message || "Action failed");
   } finally {
@@ -303,10 +410,21 @@ async function onListClick(event) {
 }
 
 function tickTimers() {
-  document.querySelectorAll("[data-live-seconds]").forEach((node) => {
+  document.querySelectorAll(".board-alert-card__timer[data-live-alert-id]").forEach((node) => {
+    const alertId = Number(node.getAttribute("data-live-alert-id") || 0);
+    if (!alertId) return;
+    const section = String(node.getAttribute("data-live-section") || "");
+    const origin = String(node.getAttribute("data-live-origin") || "");
     const base = Number(node.getAttribute("data-live-seconds") || 0);
-    const rendered = Math.max(0, base + Math.floor((Date.now() - state.loadedAt) / 1000));
+    const anchorMs = Number(node.getAttribute("data-live-anchor-ms") || 0);
+    const elapsedSinceAnchor = anchorMs ? Math.floor((Date.now() - anchorMs) / 1000) : 0;
+    const rendered = Math.max(0, base + Math.max(0, elapsedSinceAnchor));
     node.textContent = formatElapsedDuration(rendered);
+    state.timerSnapshotByAlert[alertId] = {
+      seconds: rendered,
+      section,
+      origin,
+    };
   });
 }
 
@@ -316,7 +434,7 @@ function startTimer() {
 }
 
 async function refresh() {
-  await loadState();
+  await loadState({ includeMetadata: false });
   render();
 }
 
@@ -330,12 +448,13 @@ async function boot() {
     void refresh();
   });
   window.AndonRealtime?.onEvent((event) => {
-    if (["alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "board_refresh"].includes(event.type)) {
+    if (["alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
       void refresh();
     }
   });
 
-  await refresh();
+  await loadState({ includeMetadata: true });
+  render();
   startTimer();
 }
 

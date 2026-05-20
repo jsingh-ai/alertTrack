@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
+import threading
+import time
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, flash, redirect, render_template, request, session, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 from sqlalchemy.orm import joinedload
 
 from ..company_context import get_current_company, set_current_company_id, set_current_company_slug
@@ -37,6 +40,8 @@ pages_bp = Blueprint("pages", __name__)
 MANAGEMENT_TIMEZONE = ZoneInfo("America/Chicago")
 WORKSPACE_PROMPT_SESSION_KEY = "andon_workspace_prompt"
 WORKSPACE_OPTIONS_SESSION_KEY = "andon_workspace_options"
+_LOGIN_RATE_LIMIT_LOCK = threading.Lock()
+_LOGIN_RATE_LIMIT = {}
 
 
 def _management_shift_window(now: datetime | None = None):
@@ -85,6 +90,55 @@ def _require_page_or_redirect(page_key: str):
     return None
 
 
+def _login_rate_limit_key(identity: str | None, remote_addr: str | None) -> str:
+    normalized_identity = str(identity or "").strip().lower()
+    identity_digest = hashlib.sha256(normalized_identity.encode("utf-8")).hexdigest()[:24] if normalized_identity else "anon"
+    return f"{remote_addr or 'unknown'}:{identity_digest}"
+
+
+def _is_login_rate_limited(identity: str | None, remote_addr: str | None) -> tuple[bool, int]:
+    now = time.monotonic()
+    window = int(current_app.config.get("LOGIN_RATE_LIMIT_WINDOW_SECONDS", 300))
+    max_attempts = int(current_app.config.get("LOGIN_RATE_LIMIT_MAX_ATTEMPTS", 8))
+    key = _login_rate_limit_key(identity, remote_addr)
+    with _LOGIN_RATE_LIMIT_LOCK:
+        if len(_LOGIN_RATE_LIMIT) > 2048:
+            stale = [entry_key for entry_key, value in _LOGIN_RATE_LIMIT.items() if float(value.get("expires_at", 0)) <= now]
+            for stale_key in stale:
+                _LOGIN_RATE_LIMIT.pop(stale_key, None)
+        entry = _LOGIN_RATE_LIMIT.get(key)
+        if not entry:
+            return False, 0
+        attempts = int(entry.get("attempts", 0))
+        expires_at = float(entry.get("expires_at", 0))
+        if expires_at <= now:
+            _LOGIN_RATE_LIMIT.pop(key, None)
+            return False, 0
+        if attempts < max_attempts:
+            return False, 0
+        retry_after = max(1, int(expires_at - now))
+        return True, retry_after
+
+
+def _record_login_failure(identity: str | None, remote_addr: str | None) -> None:
+    now = time.monotonic()
+    window = int(current_app.config.get("LOGIN_RATE_LIMIT_WINDOW_SECONDS", 300))
+    key = _login_rate_limit_key(identity, remote_addr)
+    with _LOGIN_RATE_LIMIT_LOCK:
+        entry = _LOGIN_RATE_LIMIT.get(key)
+        if not entry or float(entry.get("expires_at", 0)) <= now:
+            _LOGIN_RATE_LIMIT[key] = {"attempts": 1, "expires_at": now + window}
+            return
+        entry["attempts"] = int(entry.get("attempts", 0)) + 1
+        _LOGIN_RATE_LIMIT[key] = entry
+
+
+def _clear_login_failures(identity: str | None, remote_addr: str | None) -> None:
+    key = _login_rate_limit_key(identity, remote_addr)
+    with _LOGIN_RATE_LIMIT_LOCK:
+        _LOGIN_RATE_LIMIT.pop(key, None)
+
+
 @pages_bp.route("/andon")
 def landing_page():
     if is_authenticated():
@@ -119,10 +173,16 @@ def login_page():
     identity = request.form.get("identity")
     password = request.form.get("password")
     next_url = request.form.get("next")
+    is_blocked, retry_after = _is_login_rate_limited(identity, request.remote_addr)
+    if is_blocked:
+        flash(f"Too many login attempts. Please try again in {retry_after} seconds.", "warning")
+        return redirect(url_for("pages.home_page"))
     user = authenticate_user(identity, password)
     if user is None:
+        _record_login_failure(identity, request.remote_addr)
         flash("Invalid username/email or password.", "warning")
         return redirect(url_for("pages.home_page"))
+    _clear_login_failures(identity, request.remote_addr)
     login_user(user)
     memberships = get_user_memberships(user=user, active_only=True)
     if not memberships:

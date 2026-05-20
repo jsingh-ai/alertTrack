@@ -54,21 +54,33 @@ def _detect_gunicorn_worker_count() -> int:
 def _validate_socketio_runtime_config(config: dict) -> None:
     if not config.get("SOCKETIO_ENABLED"):
         return
-    if config.get("SOCKETIO_ALLOW_MULTIWORKER"):
-        return
+
+    allow_multiworker = bool(config.get("SOCKETIO_ALLOW_MULTIWORKER"))
+    message_queue = str(config.get("SOCKETIO_MESSAGE_QUEUE") or "").strip()
+    async_mode = str(config.get("SOCKETIO_ASYNC_MODE") or "").strip().lower()
 
     worker_count = _detect_gunicorn_worker_count()
-    if worker_count <= 1:
-        return
+    if allow_multiworker and worker_count > 1 and not message_queue:
+        raise RuntimeError(
+            "SOCKETIO_ALLOW_MULTIWORKER=true requires SOCKETIO_MESSAGE_QUEUE "
+            "(typically Redis) when running multiple workers."
+        )
 
-    raise RuntimeError(
-        "Socket.IO is configured with multiple Gunicorn workers "
-        f"(detected workers={worker_count}). This app defaults to single-worker "
-        "Socket.IO mode to avoid sid/namespace room-join errors. "
-        "Use one worker (`-w 1`) or explicitly set "
-        "`SOCKETIO_ALLOW_MULTIWORKER=true` only if your deployment is prepared "
-        "for it."
-    )
+    if not allow_multiworker and worker_count > 1:
+        raise RuntimeError(
+            "Socket.IO is configured with multiple Gunicorn workers "
+            f"(detected workers={worker_count}). This app defaults to single-worker "
+            "Socket.IO mode to avoid sid/namespace room-join errors. "
+            "Use one worker (`-w 1`) or explicitly set "
+            "`SOCKETIO_ALLOW_MULTIWORKER=true` only if your deployment is prepared "
+            "for it."
+        )
+
+    if async_mode == "threading" and worker_count > 1 and not allow_multiworker:
+        raise RuntimeError(
+            "SOCKETIO_ASYNC_MODE=threading with multiple workers requires "
+            "SOCKETIO_ALLOW_MULTIWORKER=true and SOCKETIO_MESSAGE_QUEUE."
+        )
 
 
 def _ensure_auth_schema() -> None:
@@ -140,6 +152,54 @@ def _ensure_auth_schema() -> None:
             },
         )
     db.session.commit()
+    _ensure_sqlite_active_alert_unique_index()
+
+
+def _ensure_sqlite_active_alert_unique_index() -> None:
+    if db.engine.dialect.name != "sqlite":
+        return
+
+    inspector = inspect(db.engine)
+    if "andon_alerts" not in inspector.get_table_names():
+        return
+
+    expected_where = "WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')"
+    existing_sql = db.session.execute(
+        text(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'index' AND name = 'uq_andon_alerts_active_machine'"
+        )
+    ).scalar()
+
+    normalized_sql = (existing_sql or "").upper()
+    if expected_where in normalized_sql:
+        return
+
+    duplicate_rows = db.session.execute(
+        text(
+            "SELECT machine_id, COUNT(*) AS row_count "
+            "FROM andon_alerts "
+            "WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED') "
+            "GROUP BY machine_id "
+            "HAVING COUNT(*) > 1"
+        )
+    ).mappings().all()
+    if duplicate_rows:
+        row_preview = ", ".join(f"machine_id={row['machine_id']} count={row['row_count']}" for row in duplicate_rows[:5])
+        raise RuntimeError(
+            "Cannot repair uq_andon_alerts_active_machine because duplicate active alerts exist: "
+            f"{row_preview}"
+        )
+
+    db.session.execute(text("DROP INDEX IF EXISTS uq_andon_alerts_active_machine"))
+    db.session.execute(
+        text(
+            "CREATE UNIQUE INDEX uq_andon_alerts_active_machine "
+            "ON andon_alerts (machine_id) "
+            "WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')"
+        )
+    )
+    db.session.commit()
 
 
 def create_app(config_name: str | None = None) -> Flask:
@@ -157,6 +217,7 @@ def create_app(config_name: str | None = None) -> Flask:
     if config_key == "production":
         validate_production_security_config(app.config)
     _validate_socketio_runtime_config(app.config)
+    os.makedirs(app.instance_path, exist_ok=True)
 
     db.init_app(app)
     if migrate is not None:
@@ -167,6 +228,9 @@ def create_app(config_name: str | None = None) -> Flask:
             async_mode=app.config.get("SOCKETIO_ASYNC_MODE"),
             message_queue=app.config.get("SOCKETIO_MESSAGE_QUEUE"),
             cors_allowed_origins=None,
+            ping_interval=app.config.get("SOCKETIO_PING_INTERVAL"),
+            ping_timeout=app.config.get("SOCKETIO_PING_TIMEOUT"),
+            http_compression=app.config.get("SOCKETIO_HTTP_COMPRESSION"),
         )
         from .socket_events import register_socket_events  # noqa: WPS433
 
@@ -208,6 +272,8 @@ def create_app(config_name: str | None = None) -> Flask:
             "current_user": current_user,
             "current_membership": current_membership,
             "socketio_enabled": socketio is not None and app.config.get("SOCKETIO_ENABLED"),
+            "socketio_async_mode": app.config.get("SOCKETIO_ASYNC_MODE"),
+            "socketio_force_polling": bool(app.config.get("SOCKETIO_FORCE_POLLING")),
             "admin_authenticated": is_admin_authenticated(),
             "user_authenticated": is_authenticated(),
             "csrf_token": generate_csrf_token(),
@@ -217,10 +283,13 @@ def create_app(config_name: str | None = None) -> Flask:
     def load_current_company():
         if has_request_context():
             g.request_started_at = time.perf_counter()
-        # Static assets and Socket.IO handshakes should not pay auth/company lookup cost.
+        # Static assets, Socket.IO handshakes, and logout should not pay
+        # auth/company preload cost.
         if request.path.startswith("/static/") or request.path.startswith("/socket.io/"):
             return
         enforce_csrf()
+        if request.endpoint == "pages.logout_page":
+            return
         if request.path == "/andon/home" and is_authenticated() and session.get(WORKSPACE_PROMPT_SESSION_KEY):
             return
         g.current_company = get_current_company()
@@ -229,6 +298,10 @@ def create_app(config_name: str | None = None) -> Flask:
 
     @app.after_request
     def log_request_timing(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
         if not app.config.get("ANDON_PERF_LOGS"):
             return response
         started_at = getattr(g, "request_started_at", None)
@@ -251,7 +324,8 @@ def create_app(config_name: str | None = None) -> Flask:
     with app.app_context():
         if app.config.get("ANDON_AUTO_SCHEMA_MAINTENANCE"):
             db.create_all()
-        _ensure_auth_schema()
+        if app.config.get("ANDON_RUNTIME_SCHEMA_REPAIR"):
+            _ensure_auth_schema()
         app.logger.debug("Andon app initialized")
 
     return app

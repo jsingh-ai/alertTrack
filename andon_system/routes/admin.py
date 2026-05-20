@@ -70,6 +70,7 @@ def _invalidate_company_caches(company_id):
     invalidate_cache("board_state", company_id)
     invalidate_cache("report_summary", company_id)
     invalidate_cache("report_machine_details", company_id)
+    invalidate_cache("report_machine_stats", company_id)
     invalidate_cache("report_problem_details", company_id)
     emit_admin_metadata_updated(company_id)
 

@@ -4,16 +4,20 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy.orm import joinedload
+from sqlalchemy import and_
+from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..company_context import get_current_company_id
 from ..models.alert import ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_CANCELLED, ALERT_STATUS_OPEN, ALERT_STATUS_RESOLVED, AndonAlert
+from ..models.department import Department
+from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..security import get_scope_filters
 from .cache_service import get_cached, set_cached
 
 REPORT_SUMMARY_CACHE_TTL_SECONDS = 15
 REPORT_DETAILS_CACHE_TTL_SECONDS = 30
+REPORT_MACHINE_STATS_CACHE_TTL_SECONDS = 10
 
 
 def format_local_datetime(value, tz_name="America/Chicago"):
@@ -89,21 +93,167 @@ def build_problem_details(filters: dict):
     return result
 
 
+def build_machine_stats(filters: dict):
+    company_id = get_current_company_id()
+    cache_key = ("report_machine_stats", company_id, _cache_filters(filters))
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    query = _base_alert_query(filters).options(
+        load_only(
+            AndonAlert.id,
+            AndonAlert.machine_id,
+            AndonAlert.department_id,
+            AndonAlert.issue_category_id,
+            AndonAlert.issue_problem_id,
+            AndonAlert.status,
+            AndonAlert.created_at,
+            AndonAlert.acknowledged_seconds,
+            AndonAlert.ack_to_clear_seconds,
+            AndonAlert.resolved_at,
+            AndonAlert.cancelled_at,
+        ),
+        noload("*"),
+    )
+    alerts = query.order_by(AndonAlert.created_at.asc()).all()
+    if not alerts:
+        return []
+
+    dept_ids = {alert.department_id for alert in alerts if alert.department_id is not None}
+    category_ids = {alert.issue_category_id for alert in alerts if alert.issue_category_id is not None}
+    problem_ids = {alert.issue_problem_id for alert in alerts if alert.issue_problem_id is not None}
+
+    department_by_id = {
+        row.id: row.name
+        for row in Department.query.options(load_only(Department.id, Department.name), noload("*"))
+        .filter(Department.id.in_(dept_ids)).all()
+    } if dept_ids else {}
+    category_by_id = {
+        row.id: row.name
+        for row in IssueCategory.query.options(load_only(IssueCategory.id, IssueCategory.name), noload("*"))
+        .filter(IssueCategory.id.in_(category_ids)).all()
+    } if category_ids else {}
+    problem_by_id = {
+        row.id: row.name
+        for row in IssueProblem.query.options(load_only(IssueProblem.id, IssueProblem.name), noload("*"))
+        .filter(IssueProblem.id.in_(problem_ids)).all()
+    } if problem_ids else {}
+
+    grouped = {}
+    for alert in alerts:
+        machine_id = int(alert.machine_id)
+        stats = grouped.get(machine_id)
+        if stats is None:
+            stats = {
+                "machine_id": machine_id,
+                "total_alerts": 0,
+                "ack_sum": 0.0,
+                "ack_count": 0,
+                "fix_sum": 0.0,
+                "fix_count": 0,
+                "latest_closed": None,
+            }
+            grouped[machine_id] = stats
+
+        stats["total_alerts"] += 1
+        ack_value = alert.acknowledged_seconds
+        if isinstance(ack_value, (int, float)) and ack_value >= 0:
+            stats["ack_sum"] += float(ack_value)
+            stats["ack_count"] += 1
+        fix_value = alert.ack_to_clear_seconds
+        if isinstance(fix_value, (int, float)) and fix_value >= 0:
+            stats["fix_sum"] += float(fix_value)
+            stats["fix_count"] += 1
+
+        status = str(alert.status or "").upper()
+        if status in {ALERT_STATUS_RESOLVED, ALERT_STATUS_CANCELLED}:
+            closed_at = alert.resolved_at or alert.cancelled_at or alert.created_at
+            closed_ts = _timestamp(closed_at)
+            current = stats["latest_closed"]
+            current_ts = _timestamp(current["closed_at"]) if current else -1
+            if current is None or closed_ts > current_ts:
+                stats["latest_closed"] = {
+                    "status": status,
+                    "department_id": alert.department_id,
+                    "issue_category_id": alert.issue_category_id,
+                    "issue_problem_id": alert.issue_problem_id,
+                    "department_name": department_by_id.get(alert.department_id),
+                    "issue_category_name": category_by_id.get(alert.issue_category_id),
+                    "issue_problem_name": problem_by_id.get(alert.issue_problem_id),
+                    "created_at": alert.created_at.isoformat() if alert.created_at else None,
+                    "closed_at": closed_at.isoformat() if closed_at else None,
+                }
+
+    result = []
+    for machine_id, stats in grouped.items():
+        result.append(
+            {
+                "machine_id": machine_id,
+                "total_alerts": int(stats["total_alerts"]),
+                "average_acknowledge_seconds": round(stats["ack_sum"] / stats["ack_count"], 2) if stats["ack_count"] else None,
+                "average_fix_seconds": round(stats["fix_sum"] / stats["fix_count"], 2) if stats["fix_count"] else None,
+                "latest_closed": stats["latest_closed"],
+            }
+        )
+
+    set_cached(cache_key, result, REPORT_MACHINE_STATS_CACHE_TTL_SECONDS)
+    return result
+
+
 def _filtered_alerts(filters):
+    query = _base_alert_query(filters).options(
+        load_only(
+            AndonAlert.id,
+            AndonAlert.company_id,
+            AndonAlert.alert_number,
+            AndonAlert.machine_id,
+            AndonAlert.department_id,
+            AndonAlert.issue_category_id,
+            AndonAlert.issue_problem_id,
+            AndonAlert.status,
+            AndonAlert.priority,
+            AndonAlert.responder_name_text,
+            AndonAlert.note,
+            AndonAlert.created_at,
+            AndonAlert.acknowledged_at,
+            AndonAlert.acknowledged_seconds,
+            AndonAlert.arrived_at,
+            AndonAlert.resolved_at,
+            AndonAlert.ack_to_clear_seconds,
+            AndonAlert.cancelled_at,
+            AndonAlert.current_escalation_level,
+            AndonAlert.resolution_note,
+            AndonAlert.root_cause,
+            AndonAlert.corrective_action,
+        ),
+        joinedload(AndonAlert.machine)
+        .load_only(Machine.id, Machine.name, Machine.machine_type, Machine.department_id)
+        .joinedload(Machine.department)
+        .load_only(Department.id, Department.name),
+        joinedload(AndonAlert.department).load_only(Department.id, Department.name),
+        joinedload(AndonAlert.issue_category).load_only(IssueCategory.id, IssueCategory.name),
+        joinedload(AndonAlert.issue_problem).load_only(IssueProblem.id, IssueProblem.name),
+        noload(AndonAlert.company),
+        noload(AndonAlert.operator_user),
+        noload(AndonAlert.responder_user),
+        noload(AndonAlert.events),
+        noload(AndonAlert.escalations),
+    )
+    return query.order_by(AndonAlert.created_at.asc()).all()
+
+
+def _base_alert_query(filters):
     company_id = get_current_company_id()
     scope = get_scope_filters()
-    query = AndonAlert.query.options(
-        joinedload(AndonAlert.machine).joinedload(Machine.department),
-        joinedload(AndonAlert.department),
-        joinedload(AndonAlert.issue_category),
-        joinedload(AndonAlert.issue_problem),
-    )
+    query = AndonAlert.query
+    conditions = []
     if company_id:
-        query = query.filter(AndonAlert.company_id == company_id)
+        conditions.append(AndonAlert.company_id == company_id)
     if scope["department_id"] is not None:
-        query = query.filter(AndonAlert.department_id == scope["department_id"])
+        conditions.append(AndonAlert.department_id == scope["department_id"])
     if scope["machine_group_name"]:
-        query = query.filter(AndonAlert.machine.has(Machine.machine_type == scope["machine_group_name"]))
+        conditions.append(AndonAlert.machine.has(Machine.machine_type == scope["machine_group_name"]))
 
     start = _parse_dt(filters.get("start"))
     end = _parse_dt(filters.get("end"))
@@ -111,24 +261,26 @@ def _filtered_alerts(filters):
     machine_id = filters.get("machine_id")
     category_id = filters.get("issue_category_id")
     problem_id = filters.get("issue_problem_id")
+    machine_group = filters.get("machine_group")
 
     if start:
-        query = query.filter(AndonAlert.created_at >= start)
+        conditions.append(AndonAlert.created_at >= start)
     if end:
-        query = query.filter(AndonAlert.created_at < end)
+        conditions.append(AndonAlert.created_at < end)
     if department_id:
-        query = query.filter(AndonAlert.department_id == department_id)
+        conditions.append(AndonAlert.department_id == department_id)
     if machine_id:
-        query = query.filter(AndonAlert.machine_id == machine_id)
-    machine_group = filters.get("machine_group")
+        conditions.append(AndonAlert.machine_id == machine_id)
     if machine_group:
-        query = query.filter(AndonAlert.machine.has(Machine.machine_type == machine_group))
+        conditions.append(AndonAlert.machine.has(Machine.machine_type == machine_group))
     if category_id:
-        query = query.filter(AndonAlert.issue_category_id == category_id)
+        conditions.append(AndonAlert.issue_category_id == category_id)
     if problem_id:
-        query = query.filter(AndonAlert.issue_problem_id == problem_id)
+        conditions.append(AndonAlert.issue_problem_id == problem_id)
 
-    return query.order_by(AndonAlert.created_at.asc()).all()
+    if conditions:
+        query = query.filter(and_(*conditions))
+    return query
 
 
 def _parse_dt(value):
@@ -143,6 +295,19 @@ def _parse_dt(value):
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _timestamp(value) -> float:
+    if not value:
+        return -1
+    if isinstance(value, str):
+        parsed = _parse_dt(value)
+        if not parsed:
+            return -1
+        return parsed.timestamp()
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
 
 
 def _cache_filters(filters):

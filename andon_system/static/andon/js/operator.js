@@ -60,6 +60,9 @@ let operatorRefreshQueued = false;
 let operatorInteractionLockUntil = 0;
 let liveTimerNodes = [];
 let operatorMetadataLoadPromise = null;
+let operatorLastPersistedViewKey = "";
+let createAlertInFlight = false;
+let createAlertMachineId = null;
 
 function markOperatorInteractionActive(durationMs = 1800) {
   operatorInteractionLockUntil = Date.now() + durationMs;
@@ -110,13 +113,10 @@ function handleVisibilityChange() {
 }
 
 async function boot() {
-  await restoreViewState();
-  await loadBoardState();
-  try {
-    await loadOperatorMetadata();
-  } catch (_error) {
+  const metadataLoad = loadOperatorMetadata().catch((_error) => {
     console.warn("Failed to preload operator metadata.");
-  }
+  });
+  await Promise.all([restoreViewState(), loadBoardState(), metadataLoad]);
   normalizeViewState();
   wireEvents();
   renderViewControls();
@@ -125,7 +125,7 @@ async function boot() {
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.AndonRefreshBus?.onRefresh(scheduleOperatorRefresh);
   window.AndonRealtime?.onEvent((event) => {
-    if (["board_refresh", "alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
+    if (["alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
       if (event.type === "admin_metadata_updated") {
         state.metadataLoaded = false;
         operatorMetadataLoadPromise = null;
@@ -465,10 +465,16 @@ function renderIssueSummary(categoryName, problemName) {
 }
 
 async function createAlertFromModal() {
+  if (createAlertInFlight) {
+    return;
+  }
   if (!state.selectedMachine || !state.selectedDepartment || !state.selectedProblem) {
     alert("Select a department and problem.");
     return;
   }
+  createAlertInFlight = true;
+  createAlertMachineId = Number(state.selectedMachine.id);
+  renderBoard();
   const payload = {
     machine_id: state.selectedMachine.id,
     department_id: state.selectedDepartment.id,
@@ -476,34 +482,42 @@ async function createAlertFromModal() {
     operator_name_text: null,
     note: state.createNoteDraft.trim() || null,
   };
-  const response = await fetch("/api/andon/alerts", {
-    method: "POST",
-    headers: csrfHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(payload),
-    credentials: "same-origin",
-  });
-  const data = await response.json();
-  if (response.status === 409 && data?.error?.existing_alert) {
-    const targetMachine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine.id)) || state.selectedMachine;
-    const activeAlert = normalizeActiveAlert(data.error.existing_alert, targetMachine);
-    if (targetMachine) {
-      targetMachine.active_alert = activeAlert;
+  try {
+    const response = await fetch("/api/andon/alerts", {
+      method: "POST",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+      credentials: "same-origin",
+    });
+    const data = await response.json();
+    if (response.status === 409 && data?.error?.existing_alert) {
+      const targetMachine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine.id)) || state.selectedMachine;
+      const activeAlert = normalizeActiveAlert(data.error.existing_alert, targetMachine);
+      if (targetMachine) {
+        targetMachine.active_alert = activeAlert;
+      }
+      await openActiveAlertModal(activeAlert, targetMachine);
+      window.AndonRefreshBus?.notify();
+      return;
     }
-    await openActiveAlertModal(activeAlert, targetMachine);
+    if (!data.success) {
+      alert(data.error?.message || "Unable to create alert.");
+      return;
+    }
+    const createdAlert = normalizeActiveAlert(data.data, state.selectedMachine);
+    const machine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine.id));
+    if (machine) {
+      machine.active_alert = createdAlert;
+    }
+    closeMachinePanel();
     window.AndonRefreshBus?.notify();
-    return;
+  } catch (_error) {
+    alert("Unable to create alert. Please try again.");
+  } finally {
+    createAlertInFlight = false;
+    createAlertMachineId = null;
+    renderBoard();
   }
-  if (!data.success) {
-    alert(data.error.message);
-    return;
-  }
-  const createdAlert = normalizeActiveAlert(data.data, state.selectedMachine);
-  const machine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine.id));
-  if (machine) {
-    machine.active_alert = createdAlert;
-  }
-  closeMachinePanel();
-  window.AndonRefreshBus?.notify();
 }
 
 async function actOnActiveAlert() {
@@ -918,7 +932,8 @@ function renderCreateInlinePanel(machine, detailed) {
     ? (state.issueGroups.find((entry) => Number(entry.department_id) === Number(preferredDepartment.id))?.problems || [])
     : [];
   const showFollowup = Boolean(preferredDepartment);
-  const canSubmit = Boolean(machine && state.selectedDepartment && state.selectedProblem);
+  const isSubmitting = createAlertInFlight && Number(createAlertMachineId) === Number(machine?.id);
+  const canSubmit = Boolean(machine && state.selectedDepartment && state.selectedProblem) && !isSubmitting;
   const healthyTime = formatCurrentTime();
   return `
     <div class="machine-tile__inline-panel--create machine-modal--create machine-modal__create-stack ${detailed ? "machine-tile__inline-panel--detailed" : ""}" data-followup="${showFollowup ? "true" : "false"}">
@@ -967,7 +982,7 @@ function renderCreateInlinePanel(machine, detailed) {
           <textarea class="form-control machine-tile__note-input" data-note-kind="create" rows="3" placeholder="Add context for the responder">${escapeHtml(state.createNoteDraft)}</textarea>
         </div>
         <div class="modal-footer machine-modal__footer machine-tile__inline-actions">
-          <button class="btn btn-danger btn-lg machine-modal__footer-btn" type="button" data-inline-action="send-message" ${canSubmit ? "" : "disabled"}>Call</button>
+          <button class="btn btn-danger btn-lg machine-modal__footer-btn" type="button" data-inline-action="send-message" ${canSubmit ? "" : "disabled"}>${isSubmitting ? "Calling..." : "Call"}</button>
         </div>
       </div>
     </div>`;
@@ -1364,6 +1379,7 @@ async function restoreViewState() {
       state.view.machineGroup = typeof remote.machineGroup === "string" ? remote.machineGroup : "";
       state.view.machineId = typeof remote.machineId === "string" || typeof remote.machineId === "number" ? String(remote.machineId) : "";
       state.view.locked = Boolean(remote.locked);
+      operatorLastPersistedViewKey = getOperatorViewStateKey(state.view);
       return;
     }
   } catch (_error) {
@@ -1375,25 +1391,41 @@ async function restoreViewState() {
       state.view.machineGroup = defaultOperatorMachineGroup;
       state.view.machineId = "";
       state.view.locked = true;
+      operatorLastPersistedViewKey = "";
       return;
     }
     const parsed = JSON.parse(raw);
     state.view.machineGroup = typeof parsed.machineGroup === "string" ? parsed.machineGroup : "";
     state.view.machineId = typeof parsed.machineId === "string" || typeof parsed.machineId === "number" ? String(parsed.machineId) : "";
     state.view.locked = Boolean(parsed.locked);
+    operatorLastPersistedViewKey = getOperatorViewStateKey(state.view);
   } catch (_error) {
     state.view.machineGroup = defaultOperatorMachineGroup;
     state.view.machineId = "";
     state.view.locked = true;
+    operatorLastPersistedViewKey = "";
   }
 }
 
+function getOperatorViewStateKey(view) {
+  return JSON.stringify({
+    machineGroup: view?.machineGroup || "",
+    machineId: view?.machineId || "",
+    locked: Boolean(view?.locked),
+  });
+}
+
 function persistOperatorViewState() {
+  const nextKey = getOperatorViewStateKey(state.view);
+  if (nextKey === operatorLastPersistedViewKey) {
+    return;
+  }
   try {
     window.localStorage.setItem(operatorViewStorageKey, JSON.stringify(state.view));
   } catch (_error) {
     // localStorage can be unavailable in locked-down kiosk browsers.
   }
+  operatorLastPersistedViewKey = nextKey;
   window.AndonPreferences?.save?.("operator", state.view);
 }
 

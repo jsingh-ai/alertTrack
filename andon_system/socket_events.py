@@ -5,7 +5,7 @@ import time
 from flask import current_app, request
 from flask_socketio import disconnect, emit, join_room, leave_room
 
-from .security import get_authorized_company_id
+from .security import get_authorized_company_id, is_authenticated
 from .services.realtime_service import BOARD_ROOM, OPERATOR_ROOM, REPORTS_ROOM, room_name
 
 VALID_ROOMS = {BOARD_ROOM, OPERATOR_ROOM, REPORTS_ROOM}
@@ -18,6 +18,9 @@ def register_socket_events(socketio):
 
     @socketio.on("connect")
     def on_connect():
+        if not is_authenticated():
+            disconnect()
+            return
         current_app.logger.debug(
             "Socket.IO client connected sid=%s ip=%s namespace=%s",
             getattr(request, "sid", None),
@@ -38,6 +41,9 @@ def register_socket_events(socketio):
     @socketio.on("join_company_room")
     def on_join_company_room(payload=None):
         started_at = time.perf_counter()
+        if not is_authenticated():
+            disconnect()
+            return
         data = payload or {}
         room_type = data.get("room") or BOARD_ROOM
         if room_type not in VALID_ROOMS:

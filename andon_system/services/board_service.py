@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..company_context import get_current_company_id
 from ..models.alert import ALERT_STATUSES_ACTIVE, EVENT_CREATED, AndonAlert, AndonAlertEvent
 from ..models.department import Department
-from ..models.issue import IssueCategory
+from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
-from ..models.user import UserCompanyAccess
+from ..models.user import User, UserCompanyAccess
 from ..security import get_scope_filters
 from .cache_service import get_cached, set_cached
 from .radius_service import build_radius_status_map
@@ -169,14 +169,74 @@ def build_operator_metadata():
 
 def _load_board_context(company_id, include_alerts: bool, include_metadata: bool = True):
     scope = get_scope_filters()
-    machine_query = Machine.query.options(joinedload(Machine.department))
-    department_query = Department.query if include_metadata else None
-    issue_query = IssueCategory.query.options(joinedload(IssueCategory.department), joinedload(IssueCategory.problems)) if include_metadata else None
+    machine_query = Machine.query.options(
+        load_only(
+            Machine.id,
+            Machine.company_id,
+            Machine.machine_code,
+            Machine.name,
+            Machine.machine_type,
+            Machine.radius_machine_id,
+            Machine.area,
+            Machine.line,
+            Machine.department_id,
+            Machine.is_active,
+        ),
+        joinedload(Machine.department).load_only(Department.id, Department.name, Department.is_active),
+        noload(Machine.alerts),
+    )
+    department_query = (
+        Department.query.options(
+            load_only(Department.id, Department.company_id, Department.name, Department.is_active),
+            noload("*"),
+        )
+        if include_metadata
+        else None
+    )
+    issue_query = (
+        IssueCategory.query.options(
+            load_only(
+                IssueCategory.id,
+                IssueCategory.company_id,
+                IssueCategory.name,
+                IssueCategory.department_id,
+                IssueCategory.color,
+                IssueCategory.priority_default,
+                IssueCategory.is_active,
+            ),
+            joinedload(IssueCategory.department).load_only(Department.id, Department.name, Department.is_active),
+            joinedload(IssueCategory.problems).load_only(
+                IssueProblem.id,
+                IssueProblem.name,
+                IssueProblem.description,
+                IssueProblem.is_active,
+            ),
+            noload(IssueCategory.alerts),
+        )
+        if include_metadata
+        else None
+    )
     user_query = (
         UserCompanyAccess.query.options(
-            joinedload(UserCompanyAccess.user),
-            joinedload(UserCompanyAccess.department),
-            joinedload(UserCompanyAccess.machine_group),
+            load_only(
+                UserCompanyAccess.id,
+                UserCompanyAccess.company_id,
+                UserCompanyAccess.user_id,
+                UserCompanyAccess.department_id,
+                UserCompanyAccess.machine_group_id,
+                UserCompanyAccess.is_active,
+            ),
+            joinedload(UserCompanyAccess.user).load_only(
+                User.id,
+                User.display_name,
+                User.employee_id,
+                User.department_id,
+                User.machine_group_id,
+                User.is_active,
+            ),
+            joinedload(UserCompanyAccess.department).load_only(Department.id, Department.name, Department.is_active),
+            joinedload(UserCompanyAccess.machine_group).load_only(MachineGroup.id, MachineGroup.name, MachineGroup.is_active),
+            noload(UserCompanyAccess.company),
         )
         if include_metadata
         else None
@@ -231,8 +291,31 @@ def _load_board_context(company_id, include_alerts: bool, include_metadata: bool
     if include_alerts:
         active_alerts = (
             alert_query.options(
-                joinedload(AndonAlert.issue_category),
-                joinedload(AndonAlert.issue_problem),
+                load_only(
+                    AndonAlert.id,
+                    AndonAlert.company_id,
+                    AndonAlert.machine_id,
+                    AndonAlert.department_id,
+                    AndonAlert.issue_category_id,
+                    AndonAlert.issue_problem_id,
+                    AndonAlert.status,
+                    AndonAlert.priority,
+                    AndonAlert.responder_user_id,
+                    AndonAlert.responder_name_text,
+                    AndonAlert.note,
+                    AndonAlert.created_at,
+                    AndonAlert.acknowledged_at,
+                    AndonAlert.acknowledged_seconds,
+                    AndonAlert.ack_to_clear_seconds,
+                ),
+                joinedload(AndonAlert.department).load_only(Department.id, Department.name),
+                joinedload(AndonAlert.issue_category).load_only(IssueCategory.id, IssueCategory.name, IssueCategory.color),
+                joinedload(AndonAlert.issue_problem).load_only(IssueProblem.id, IssueProblem.name),
+                noload(AndonAlert.machine),
+                noload(AndonAlert.operator_user),
+                noload(AndonAlert.responder_user),
+                noload(AndonAlert.events),
+                noload(AndonAlert.escalations),
             )
             .order_by(AndonAlert.created_at.desc())
             .all()
@@ -340,7 +423,7 @@ def _created_notes_by_alert_id(alerts, company_id):
     if company_id:
         query = query.filter(AndonAlertEvent.company_id == company_id)
     created_notes = {}
-    for event in query.order_by(AndonAlertEvent.event_at.asc()).all():
+    for event in query.options(noload("*")).order_by(AndonAlertEvent.event_at.asc()).all():
         metadata = event.metadata_json or {}
         note = str(metadata.get("note") or "").strip()
         if note and event.alert_id not in created_notes:

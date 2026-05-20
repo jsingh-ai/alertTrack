@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from flask import Blueprint, abort, jsonify, request
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..company_context import get_current_company_id
 from ..models.alert import (
@@ -17,7 +17,7 @@ from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
-from ..models.user import UserBoard, UserBoardItem, UserCompanyAccess
+from ..models.user import User, UserBoard, UserBoardItem, UserCompanyAccess
 from ..security import (
     PAGE_BOARD,
     PAGE_MANAGEMENT,
@@ -49,6 +49,7 @@ from ..services.reporting_service import (
     build_by_problem,
     build_calls_per_hour,
     build_machine_details,
+    build_machine_stats,
     build_report_summary,
     build_problem_details,
 )
@@ -75,7 +76,10 @@ def machines():
     _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     company_id = get_current_company_id()
     scope = get_scope_filters()
-    query = Machine.query.filter_by(is_active=True)
+    query = Machine.query.options(
+        joinedload(Machine.department).load_only(Department.id, Department.name),
+        noload(Machine.alerts),
+    ).filter_by(is_active=True)
     if company_id:
         query = query.filter(Machine.company_id == company_id)
     if scope["department_id"] is not None:
@@ -90,7 +94,7 @@ def departments():
     _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     company_id = get_current_company_id()
     scope = get_scope_filters()
-    query = Department.query.filter_by(is_active=True)
+    query = Department.query.options(noload("*")).filter_by(is_active=True)
     if company_id:
         query = query.filter(Department.company_id == company_id)
     if scope["department_id"] is not None:
@@ -103,7 +107,11 @@ def issue_categories():
     _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     company_id = get_current_company_id()
     scope = get_scope_filters()
-    query = IssueCategory.query.filter_by(is_active=True)
+    query = IssueCategory.query.options(
+        joinedload(IssueCategory.department).load_only(Department.id, Department.name),
+        noload(IssueCategory.problems),
+        noload(IssueCategory.alerts),
+    ).filter_by(is_active=True)
     if company_id:
         query = query.filter(IssueCategory.company_id == company_id)
     if scope["department_id"] is not None:
@@ -115,7 +123,13 @@ def issue_categories():
 def issue_problems():
     _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     category_id = request.args.get("category_id", type=int)
-    query = IssueProblem.query.filter_by(is_active=True)
+    query = IssueProblem.query.options(
+        joinedload(IssueProblem.category)
+        .load_only(IssueCategory.id, IssueCategory.name, IssueCategory.department_id)
+        .joinedload(IssueCategory.department)
+        .load_only(Department.id, Department.name),
+        noload(IssueProblem.alerts),
+    ).filter_by(is_active=True)
     company_id = get_current_company_id()
     scope = get_scope_filters()
     if company_id:
@@ -133,7 +147,38 @@ def users():
     _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     company_id = get_current_company_id()
     scope = get_scope_filters()
-    query = UserCompanyAccess.query.filter_by(is_active=True)
+    query = UserCompanyAccess.query.options(
+        load_only(
+            UserCompanyAccess.id,
+            UserCompanyAccess.user_id,
+            UserCompanyAccess.company_id,
+            UserCompanyAccess.role,
+            UserCompanyAccess.scope_mode,
+            UserCompanyAccess.department_id,
+            UserCompanyAccess.machine_group_id,
+            UserCompanyAccess.is_active,
+            UserCompanyAccess.created_at,
+            UserCompanyAccess.updated_at,
+        ),
+        joinedload(UserCompanyAccess.user).load_only(
+            User.id,
+            User.company_id,
+            User.employee_id,
+            User.display_name,
+            User.username,
+            User.role,
+            User.email,
+            User.phone_number,
+            User.department_id,
+            User.machine_group_id,
+            User.is_active,
+            User.last_login_at,
+            User.created_at,
+        ),
+        joinedload(UserCompanyAccess.department).load_only(Department.id, Department.name, Department.is_active),
+        joinedload(UserCompanyAccess.machine_group).load_only(MachineGroup.id, MachineGroup.name, MachineGroup.is_active),
+        noload(UserCompanyAccess.company),
+    ).filter_by(is_active=True)
     if company_id:
         query = query.filter(UserCompanyAccess.company_id == company_id)
     if scope["department_id"] is not None:
@@ -143,9 +188,19 @@ def users():
     data = []
     for access in query.order_by(UserCompanyAccess.id.asc()).all():
         if access.user and access.user.is_active:
-            payload = access.user.to_dict()
-            payload.update(access.to_dict())
-            data.append(payload)
+            data.append(
+                {
+                    "id": access.user.id,
+                    "display_name": access.user.display_name,
+                    "work_id": access.user.employee_id,
+                    "department_id": access.department_id or access.user.department_id,
+                    "department_name": access.department.name if access.department else None,
+                    "machine_group_id": access.machine_group_id or access.user.machine_group_id,
+                    "machine_group_name": access.machine_group.name if access.machine_group else None,
+                    "role": access.role,
+                    "scope_mode": access.scope_mode,
+                }
+            )
     return jsonify({"success": True, "data": data})
 
 
@@ -187,6 +242,7 @@ def api_toggle_machine_from_alert(alert_id):
     invalidate_cache("board_state", alert.company_id)
     invalidate_cache("report_summary", alert.company_id)
     invalidate_cache("report_machine_details", alert.company_id)
+    invalidate_cache("report_machine_stats", alert.company_id)
     invalidate_cache("report_problem_details", alert.company_id)
     emit_machine_updated(alert.company_id, machine_id=alert.machine.id, action="toggle_from_alert")
     return jsonify({"success": True, "data": {"machine_id": alert.machine.id, "is_active": alert.machine.is_active}})
@@ -270,6 +326,12 @@ def api_report_summary():
 def api_report_machine_details():
     _require_any_page_access(PAGE_REPORTS, PAGE_MANAGEMENT)
     return jsonify({"success": True, "data": build_machine_details(_filters())})
+
+
+@api_bp.get("/reports/machine-stats")
+def api_report_machine_stats():
+    _require_any_page_access(PAGE_REPORTS, PAGE_MANAGEMENT)
+    return jsonify({"success": True, "data": build_machine_stats(_filters())})
 
 
 @api_bp.get("/reports/problem-details")
@@ -367,7 +429,11 @@ def api_list_boards():
     user = get_authenticated_user()
     company_id = get_current_company_id()
     boards = (
-        UserBoard.query.options(joinedload(UserBoard.items))
+        UserBoard.query.options(
+            joinedload(UserBoard.items).noload(UserBoardItem.board),
+            noload(UserBoard.user),
+            noload(UserBoard.company),
+        )
         .filter_by(user_id=user.id, company_id=company_id)
         .order_by(UserBoard.last_opened_at.desc().nullslast(), UserBoard.updated_at.desc())
         .all()
@@ -569,7 +635,14 @@ def _get_user_board(board_id: int) -> UserBoard:
     user = get_authenticated_user()
     company_id = get_current_company_id()
     board = (
-        UserBoard.query.options(joinedload(UserBoard.items).joinedload(UserBoardItem.machine))
+        UserBoard.query.options(
+            joinedload(UserBoard.items)
+            .load_only(UserBoardItem.id, UserBoardItem.board_id, UserBoardItem.machine_id, UserBoardItem.position, UserBoardItem.created_at)
+            .joinedload(UserBoardItem.machine)
+            .load_only(Machine.id, Machine.name, Machine.machine_type),
+            noload(UserBoard.user),
+            noload(UserBoard.company),
+        )
         .filter_by(id=board_id, user_id=user.id, company_id=company_id)
         .one_or_none()
     )
@@ -581,7 +654,7 @@ def _get_user_board(board_id: int) -> UserBoard:
 def _get_scoped_machine(machine_id: int | str):
     company_id = get_current_company_id()
     scope = get_scope_filters()
-    query = Machine.query.filter_by(id=int(machine_id), company_id=company_id)
+    query = Machine.query.options(noload("*")).filter_by(id=int(machine_id), company_id=company_id)
     if scope["department_id"] is not None:
         query = query.filter(Machine.department_id == scope["department_id"])
     if scope["machine_group_name"]:
@@ -592,7 +665,7 @@ def _get_scoped_machine(machine_id: int | str):
 def _resolve_bulk_machine_ids(source_type: str, source_value: str) -> list[int]:
     company_id = get_current_company_id()
     scope = get_scope_filters()
-    query = Machine.query.filter(Machine.company_id == company_id)
+    query = Machine.query.options(load_only(Machine.id, Machine.name, Machine.machine_type, Machine.department_id), noload("*")).filter(Machine.company_id == company_id)
     if scope["department_id"] is not None:
         query = query.filter(Machine.department_id == scope["department_id"])
     if scope["machine_group_name"]:

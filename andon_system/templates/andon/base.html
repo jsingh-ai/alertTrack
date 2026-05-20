@@ -281,23 +281,87 @@
       };
 
       window.AndonPreferences = {
+        _stateByPage: new Map(),
+        _stableSerialize(value) {
+          function normalize(input) {
+            if (Array.isArray(input)) {
+              return input.map(normalize);
+            }
+            if (input && typeof input === "object") {
+              return Object.keys(input)
+                .sort()
+                .reduce((acc, key) => {
+                  acc[key] = normalize(input[key]);
+                  return acc;
+                }, {});
+            }
+            return input;
+          }
+          return JSON.stringify(normalize(value || {}));
+        },
         async load(pageKey) {
           const response = await fetch(`/api/andon/preferences/${encodeURIComponent(pageKey)}`, {
             credentials: "same-origin",
           });
           const data = await response.json().catch(() => ({}));
-          return data.data || {};
+          const payload = data.data || {};
+          const serialized = this._stableSerialize(payload);
+          const state = this._stateByPage.get(pageKey) || {};
+          state.lastSavedSerialized = serialized;
+          state.pendingSerialized = null;
+          state.pendingPayload = null;
+          if (state.timerId) {
+            clearTimeout(state.timerId);
+            state.timerId = null;
+          }
+          this._stateByPage.set(pageKey, state);
+          return payload;
         },
         async save(pageKey, payload) {
-          await fetch(`/api/andon/preferences/${encodeURIComponent(pageKey)}`, {
-            method: "POST",
-            headers: window.AndonSecurity.withCsrfHeaders({
-              "Content-Type": "application/json",
-              "Accept": "application/json",
-            }),
-            credentials: "same-origin",
-            body: JSON.stringify(payload || {}),
-          });
+          const nextPayload = payload || {};
+          const nextSerialized = this._stableSerialize(nextPayload);
+          const state = this._stateByPage.get(pageKey) || {};
+          if (state.lastSavedSerialized === nextSerialized || state.pendingSerialized === nextSerialized) {
+            return;
+          }
+
+          state.pendingPayload = nextPayload;
+          state.pendingSerialized = nextSerialized;
+          if (state.timerId) {
+            clearTimeout(state.timerId);
+          }
+          state.timerId = window.setTimeout(async () => {
+            const latest = this._stateByPage.get(pageKey);
+            if (!latest || !latest.pendingPayload) return;
+            const body = latest.pendingPayload;
+            const bodySerialized = latest.pendingSerialized;
+            latest.pendingPayload = null;
+            latest.pendingSerialized = null;
+            latest.timerId = null;
+            this._stateByPage.set(pageKey, latest);
+            if (latest.lastSavedSerialized === bodySerialized) {
+              return;
+            }
+            try {
+              const response = await fetch(`/api/andon/preferences/${encodeURIComponent(pageKey)}`, {
+                method: "POST",
+                headers: window.AndonSecurity.withCsrfHeaders({
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+                }),
+                credentials: "same-origin",
+                body: JSON.stringify(body),
+              });
+              if (response.ok) {
+                const updated = this._stateByPage.get(pageKey) || {};
+                updated.lastSavedSerialized = bodySerialized;
+                this._stateByPage.set(pageKey, updated);
+              }
+            } catch (_error) {
+              // Keep UI responsive when preferences endpoint is temporarily unavailable.
+            }
+          }, 180);
+          this._stateByPage.set(pageKey, state);
         },
       };
 
@@ -310,10 +374,19 @@
       }, true);
     })();
   </script>
-  {% set realtime_room = "reports" if request.endpoint == "pages.reports_page" else ("board" if request.endpoint == "pages.board_page" else "operator") %}
+  {% set realtime_room = none %}
+  {% if request.endpoint == "pages.reports_page" %}
+    {% set realtime_room = "reports" %}
+  {% elif request.endpoint == "pages.board_page" or request.endpoint == "pages.management_page" %}
+    {% set realtime_room = "board" %}
+  {% elif request.endpoint == "pages.operator_page" %}
+    {% set realtime_room = "operator" %}
+  {% endif %}
   <script>
     window.AndonRealtimeConfig = {
-      enabled: {{ socketio_enabled|tojson }},
+      enabled: {{ (socketio_enabled and realtime_room is not none)|tojson }},
+      asyncMode: {{ socketio_async_mode|tojson }},
+      forcePolling: {{ socketio_force_polling|tojson }},
       companyId: {{ (current_company.id if current_company else none)|tojson }},
       room: {{ realtime_room|tojson }},
     };

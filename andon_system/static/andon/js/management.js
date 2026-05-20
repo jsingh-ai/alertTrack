@@ -1,5 +1,6 @@
 const boardStateUrl = "/api/andon/board-state?compact=1";
 const reportDetailsUrl = "/api/andon/reports/machine-details";
+const reportMachineStatsUrl = "/api/andon/reports/machine-stats";
 const managementDefaults = window.AndonManagementDefaults || {};
 
 const managementFiltersBtn = document.getElementById("managementFiltersBtn");
@@ -32,6 +33,13 @@ const state = {
 let elapsedTimerIntervalId = null;
 let activeDetailMachine = null;
 let detailRequestId = 0;
+let managementRefreshTimeoutId = null;
+let managementRefreshInFlight = false;
+let managementRefreshQueued = false;
+let managementRefreshQueuedIncludeShiftStats = false;
+let managementLastShiftStatsRefreshAt = 0;
+const MANAGEMENT_SHIFT_STATS_MIN_REFRESH_MS = 8000;
+let managementDetailRefreshTimeoutId = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -74,7 +82,7 @@ function getHealth(machine) {
   if (!machine?.is_active) return { label: "Offline", className: "status-off" };
   const alertStatus = String(machine?.active_alert?.status || "").toUpperCase();
   if (alertStatus === "OPEN") return { label: "Alert Open", className: "status-open" };
-  if (alertStatus === "ACKNOWLEDGED" || alertStatus === "ARRIVED") return { label: "Being Worked", className: "status-acknowledged" };
+  if (alertStatus === "ACKNOWLEDGED" || alertStatus === "ARRIVED") return { label: "Acknowledged - Working on It", className: "status-acknowledged" };
   return { label: "machine running healthy", className: "status-healthy" };
 }
 
@@ -113,6 +121,7 @@ function getMachineStats(machineId) {
 function renderMachineCard(machine) {
   const health = getHealth(machine);
   const active = machine.active_alert;
+  const activeStatus = String(active?.status || "").toUpperCase();
   const stats = getMachineStats(machine.id);
   const lastClosed = stats.latestClosed;
   const issue = active ? String(active.problem_name || active.category_name || "Unassigned").trim() : "";
@@ -121,6 +130,9 @@ function renderMachineCard(machine) {
     ? [lastClosed.department_name, lastClosed.issue_problem_name || lastClosed.issue_category_name].filter(Boolean).join(" - ") || "Unassigned"
     : "No recent issue";
   const elapsedBase = Number(active?.elapsed_seconds || 0);
+  const isWorkingAlert = activeStatus === "ACKNOWLEDGED" || activeStatus === "ARRIVED";
+  const issueStateClass = isWorkingAlert ? "management-machine-card__state--issue-working" : "management-machine-card__state--issue-open";
+  const timerStateClass = isWorkingAlert ? "management-machine-card__state--timer-working" : "management-machine-card__state--timer-open";
 
   return `
     <article class="management-machine-card management-machine-card--clickable board-live-tile" data-machine-id="${machine.id}" role="button" tabindex="0">
@@ -145,7 +157,7 @@ function renderMachineCard(machine) {
         <div class="management-machine-card__body">
           ${active ? `
             <div class="management-machine-card__state-row management-machine-card__state-row--two">
-              <div class="management-machine-card__state management-machine-card__state--issue-open">
+              <div class="management-machine-card__state ${issueStateClass}">
                 <div class="management-machine-card__state-label">Issue</div>
                 <div class="management-machine-card__state-value">${escapeHtml(issue)}</div>
               </div>
@@ -154,7 +166,7 @@ function renderMachineCard(machine) {
                 <div class="management-machine-card__state-value">${escapeHtml(responder || "No Responder Assigned")}</div>
               </div>
             </div>
-            <div class="management-machine-card__state management-machine-card__state--timer-open management-machine-card__state--elapsed-full">
+            <div class="management-machine-card__state ${timerStateClass} management-machine-card__state--elapsed-full">
               <div class="management-machine-card__state-label">Elapsed</div>
               <div class="management-machine-card__state-value management-machine-card__state-value--elapsed" data-live-elapsed="1" data-base-seconds="${elapsedBase}">${formatElapsedDuration(elapsedBase)}</div>
             </div>
@@ -297,58 +309,105 @@ function renderGroupFilter() {
 }
 
 async function boot() {
-  const boardState = await fetchJson(boardStateUrl);
-  state.machines = boardState.machines || [];
-  state.loadedAt = Date.now();
-  await loadShiftStats();
-  const groups = getMachineGroups(state.machines);
-  state.selectedGroup = pickDefaultGroup(groups);
-  renderGroupFilter();
-  if (managementGroupFilter.value !== state.selectedGroup) {
-    managementGroupFilter.value = state.selectedGroup;
+  await refreshManagementState({ initializeDefaultGroup: true, includeShiftStats: true });
+}
+
+async function refreshManagementState(options = {}) {
+  const includeShiftStats = options.includeShiftStats !== false;
+  if (managementRefreshInFlight) {
+    if (includeShiftStats) {
+      managementRefreshQueuedIncludeShiftStats = true;
+    }
+    managementRefreshQueued = true;
+    return;
   }
-  render();
+  managementRefreshInFlight = true;
+  try {
+    const initializeDefaultGroup = Boolean(options.initializeDefaultGroup);
+    const shouldLoadShiftStats = (includeShiftStats || !state.shiftStatsLoaded)
+      && (!state.shiftStatsLoaded || (Date.now() - managementLastShiftStatsRefreshAt) >= MANAGEMENT_SHIFT_STATS_MIN_REFRESH_MS);
+    const boardStatePromise = fetchJson(boardStateUrl);
+    const shiftStatsPromise = shouldLoadShiftStats
+      ? loadShiftStats()
+      : Promise.resolve();
+    const boardState = await boardStatePromise;
+    state.machines = boardState.machines || [];
+    state.loadedAt = Date.now();
+    await shiftStatsPromise;
+
+    const groups = getMachineGroups(state.machines);
+    if (initializeDefaultGroup) {
+      state.selectedGroup = pickDefaultGroup(groups);
+    } else if (state.selectedGroup !== "all" && !groups.includes(state.selectedGroup)) {
+      state.selectedGroup = "all";
+    }
+
+    renderGroupFilter();
+    if (managementGroupFilter.value !== state.selectedGroup) {
+      managementGroupFilter.value = state.selectedGroup;
+    }
+    render();
+  } finally {
+    managementRefreshInFlight = false;
+    if (managementRefreshQueued) {
+      const queuedIncludeShiftStats = managementRefreshQueuedIncludeShiftStats;
+      managementRefreshQueued = false;
+      managementRefreshQueuedIncludeShiftStats = false;
+      scheduleManagementRefresh({ includeShiftStats: queuedIncludeShiftStats });
+    }
+  }
+}
+
+function scheduleManagementRefresh(options = {}) {
+  const includeShiftStats = options.includeShiftStats !== false;
+  if (includeShiftStats) {
+    managementRefreshQueuedIncludeShiftStats = true;
+  }
+  if (managementRefreshTimeoutId) {
+    clearTimeout(managementRefreshTimeoutId);
+  }
+  managementRefreshTimeoutId = setTimeout(() => {
+    managementRefreshTimeoutId = null;
+    const runIncludeShiftStats = managementRefreshQueuedIncludeShiftStats;
+    managementRefreshQueuedIncludeShiftStats = false;
+    void refreshManagementState({ includeShiftStats: runIncludeShiftStats });
+  }, 140);
+}
+
+function scheduleManagementDetailRefresh() {
+  if (!activeDetailMachine || !managementDetailModalEl?.classList.contains("show")) return;
+  if (managementDetailRefreshTimeoutId) {
+    clearTimeout(managementDetailRefreshTimeoutId);
+  }
+  managementDetailRefreshTimeoutId = setTimeout(() => {
+    managementDetailRefreshTimeoutId = null;
+    void loadManagementDetailSummary();
+  }, 220);
 }
 
 async function loadShiftStats() {
   const start = managementDefaults.shiftStart ? new Date(managementDefaults.shiftStart) : new Date(Date.now() - 12 * 60 * 60 * 1000);
   const end = managementDefaults.shiftEnd ? new Date(managementDefaults.shiftEnd) : new Date();
   const params = new URLSearchParams({ start: start.toISOString(), end: end.toISOString() });
-  const details = await fetchJson(`${reportDetailsUrl}?${params.toString()}`);
-  const nextStats = {};
-  for (const detail of details || []) {
-    const machineId = Number(detail.machine_id);
-    if (!nextStats[machineId]) {
-      nextStats[machineId] = { totalAlerts: 0, ackSum: 0, ackCount: 0, fixSum: 0, fixCount: 0, latestClosed: null };
-    }
-    const stats = nextStats[machineId];
-    stats.totalAlerts += 1;
-    if (Number.isFinite(Number(detail.acknowledged_seconds)) && Number(detail.acknowledged_seconds) >= 0) {
-      stats.ackSum += Number(detail.acknowledged_seconds);
-      stats.ackCount += 1;
-    }
-    if (Number.isFinite(Number(detail.ack_to_clear_seconds)) && Number(detail.ack_to_clear_seconds) >= 0) {
-      stats.fixSum += Number(detail.ack_to_clear_seconds);
-      stats.fixCount += 1;
-    }
-    if (["RESOLVED", "CANCELLED"].includes(String(detail.status || "").toUpperCase())) {
-      const candidate = new Date(detail.closed_at || detail.created_at || 0).getTime();
-      const current = new Date(stats.latestClosed?.closed_at || stats.latestClosed?.created_at || 0).getTime();
-      if (!stats.latestClosed || candidate > current) stats.latestClosed = detail;
-    }
-  }
+  const statsRows = await fetchJson(`${reportMachineStatsUrl}?${params.toString()}`);
   state.shiftStatsByMachineId = Object.fromEntries(
-    Object.entries(nextStats).map(([machineId, stats]) => [
-      Number(machineId),
-      {
-        totalAlerts: String(stats.totalAlerts),
-        averageAcknowledge: stats.ackCount ? formatElapsedDuration(stats.ackSum / stats.ackCount) : "—",
-        averageFix: stats.fixCount ? formatElapsedDuration(stats.fixSum / stats.fixCount) : "—",
-        latestClosed: stats.latestClosed,
-      },
-    ]),
+    (statsRows || []).map((row) => {
+      const machineId = Number(row.machine_id);
+      const avgAck = Number(row.average_acknowledge_seconds);
+      const avgFix = Number(row.average_fix_seconds);
+      return [
+        machineId,
+        {
+          totalAlerts: String(Number(row.total_alerts || 0)),
+          averageAcknowledge: Number.isFinite(avgAck) && avgAck >= 0 ? formatElapsedDuration(avgAck) : "—",
+          averageFix: Number.isFinite(avgFix) && avgFix >= 0 ? formatElapsedDuration(avgFix) : "—",
+          latestClosed: row.latest_closed || null,
+        },
+      ];
+    }),
   );
   state.shiftStatsLoaded = true;
+  managementLastShiftStatsRefreshAt = Date.now();
 }
 
 function startElapsedTimer() {
@@ -409,6 +468,26 @@ managementDetailRefresh?.addEventListener("click", () => {
 managementDetailModalEl?.addEventListener("hidden.bs.modal", () => {
   activeDetailMachine = null;
   detailRequestId += 1;
+  if (managementDetailRefreshTimeoutId) {
+    clearTimeout(managementDetailRefreshTimeoutId);
+    managementDetailRefreshTimeoutId = null;
+  }
+});
+
+window.AndonRefreshBus?.onRefresh(() => {
+  scheduleManagementRefresh({ includeShiftStats: true });
+});
+
+window.AndonRealtime?.onEvent((event) => {
+  if (["alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
+    scheduleManagementRefresh({ includeShiftStats: true });
+    if (activeDetailMachine && managementDetailModalEl?.classList.contains("show")) {
+      const eventMachineId = Number(event?.payload?.machine_id || 0);
+      if (event.type === "admin_metadata_updated" || eventMachineId === 0 || Number(activeDetailMachine.id) === eventMachineId) {
+        scheduleManagementDetailRefresh();
+      }
+    }
+  }
 });
 
 boot().catch((error) => {
