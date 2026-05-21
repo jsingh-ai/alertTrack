@@ -554,6 +554,10 @@ def create_app(config_name: str | None = None) -> Flask:
             db.create_all()
         if app.config.get("ANDON_RUNTIME_SCHEMA_REPAIR"):
             _ensure_auth_schema()
+        elif db.engine.dialect.name == "postgresql":
+            # Ensure read-path indexes exist even when runtime schema repair is disabled.
+            _ensure_postgres_performance_indexes()
+            db.session.commit()
         app.logger.debug("Andon app initialized")
 
     return app
