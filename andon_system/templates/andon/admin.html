@@ -668,6 +668,18 @@
     return "";
   }
 
+  function setFormBusyState(form, isBusy) {
+    if (!form) return;
+    if (isBusy) {
+      form.dataset.submitting = "true";
+    } else {
+      delete form.dataset.submitting;
+    }
+    form.querySelectorAll("button, input[type='submit'], input[type='button']").forEach((control) => {
+      control.disabled = Boolean(isBusy);
+    });
+  }
+
   function notifyAndonRefresh() {
     window.AndonRefreshBus?.notify();
   }
@@ -1996,6 +2008,10 @@
     if (event.defaultPrevented) return;
     const form = event.target.closest("form.js-ajax-form");
     if (!form) return;
+    if (form.dataset.submitting === "true") {
+      event.preventDefault();
+      return;
+    }
     const kind = form.dataset.kind || "";
     if (form.dataset.kind?.endsWith("-delete") && form.dataset.skipDeleteConfirm !== "true") {
       event.preventDefault();
@@ -2010,6 +2026,7 @@
     if (pendingMessage) {
       showToast(pendingMessage, "info", "Admin");
     }
+    setFormBusyState(form, true);
     try {
       const payload = await submitAjaxForm(form);
       if (form.dataset.kind === "department-create" && payload.department) {
@@ -2262,6 +2279,8 @@
       }
     } catch (error) {
       showToast(error.message || "Request failed");
+    } finally {
+      setFormBusyState(form, false);
     }
   });
 
