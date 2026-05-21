@@ -129,12 +129,7 @@ def build_operator_metadata():
     if cached is not None:
         return cached
 
-    context = _load_board_context(
-        company_id,
-        include_alerts=False,
-        include_metadata=True,
-        include_radius=False,
-    )
+    context = _load_operator_metadata_context(company_id)
     result = {
         "departments": [
             {
@@ -175,6 +170,108 @@ def build_operator_metadata():
     }
     set_cached(cache_key, result, OPERATOR_METADATA_CACHE_TTL_SECONDS)
     return result
+
+
+def _load_operator_metadata_context(company_id):
+    scope = get_scope_filters()
+    membership = get_current_membership()
+    role = membership.role if membership else None
+    department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+    metadata_department_ids = list(department_ids)
+
+    if role == "Operator" and company_id:
+        all_department_rows = (
+            Department.query.options(noload("*"))
+            .with_entities(Department.id)
+            .filter(Department.company_id == company_id)
+            .all()
+        )
+        all_department_ids = sorted({row.id for row in all_department_rows if row.id is not None})
+        if all_department_ids:
+            metadata_department_ids = all_department_ids
+
+    department_query = Department.query.options(
+        load_only(Department.id, Department.company_id, Department.name, Department.is_active),
+        noload("*"),
+    )
+    issue_query = IssueCategory.query.options(
+        load_only(
+            IssueCategory.id,
+            IssueCategory.company_id,
+            IssueCategory.name,
+            IssueCategory.department_id,
+            IssueCategory.color,
+            IssueCategory.priority_default,
+            IssueCategory.is_active,
+        ),
+        joinedload(IssueCategory.department).load_only(Department.id, Department.name, Department.is_active),
+        joinedload(IssueCategory.problems).load_only(
+            IssueProblem.id,
+            IssueProblem.name,
+            IssueProblem.description,
+            IssueProblem.is_active,
+        ),
+        noload(IssueCategory.alerts),
+    )
+    user_query = UserCompanyAccess.query.options(
+        load_only(
+            UserCompanyAccess.id,
+            UserCompanyAccess.company_id,
+            UserCompanyAccess.user_id,
+            UserCompanyAccess.department_id,
+            UserCompanyAccess.machine_group_id,
+            UserCompanyAccess.is_active,
+        ),
+        joinedload(UserCompanyAccess.user).load_only(
+            User.id,
+            User.display_name,
+            User.employee_id,
+            User.department_id,
+            User.machine_group_id,
+            User.is_active,
+        ),
+        joinedload(UserCompanyAccess.department).load_only(Department.id, Department.name, Department.is_active),
+        joinedload(UserCompanyAccess.machine_group).load_only(MachineGroup.id, MachineGroup.name, MachineGroup.is_active),
+        noload(UserCompanyAccess.company),
+    )
+
+    if company_id:
+        department_query = department_query.filter(Department.company_id == company_id)
+        issue_query = issue_query.filter(IssueCategory.company_id == company_id)
+        user_query = user_query.filter(UserCompanyAccess.company_id == company_id)
+    if metadata_department_ids:
+        department_query = department_query.filter(Department.id.in_(metadata_department_ids))
+        issue_query = issue_query.filter(IssueCategory.department_id.in_(metadata_department_ids))
+        user_query = user_query.filter(UserCompanyAccess.department_id.in_(metadata_department_ids))
+    if machine_group_names:
+        user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
+
+    if role == "Operator":
+        departments = department_query.order_by(Department.name.asc()).all()
+    else:
+        departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all()
+    issue_categories = issue_query.filter_by(is_active=True).order_by(IssueCategory.name.asc()).all()
+    visible_departments = [department for department in departments if role == "Operator" or department.is_active]
+    visible_issue_categories = [
+        category
+        for category in issue_categories
+        if category.department and category.department.is_active
+    ]
+    visible_users = [
+        access.user
+        for access in user_query.filter_by(is_active=True).order_by(UserCompanyAccess.id.asc()).all()
+        if access.user
+        and access.user.is_active
+        and (access.department is None or access.department.is_active)
+        and (access.machine_group is None or access.machine_group.is_active)
+    ]
+
+    return {
+        "visible_departments": visible_departments,
+        "visible_issue_categories": visible_issue_categories,
+        "visible_users": visible_users,
+    }
 
 
 def _load_board_context(company_id, include_alerts: bool, include_metadata: bool = True, include_radius: bool = True):

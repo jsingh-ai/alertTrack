@@ -167,6 +167,7 @@ def _ensure_auth_schema() -> None:
                 "CHECK (role IN ('Admin', 'Manager', 'Operator', 'Viewer'))"
             )
         )
+        _ensure_postgres_performance_indexes()
     db.session.commit()
     _ensure_sqlite_user_role_constraints()
     _ensure_sqlite_active_alert_unique_index()
@@ -364,6 +365,51 @@ def _ensure_sqlite_user_role_constraints() -> None:
     finally:
         db.session.execute(text("PRAGMA foreign_keys=ON"))
         db.session.commit()
+
+
+def _ensure_postgres_performance_indexes() -> None:
+    if db.engine.dialect.name != "postgresql":
+        return
+    # Pager polls and operator snapshot reads.
+    db.session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_andon_alerts_company_department_status_priority_created "
+            "ON andon_alerts (company_id, department_id, status, priority DESC, created_at ASC)"
+        )
+    )
+    db.session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_andon_alerts_company_status_created "
+            "ON andon_alerts (company_id, status, created_at DESC)"
+        )
+    )
+    # Created-note lookup for active alerts.
+    db.session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_andon_alert_events_company_type_alert_event "
+            "ON andon_alert_events (company_id, event_type, alert_id, event_at ASC)"
+        )
+    )
+    # Operator metadata user resolution by company + scope.
+    db.session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_user_company_access_company_active_department "
+            "ON user_company_access (company_id, is_active, department_id)"
+        )
+    )
+    db.session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_user_company_access_company_active_group "
+            "ON user_company_access (company_id, is_active, machine_group_id)"
+        )
+    )
+    # Machine lists for board/operator reads.
+    db.session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_machines_company_type_name "
+            "ON machines (company_id, machine_type, name)"
+        )
+    )
 
 
 def create_app(config_name: str | None = None) -> Flask:

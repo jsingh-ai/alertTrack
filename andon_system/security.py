@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import secrets
+import threading
 import time
 from datetime import datetime, timezone
+from hashlib import sha256
 from hmac import compare_digest
 from types import SimpleNamespace
 from urllib.parse import urlparse
@@ -49,6 +51,11 @@ ROLE_LANDING_PAGE = {
     "Viewer": "pages.board_page",
 }
 PREFERENCE_ALLOWED_PAGE_KEYS = {PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT, PAGE_REPORTS, PAGE_ADMIN}
+_PAGER_TOKEN_CACHE_TTL_SECONDS = 60
+_PAGER_LAST_SEEN_THROTTLE_SECONDS = 30
+_PAGER_TOKEN_DEVICE_CACHE = {}
+_PAGER_LAST_SEEN_TRACKER = {}
+_PAGER_CACHE_LOCK = threading.RLock()
 
 
 def _perf_enabled() -> bool:
@@ -118,9 +125,7 @@ def get_authenticated_pager_device(update_last_seen: bool = True) -> PagerDevice
     if hasattr(g, "authenticated_pager_device"):
         device = getattr(g, "authenticated_pager_device")
         if device is not None and update_last_seen and not getattr(g, "authenticated_pager_device_last_seen_updated", False):
-            device.last_seen_at = datetime.now(timezone.utc)
-            db.session.commit()
-            g.authenticated_pager_device_last_seen_updated = True
+            _maybe_update_pager_last_seen(device, update_last_seen=True)
         return device
 
     token = parse_bearer_token()
@@ -128,6 +133,13 @@ def get_authenticated_pager_device(update_last_seen: bool = True) -> PagerDevice
         g.authenticated_pager_device = None
         g.authenticated_pager_device_last_seen_updated = False
         return None
+
+    cache_hit = _get_cached_pager_device_for_token(token)
+    if cache_hit is not None:
+        g.authenticated_pager_device = cache_hit
+        g.authenticated_pager_device_last_seen_updated = False
+        _maybe_update_pager_last_seen(cache_hit, update_last_seen)
+        return cache_hit
 
     devices = PagerDevice.query.options(
         joinedload(PagerDevice.department).load_only(Department.id, Department.company_id, Department.is_active, Department.name),
@@ -141,15 +153,79 @@ def get_authenticated_pager_device(update_last_seen: bool = True) -> PagerDevice
                 continue
             g.authenticated_pager_device = device
             g.authenticated_pager_device_last_seen_updated = False
-            if update_last_seen:
-                device.last_seen_at = datetime.now(timezone.utc)
-                db.session.commit()
-                g.authenticated_pager_device_last_seen_updated = True
+            _cache_pager_device_for_token(token, device)
+            _maybe_update_pager_last_seen(device, update_last_seen)
             return device
 
     g.authenticated_pager_device = None
     g.authenticated_pager_device_last_seen_updated = False
     return None
+
+
+def _pager_token_fingerprint(token: str) -> str:
+    return sha256(str(token).encode("utf-8")).hexdigest()
+
+
+def _get_cached_pager_device_for_token(token: str) -> PagerDevice | None:
+    now = time.monotonic()
+    fingerprint = _pager_token_fingerprint(token)
+    with _PAGER_CACHE_LOCK:
+        cached = _PAGER_TOKEN_DEVICE_CACHE.get(fingerprint)
+        if not cached:
+            return None
+        if cached["expires_at"] <= now:
+            _PAGER_TOKEN_DEVICE_CACHE.pop(fingerprint, None)
+            return None
+        device_id = cached["device_id"]
+        expected_token_hash = cached["token_hash"]
+
+    device = PagerDevice.query.options(
+        joinedload(PagerDevice.department).load_only(Department.id, Department.company_id, Department.is_active, Department.name),
+        noload(PagerDevice.company),
+    ).filter(
+        PagerDevice.id == device_id,
+        PagerDevice.active.is_(True),
+    ).one_or_none()
+    if device is None:
+        with _PAGER_CACHE_LOCK:
+            _PAGER_TOKEN_DEVICE_CACHE.pop(fingerprint, None)
+        return None
+    if not device.token_hash or expected_token_hash != device.token_hash:
+        with _PAGER_CACHE_LOCK:
+            _PAGER_TOKEN_DEVICE_CACHE.pop(fingerprint, None)
+        return None
+    if not device.department or not device.department.is_active or device.department.company_id != device.company_id:
+        with _PAGER_CACHE_LOCK:
+            _PAGER_TOKEN_DEVICE_CACHE.pop(fingerprint, None)
+        return None
+    return device
+
+
+def _cache_pager_device_for_token(token: str, device: PagerDevice) -> None:
+    if not token or not device or not device.id or not device.token_hash:
+        return
+    fingerprint = _pager_token_fingerprint(token)
+    with _PAGER_CACHE_LOCK:
+        _PAGER_TOKEN_DEVICE_CACHE[fingerprint] = {
+            "device_id": int(device.id),
+            "token_hash": str(device.token_hash),
+            "expires_at": time.monotonic() + _PAGER_TOKEN_CACHE_TTL_SECONDS,
+        }
+
+
+def _maybe_update_pager_last_seen(device: PagerDevice, update_last_seen: bool) -> None:
+    if not update_last_seen:
+        return
+    now_mono = time.monotonic()
+    now_utc = datetime.now(timezone.utc)
+    with _PAGER_CACHE_LOCK:
+        last_seen = _PAGER_LAST_SEEN_TRACKER.get(device.id, 0.0)
+        if (now_mono - last_seen) < _PAGER_LAST_SEEN_THROTTLE_SECONDS:
+            return
+        _PAGER_LAST_SEEN_TRACKER[device.id] = now_mono
+    device.last_seen_at = now_utc
+    db.session.commit()
+    g.authenticated_pager_device_last_seen_updated = True
 
 
 def get_authenticated_user() -> User | None:

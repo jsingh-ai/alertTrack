@@ -59,7 +59,7 @@ from ..services.reporting_service import (
 )
 from ..services.escalation_service import check_escalations
 from ..services.cache_service import get_cached, invalidate_cache, set_cached
-from ..services.realtime_service import emit_machine_updated
+from ..services.realtime_service import emit_alert_updated, emit_machine_updated
 
 api_bp = Blueprint("api", __name__, url_prefix="/api/andon")
 
