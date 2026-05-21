@@ -2430,10 +2430,13 @@
       showToast("Department role must have at least one department selected.");
       return;
     }
+    const rowToUpdate = activeUserScopeRow;
     try {
-      applyUserScopeToRow(activeUserScopeRow);
-      await submitUserUpdate(activeUserScopeRow);
+      applyUserScopeToRow(rowToUpdate);
       closeUserScopeModalDialog();
+      showToast("Saving scope...", "info", "Admin");
+      await submitUserUpdate(rowToUpdate);
+      showToast("Scope saved.", "success", "Admin");
       notifyAndonRefresh();
     } catch (error) {
       showToast(error.message || "Request failed");

@@ -7,6 +7,7 @@ from flask import Blueprint, jsonify, flash, redirect, request, url_for
 
 from ..company_context import get_current_company
 from ..extensions import db
+from ..extensions import socketio
 from ..models.alert import AndonAlert, AndonAlertEvent
 from ..models.department import Department
 from ..models.escalation import EscalationRule
@@ -69,11 +70,14 @@ def _company_id():
 def _invalidate_company_caches(company_id):
     if company_id is None:
         return
-    invalidate_cache("board_state", company_id)
-    invalidate_cache("report_summary", company_id)
-    invalidate_cache("report_machine_details", company_id)
-    invalidate_cache("report_machine_stats", company_id)
-    invalidate_cache("report_problem_details", company_id)
+    # A company-level version bump invalidates all company-scoped namespaces.
+    invalidate_cache(company_id=company_id)
+    try:
+        if socketio is not None:
+            socketio.start_background_task(emit_admin_metadata_updated, company_id)
+            return
+    except Exception:
+        pass
     emit_admin_metadata_updated(company_id)
 
 
@@ -190,14 +194,6 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
         valid_department_ids = {row.id for row in rows}
 
     group_machine_ids = set()
-    if group_names_by_id:
-        rows = Machine.query.with_entities(Machine.id, Machine.department_id).filter(
-            Machine.company_id == company_id,
-            Machine.machine_type.in_(list(group_names_by_id.values())),
-            Machine.is_active.is_(True),
-        ).all()
-        group_machine_ids = {row.id for row in rows}
-        group_department_ids = {row.department_id for row in rows if row.department_id is not None}
 
     if role == "Operator":
         if not valid_group_ids:
@@ -219,6 +215,14 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
             "department_ids": sorted(valid_department_ids),
         }, None
     if role == "Manager":
+        if group_names_by_id:
+            rows = Machine.query.with_entities(Machine.id, Machine.department_id).filter(
+                Machine.company_id == company_id,
+                Machine.machine_type.in_(list(group_names_by_id.values())),
+                Machine.is_active.is_(True),
+            ).all()
+            group_machine_ids = {row.id for row in rows}
+            group_department_ids = {row.department_id for row in rows if row.department_id is not None}
         if not valid_group_ids:
             rows = MachineGroup.query.with_entities(MachineGroup.id, MachineGroup.name).filter(
                 MachineGroup.company_id == company_id,

@@ -180,8 +180,15 @@ def _get_redis_client():
     with _REDIS_LOCK:
         if _REDIS_CLIENT is not None:
             return _REDIS_CLIENT
+        connect_timeout = _redis_timeout_seconds("REDIS_CONNECT_TIMEOUT_SECONDS", default=0.5)
+        socket_timeout = _redis_timeout_seconds("REDIS_SOCKET_TIMEOUT_SECONDS", default=0.5)
         try:
-            _REDIS_CLIENT = redis.Redis.from_url(url, decode_responses=True)
+            _REDIS_CLIENT = redis.Redis.from_url(
+                url,
+                decode_responses=True,
+                socket_connect_timeout=connect_timeout,
+                socket_timeout=socket_timeout,
+            )
             _REDIS_CLIENT.ping()
         except _redis_transport_errors():
             _REDIS_CLIENT = None
@@ -234,3 +241,14 @@ def _redis_transport_errors():
         if exc is not None:
             errors.append(exc)
     return tuple(dict.fromkeys(errors))
+
+
+def _redis_timeout_seconds(env_name: str, default: float) -> float:
+    raw = os.getenv(env_name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(0.05, value)
