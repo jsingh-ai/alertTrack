@@ -678,7 +678,9 @@ function buildMachineTileSignature(machine, detailed) {
   const selectedAlertId = state.selectedAlert ? Number(state.selectedAlert.id) : null;
   const isSelectedMachine = Number(machine.id) === selectedMachineId;
   const isSelectedAlert = active && selectedAlertId === Number(alert.id);
-  const metadataState = isSelectedMachine || isSelectedAlert ? (state.metadataLoaded ? "meta" : "nometa") : "";
+  const metadataState = active
+    ? (isSelectedMachine || isSelectedAlert ? (state.metadataLoaded ? "meta" : "nometa") : "")
+    : `${state.metadataLoaded ? "meta" : "nometa"}:${Array.isArray(state.departments) ? state.departments.length : 0}`;
   const createDraftState = !active && isSelectedMachine ? state.createNoteDraft : "";
   const alertDraftState = isSelectedAlert ? state.alertNoteDraft : "";
   const alertUserState = isSelectedAlert ? String(state.selectedAlertUserId || "") : "";
@@ -882,6 +884,9 @@ function getGroupSummary(machines) {
 }
 
 function renderDepartmentButtonsMarkup() {
+  if (!state.metadataLoaded && (!Array.isArray(state.departments) || !state.departments.length)) {
+    return '<div class="problem-empty">Loading departments...</div>';
+  }
   const selectedDepartmentId = state.selectedDepartment ? Number(state.selectedDepartment.id) : null;
   const metadataKey = getRenderableDepartments()
     .map((department) => `${department.id}:${department.name}:${department.isPlaceholder ? 1 : 0}`)

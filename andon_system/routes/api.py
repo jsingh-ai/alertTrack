@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import time
 
 from flask import Blueprint, abort, current_app, jsonify, request
 from sqlalchemy.exc import OperationalError
@@ -62,6 +63,7 @@ from ..services.cache_service import get_cached, invalidate_cache, set_cached
 from ..services.realtime_service import emit_alert_updated, emit_machine_updated
 
 api_bp = Blueprint("api", __name__, url_prefix="/api/andon")
+PAGER_ACTIVE_ALERTS_CACHE_TTL_SECONDS = 15
 
 
 @api_bp.before_request
@@ -323,17 +325,41 @@ def api_acknowledge_alert(alert_id):
 
 @api_bp.get("/pager/alerts/active")
 def api_pager_active_alerts():
+    started_at = time.perf_counter()
     pager = get_authenticated_pager_device()
     if pager is None:
         abort(403)
+    auth_ms = (time.perf_counter() - started_at) * 1000
 
     cache_key = ("pager_active_alerts", pager.company_id, pager.department_id)
     cached = get_cached(cache_key)
     if cached is not None:
+        if current_app.config.get("ANDON_PERF_LOGS"):
+            current_app.logger.debug(
+                "PERF pager_active_alerts auth_ms=%.1f cache=hit query_ms=0.0 serialize_ms=0.0 count=%s",
+                auth_ms,
+                len(cached) if isinstance(cached, list) else -1,
+            )
         return jsonify({"success": True, "data": cached})
 
+    query_started_at = time.perf_counter()
     alerts = (
         AndonAlert.query.options(
+            load_only(
+                AndonAlert.id,
+                AndonAlert.company_id,
+                AndonAlert.alert_number,
+                AndonAlert.machine_id,
+                AndonAlert.department_id,
+                AndonAlert.issue_category_id,
+                AndonAlert.issue_problem_id,
+                AndonAlert.status,
+                AndonAlert.priority,
+                AndonAlert.created_at,
+                AndonAlert.acknowledged_at,
+                AndonAlert.acknowledged_seconds,
+                AndonAlert.note,
+            ),
             joinedload(AndonAlert.machine).load_only(Machine.id, Machine.name, Machine.machine_code),
             joinedload(AndonAlert.department).load_only(Department.id, Department.name),
             joinedload(AndonAlert.issue_category).load_only(IssueCategory.id, IssueCategory.name),
@@ -350,6 +376,7 @@ def api_pager_active_alerts():
         .order_by(AndonAlert.priority.desc(), AndonAlert.created_at.asc())
         .all()
     )
+    query_ms = (time.perf_counter() - query_started_at) * 1000
     status_labels = {
         ALERT_STATUS_OPEN: "Open",
         ALERT_STATUS_ACKNOWLEDGED: "Acknowledged",
@@ -358,6 +385,7 @@ def api_pager_active_alerts():
         ALERT_STATUS_CANCELLED: "Cancelled",
     }
 
+    serialize_started_at = time.perf_counter()
     payload = [
         {
             "id": alert.id,
@@ -397,7 +425,16 @@ def api_pager_active_alerts():
         }
         for alert in alerts
     ]
-    set_cached(cache_key, payload, ttl_seconds=2)
+    serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+    set_cached(cache_key, payload, ttl_seconds=PAGER_ACTIVE_ALERTS_CACHE_TTL_SECONDS)
+    if current_app.config.get("ANDON_PERF_LOGS"):
+        current_app.logger.debug(
+            "PERF pager_active_alerts auth_ms=%.1f cache=miss query_ms=%.1f serialize_ms=%.1f count=%s",
+            auth_ms,
+            query_ms,
+            serialize_ms,
+            len(payload),
+        )
     return jsonify({"success": True, "data": payload})
 
 
@@ -458,7 +495,13 @@ def api_pager_acknowledge_alert(alert_id: int):
         db.session.rollback()
         current_app.logger.exception("Pager acknowledge failed alert_id=%s pager_device_id=%s", alert_id, pager.id)
         return _error(f"Unable to acknowledge alert: {exc}", 400)
-    invalidate_cache(company_id=alert.company_id)
+    invalidate_cache("board_state", alert.company_id)
+    invalidate_cache("operator_snapshot", alert.company_id)
+    invalidate_cache("pager_active_alerts", alert.company_id)
+    invalidate_cache("report_summary", alert.company_id)
+    invalidate_cache("report_machine_details", alert.company_id)
+    invalidate_cache("report_machine_stats", alert.company_id)
+    invalidate_cache("report_problem_details", alert.company_id)
     emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="acknowledged")
     return jsonify(
         {
@@ -542,7 +585,13 @@ def api_pager_resolve_alert(alert_id: int):
         db.session.rollback()
         current_app.logger.exception("Pager resolve failed alert_id=%s pager_device_id=%s", alert_id, pager.id)
         return _error(f"Unable to resolve alert: {exc}", 400)
-    invalidate_cache(company_id=alert.company_id)
+    invalidate_cache("board_state", alert.company_id)
+    invalidate_cache("operator_snapshot", alert.company_id)
+    invalidate_cache("pager_active_alerts", alert.company_id)
+    invalidate_cache("report_summary", alert.company_id)
+    invalidate_cache("report_machine_details", alert.company_id)
+    invalidate_cache("report_machine_stats", alert.company_id)
+    invalidate_cache("report_problem_details", alert.company_id)
     emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="resolved")
     return jsonify(
         {

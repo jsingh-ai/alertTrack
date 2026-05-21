@@ -70,8 +70,12 @@ def _emit_to_rooms(event_name: str, payload: dict, rooms):
     if not _enabled() or not payload.get("company_id"):
         return
     for room_type in rooms:
+        room = room_name(payload["company_id"], room_type)
         try:
-            socketio.emit(event_name, payload, to=room_name(payload["company_id"], room_type))
+            if _emit_async_enabled():
+                socketio.start_background_task(_safe_emit, event_name, payload, room)
+            else:
+                _safe_emit(event_name, payload, room)
         except Exception:
             if has_app_context():
                 current_app.logger.exception("Unable to emit realtime event %s", event_name)
@@ -81,3 +85,21 @@ def _enabled() -> bool:
     if socketio is None or not has_app_context():
         return False
     return bool(current_app.config.get("SOCKETIO_ENABLED", True))
+
+
+def _emit_async_enabled() -> bool:
+    if not has_app_context():
+        return False
+    async_mode = str(current_app.config.get("SOCKETIO_ASYNC_MODE") or "").strip().lower()
+    configured = current_app.config.get("SOCKETIO_EMIT_ASYNC")
+    if configured is not None:
+        return bool(configured)
+    return async_mode in {"threading", "gevent", "eventlet"}
+
+
+def _safe_emit(event_name: str, payload: dict, room: str):
+    try:
+        socketio.emit(event_name, payload, to=room)
+    except Exception:
+        if has_app_context():
+            current_app.logger.exception("Unable to emit realtime event %s", event_name)

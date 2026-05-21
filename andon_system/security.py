@@ -625,9 +625,14 @@ def get_authorized_company_id() -> int | None:
 
 
 def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
+    if membership is None and has_request_context():
+        cached_scope = getattr(g, "scope_filters_cache", None)
+        if cached_scope is not None:
+            return cached_scope
+
     effective_membership = membership or get_current_membership()
     if effective_membership is None:
-        return {
+        result = {
             "company_id": None,
             "department_id": None,
             "department_ids": [],
@@ -636,10 +641,13 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
             "machine_ids": [],
             "restricted": False,
         }
+        if membership is None and has_request_context():
+            g.scope_filters_cache = result
+        return result
 
     company_id = effective_membership.company_id
     if not effective_membership.is_restricted:
-        return {
+        result = {
             "company_id": company_id,
             "department_id": None,
             "department_ids": [],
@@ -648,6 +656,9 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
             "machine_ids": [],
             "restricted": False,
         }
+        if membership is None and has_request_context():
+            g.scope_filters_cache = result
+        return result
 
     current_user = get_authenticated_user()
     access = None
@@ -693,7 +704,7 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
                 if row.id is not None
             ]
         resolved_department_ids = sorted(set(valid_department_ids))
-        return {
+        result = {
             "company_id": company_id,
             "department_id": resolved_department_ids[0] if len(resolved_department_ids) == 1 else None,
             "department_ids": resolved_department_ids,
@@ -702,6 +713,9 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
             "machine_ids": [],
             "restricted": True,
         }
+        if membership is None and has_request_context():
+            g.scope_filters_cache = result
+        return result
 
     if effective_membership.role == "Operator" and config_machine_ids:
         scoped_rows = (
@@ -717,7 +731,7 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
         machine_ids = sorted({row.id for row in scoped_rows if row.id is not None})
         resolved_department_ids = sorted({row.department_id for row in scoped_rows if row.department_id is not None})
         machine_group_names = sorted({row.machine_type for row in scoped_rows if row.machine_type})
-        return {
+        result = {
             "company_id": company_id,
             "department_id": resolved_department_ids[0] if len(resolved_department_ids) == 1 else None,
             "department_ids": resolved_department_ids,
@@ -726,6 +740,9 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
             "machine_ids": machine_ids,
             "restricted": True,
         }
+        if membership is None and has_request_context():
+            g.scope_filters_cache = result
+        return result
 
     machine_query = Machine.query.options(noload("*")).with_entities(
         Machine.id,
@@ -785,7 +802,7 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
         machine_group_names = group_names
         resolved_department_ids = all_department_ids
 
-    return {
+    result = {
         "company_id": company_id,
         "department_id": resolved_department_ids[0] if len(resolved_department_ids) == 1 else None,
         "department_ids": resolved_department_ids,
@@ -794,6 +811,9 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
         "machine_ids": machine_ids,
         "restricted": True,
     }
+    if membership is None and has_request_context():
+        g.scope_filters_cache = result
+    return result
 
 
 def get_view_preference(page_key: str, company_id: int | None = None, user: User | None = None) -> dict:

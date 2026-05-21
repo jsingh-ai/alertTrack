@@ -476,9 +476,16 @@ def get_active_alert_metrics():
 
 
 def _invalidate_live_caches(company_id):
-    # One company-scope bump invalidates all company cache namespaces and
-    # avoids multiple synchronous cache backend roundtrips per alert action.
-    invalidate_cache(company_id=company_id)
+    # Alert lifecycle updates do not change operator metadata. Keep cache
+    # invalidation scoped to live board/report/pager views to avoid expensive
+    # metadata recompute on every call/ack/close.
+    invalidate_cache("board_state", company_id)
+    invalidate_cache("operator_snapshot", company_id)
+    invalidate_cache("pager_active_alerts", company_id)
+    invalidate_cache("report_summary", company_id)
+    invalidate_cache("report_machine_details", company_id)
+    invalidate_cache("report_machine_stats", company_id)
+    invalidate_cache("report_problem_details", company_id)
 
 
 def _get_active_alert_for_machine(machine_id, company_id):

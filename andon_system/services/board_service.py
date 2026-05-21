@@ -15,7 +15,7 @@ from ..security import get_current_membership, get_scope_filters
 from .cache_service import get_cached, set_cached
 from .radius_service import build_radius_status_map
 
-BOARD_STATE_CACHE_TTL_SECONDS = 5
+BOARD_STATE_CACHE_TTL_SECONDS = 10
 OPERATOR_METADATA_CACHE_TTL_SECONDS = 300
 
 
