@@ -32,14 +32,14 @@
 
   <div class="admin-section-shell mb-4">
     <div class="d-flex flex-wrap gap-2 mb-3">
-      <button class="btn btn-light btn-sm admin-section-toggle is-active" type="button" data-admin-section-target="machine-groups">Machine Groups</button>
-      <button class="btn btn-light btn-sm admin-section-toggle" type="button" data-admin-section-target="departments">Departments</button>
-      <button class="btn btn-light btn-sm admin-section-toggle" type="button" data-admin-section-target="users">Users</button>
-      <button class="btn btn-light btn-sm admin-section-toggle" type="button" data-admin-section-target="escalation">Escalation Rules</button>
+      <button class="btn btn-light btn-sm admin-section-toggle {% if active_section == 'machine-groups' %}is-active{% endif %}" type="button" data-admin-section-target="machine-groups">Machine Groups</button>
+      <button class="btn btn-light btn-sm admin-section-toggle {% if active_section == 'departments' %}is-active{% endif %}" type="button" data-admin-section-target="departments">Departments</button>
+      <button class="btn btn-light btn-sm admin-section-toggle {% if active_section == 'users' %}is-active{% endif %}" type="button" data-admin-section-target="users">Users</button>
+      <button class="btn btn-light btn-sm admin-section-toggle {% if active_section == 'escalation' %}is-active{% endif %}" type="button" data-admin-section-target="escalation">Escalation Rules</button>
     </div>
   </div>
 
-  <div class="admin-section" data-admin-section="machine-groups">
+  <div class="admin-section {% if active_section != 'machine-groups' %}d-none{% endif %}" data-admin-section="machine-groups">
     <div class="card andon-panel mb-4">
       <div class="card-body">
         <div class="admin-section-header mb-3">
@@ -129,7 +129,7 @@
     </div>
   </div>
 
-  <div class="admin-section d-none" data-admin-section="departments">
+  <div class="admin-section {% if active_section != 'departments' %}d-none{% endif %}" data-admin-section="departments">
     <div class="card andon-panel mb-4">
       <div class="card-body">
         <div class="admin-section-header mb-3">
@@ -222,7 +222,7 @@
     </div>
   </div>
 
-  <div class="admin-section d-none" data-admin-section="escalation">
+  <div class="admin-section {% if active_section != 'escalation' %}d-none{% endif %}" data-admin-section="escalation">
     <div class="card andon-panel mb-4">
       <div class="card-body">
         <div class="admin-section-header mb-3">
@@ -257,7 +257,7 @@
     </div>
   </div>
 
-  <div class="admin-section d-none" data-admin-section="users">
+  <div class="admin-section {% if active_section != 'users' %}d-none{% endif %}" data-admin-section="users">
     <div class="card andon-panel mb-4">
       <div class="card-body">
         <div class="admin-section-header mb-3">
@@ -527,6 +527,7 @@
 (function () {
   const sectionButtons = document.querySelectorAll("[data-admin-section-target]");
   const sections = document.querySelectorAll("[data-admin-section]");
+  const initialAdminSection = "{{ active_section|default('machine-groups') }}";
   const filter = document.getElementById("issueDepartmentSelect");
   const issueTableBody = document.getElementById("issueTableBody");
   const departmentTableBody = document.getElementById("departmentTableBody");
@@ -723,6 +724,12 @@
   }
 
   function showAdminSection(sectionName) {
+    if (sectionName !== initialAdminSection) {
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.set("section", sectionName);
+      window.location.assign(nextUrl.toString());
+      return;
+    }
     if (sectionName === "departments" && !sectionPreparedState.departments) {
       regroupIssues();
       sectionPreparedState.departments = true;
@@ -736,20 +743,10 @@
     sectionButtons.forEach((button) => {
       button.classList.toggle("is-active", button.dataset.adminSectionTarget === sectionName);
     });
-    try {
-      window.localStorage.setItem("andon-admin-section", sectionName);
-    } catch (_error) {
-      // ignore storage failures in kiosk mode
-    }
   }
 
   function restoreAdminSection() {
-    let sectionName = "machine-groups";
-    try {
-      sectionName = window.localStorage.getItem("andon-admin-section") || sectionName;
-    } catch (_error) {
-      // ignore storage failures in kiosk mode
-    }
+    let sectionName = initialAdminSection || "machine-groups";
     if (!sections || !sections.length) return;
     if (!Array.from(sections).some((section) => section.dataset.adminSection === sectionName)) {
       sectionName = "machine-groups";

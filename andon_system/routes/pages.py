@@ -7,7 +7,7 @@ from collections import defaultdict
 from zoneinfo import ZoneInfo
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, load_only
 
 from ..company_context import get_current_company, set_current_company_id, set_current_company_slug
 from ..extensions import db
@@ -15,7 +15,7 @@ from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
-from ..models.user import USER_ROLES, USER_SCOPE_MODES, UserCompanyAccess
+from ..models.user import USER_ROLES, USER_SCOPE_MODES, User, UserCompanyAccess
 from ..security import (
     PAGE_ADMIN,
     PAGE_BOARD,
@@ -358,18 +358,55 @@ def admin_page():
         return _landing_redirect()
     company = get_current_company()
     company_id = company.id if company else None
-    escalation_rules_map = ensure_fixed_escalation_rules()
-    machines = Machine.query.filter_by(company_id=company_id).order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all() if company_id else []
+    active_section = (request.args.get("section") or "machine-groups").strip().lower()
+    if active_section not in {"machine-groups", "departments", "users", "escalation"}:
+        active_section = "machine-groups"
+    escalation_rules_map = ensure_fixed_escalation_rules() if active_section == "escalation" else {}
+    needs_machine_data = active_section in {"machine-groups", "users"}
+    needs_user_data = active_section == "users"
+    needs_department_data = active_section in {"departments", "users"}
+    needs_issue_data = active_section == "departments"
+    machines = (
+        Machine.query.options(
+            load_only(
+                Machine.id,
+                Machine.name,
+                Machine.machine_code,
+                Machine.machine_type,
+                Machine.department_id,
+                Machine.is_active,
+            )
+        ).filter_by(company_id=company_id).order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all()
+        if company_id and needs_machine_data
+        else []
+    )
     access_rows = (
         UserCompanyAccess.query.options(
-            joinedload(UserCompanyAccess.user),
-            joinedload(UserCompanyAccess.department),
-            joinedload(UserCompanyAccess.machine_group),
+            load_only(
+                UserCompanyAccess.id,
+                UserCompanyAccess.role,
+                UserCompanyAccess.scope_mode,
+                UserCompanyAccess.department_id,
+                UserCompanyAccess.machine_group_id,
+                UserCompanyAccess.scope_config_json,
+                UserCompanyAccess.is_active,
+            ),
+            joinedload(UserCompanyAccess.user).load_only(
+                User.id,
+                User.display_name,
+                User.username,
+                User.employee_id,
+                User.email,
+                User.phone_number,
+                User.password_hash,
+            ),
+            joinedload(UserCompanyAccess.department).load_only(Department.id, Department.name),
+            joinedload(UserCompanyAccess.machine_group).load_only(MachineGroup.id, MachineGroup.name),
         )
         .filter_by(company_id=company_id)
         .order_by(UserCompanyAccess.is_active.desc(), UserCompanyAccess.role.asc(), UserCompanyAccess.id.asc())
         .all()
-        if company_id
+        if company_id and needs_user_data
         else []
     )
     users = []
@@ -397,9 +434,21 @@ def admin_page():
         )
         users.append(user_payload)
     machine_groups = []
-    machine_group_rows = MachineGroup.query.filter_by(company_id=company_id).order_by(MachineGroup.name.asc()).all() if company_id else []
+    machine_group_rows = (
+        MachineGroup.query.options(
+            load_only(MachineGroup.id, MachineGroup.name, MachineGroup.is_active)
+        ).filter_by(company_id=company_id).order_by(MachineGroup.name.asc()).all()
+        if company_id and (needs_machine_data or needs_user_data or needs_department_data)
+        else []
+    )
     machine_group_id_by_name = {group.name: group.id for group in machine_group_rows}
-    departments = Department.query.filter_by(company_id=company_id).order_by(Department.name.asc()).all() if company_id else []
+    departments = (
+        Department.query.options(
+            load_only(Department.id, Department.name, Department.is_active)
+        ).filter_by(company_id=company_id).order_by(Department.name.asc()).all()
+        if company_id and needs_department_data
+        else []
+    )
     department_name_by_id = {department.id: department.name for department in departments}
     machine_count_by_group_name = defaultdict(int)
     for machine in machines:
@@ -435,12 +484,15 @@ def admin_page():
         for department in departments
     ]
     problems = (
-        IssueProblem.query.join(IssueCategory)
+        IssueProblem.query.options(
+            load_only(IssueProblem.id, IssueProblem.name, IssueProblem.is_active),
+            joinedload(IssueProblem.category).load_only(IssueCategory.department_id),
+        ).join(IssueCategory)
         .join(Department)
         .filter(IssueProblem.company_id == company_id)
         .order_by(Department.name.asc(), IssueProblem.name.asc())
         .all()
-        if company_id
+        if company_id and needs_issue_data
         else []
     )
     problems_by_department_id = defaultdict(list)
@@ -462,11 +514,12 @@ def admin_page():
         users=users,
         machine_groups=machine_groups,
         issue_groups=issue_groups,
-        escalation_rules=[escalation_rules_map[level] for level in sorted(escalation_rules_map.keys())],
+        escalation_rules=[escalation_rules_map[level] for level in sorted(escalation_rules_map.keys())] if escalation_rules_map else [],
         escalation_phase_labels=FIXED_ESCALATION_PHASES,
         user_roles=USER_ROLES,
         user_scope_modes=USER_SCOPE_MODES,
         current_company=company,
         machine_scope_catalog=machine_scope_catalog,
         departments_catalog=departments_catalog,
+        active_section=active_section,
     )
