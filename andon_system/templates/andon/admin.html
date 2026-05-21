@@ -2002,7 +2002,7 @@
       updateUserRow(data.user);
       refreshUsersView();
     }
-    row.dataset.userLastSavedSignature = signature;
+    row.dataset.userLastSavedSignature = userUpdateSignature(row);
     return true;
   }
 
