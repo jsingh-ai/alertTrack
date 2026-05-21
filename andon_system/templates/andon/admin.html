@@ -265,21 +265,9 @@
           <h2 class="h4 mb-0">Users</h2>
           <p class="text-secondary small mb-0">Users are global accounts. This table manages the selected company's role and scope for each account.</p>
         </div>
-        <div class="row g-2 align-items-end mb-3">
-          <div class="col-md-4 col-lg-3">
-            <label class="form-label">Group Users By</label>
-            <select class="form-select" id="userGroupingModeSelect">
-              <option value="combined" selected>Machine Group + Department</option>
-              <option value="machine-group">Machine Group</option>
-              <option value="department">Department</option>
-              <option value="none">No Grouping</option>
-            </select>
-          </div>
-        </div>
         <form class="mb-3 js-ajax-form" method="post" action="{{ url_for('admin.create_user') }}" id="userCreateForm" data-kind="user-create">
           <input type="hidden" name="scope_mode" id="userScopeModeSelect" value="restricted">
           <input type="hidden" name="machine_group_id" id="userMachineGroupSelect" value="">
-          <input type="hidden" name="department_id" id="userDepartmentSelect" value="">
           <input type="hidden" name="scope_machine_ids" id="userScopeMachineIdsInput" value="">
           <input type="hidden" name="scope_machine_group_ids" id="userScopeMachineGroupIdsInput" value="">
           <input type="hidden" name="scope_department_ids" id="userScopeDepartmentIdsInput" value="">
@@ -292,11 +280,11 @@
               <div class="row g-2">
                 <div class="col-md-4">
                   <label class="form-label">Username</label>
-                  <input class="form-control" name="username" placeholder="username">
+                  <input class="form-control" name="username" placeholder="username" required>
                 </div>
                 <div class="col-md-4">
                   <label class="form-label">Password</label>
-                  <input class="form-control" name="password" type="password" placeholder="Required for new account">
+                  <input class="form-control" name="password" type="password" placeholder="Required for new account" required>
                 </div>
                 <div class="col-md-4">
                   <label class="form-label">Work ID</label>
@@ -326,16 +314,25 @@
                   <label class="form-label">Role</label>
                   <select class="form-select" name="role" id="userRoleSelect" required>
                     {% for role in user_roles %}
-                      <option value="{{ role }}"{% if role == "Operator" %} selected{% endif %}>{{ role }}</option>
+                      <option value="{{ role }}"{% if role == "Operator" %} selected{% endif %}>{{ "Department" if role == "Viewer" else role }}</option>
                     {% endfor %}
                   </select>
                 </div>
-                <div class="col-md-8 d-flex align-items-end">
+                <div class="col-md-4 d-none" id="userDepartmentFieldWrap">
+                  <label class="form-label">Department</label>
+                  <select class="form-select" name="department_id" id="userDepartmentSelect">
+                    <option value="">Select a department</option>
+                    {% for department in departments %}
+                      <option value="{{ department.id }}">{{ department.name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-12">
                   <div class="admin-user-scope-tip" id="userScopeRoleHint">Pick one or more machine groups, then choose machines in those groups.</div>
                 </div>
               </div>
               <div class="admin-scope-controls">
-                <div>
+                <div id="userScopeGroupBlock">
                   <label class="form-label">Machine Groups</label>
                   <div class="admin-scope-group-list" id="userScopeGroupList">
                     {% for group in machine_groups %}
@@ -346,7 +343,7 @@
                     {% endfor %}
                   </div>
                 </div>
-                <div>
+                <div id="userScopeMachineBlock">
                   <div class="d-flex justify-content-between align-items-center mb-1">
                     <label class="form-label mb-0">Machines</label>
                     <label class="admin-scope-check mb-0">
@@ -360,13 +357,42 @@
             </div>
           </div>
           <div class="d-flex justify-content-end mt-3">
-            <button class="btn btn-primary px-4">Add User</button>
+            <button class="btn btn-primary btn-lg px-5 py-2 fw-semibold shadow-sm">Add User</button>
           </div>
         </form>
-        <div class="table-responsive">
-          <table class="table table-sm table-dark table-striped align-middle">
-            <thead><tr><th>Username</th><th>Password</th><th>Work ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Scope</th><th>Scope Details</th><th>Status</th><th></th></tr></thead>
-            <tbody id="userTableBody">
+        <div class="p-3 rounded-3 border mt-1 mb-1 bg-body-tertiary">
+          <div class="mb-3">
+            <h3 class="h6 mb-1">Added Users</h3>
+            <p class="small text-secondary mb-0">Search and filter existing users by name, role, and machine group.</p>
+          </div>
+          <div class="row g-2 align-items-end mb-3">
+            <div class="col-md-4 col-lg-3">
+              <label class="form-label">Search Name</label>
+              <input class="form-control" id="userSearchInput" placeholder="Type to filter users...">
+            </div>
+            <div class="col-md-2 col-lg-2">
+              <label class="form-label">Role Filter</label>
+              <select class="form-select" id="userRoleFilterSelect">
+                <option value="">All Roles</option>
+                {% for role in user_roles %}
+                  <option value="{{ role }}">{{ "Department" if role == "Viewer" else role }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-2 col-lg-2">
+              <label class="form-label">Group Filter</label>
+              <select class="form-select" id="userMachineGroupFilterSelect">
+                <option value="">All Groups</option>
+                {% for group in machine_groups %}
+                  <option value="{{ group.id }}">{{ group.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-dark table-striped align-middle mb-0">
+              <thead><tr><th>Username</th><th>Password</th><th>Work ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Scope</th><th>Scope Details Department</th><th>Status</th><th></th></tr></thead>
+              <tbody id="userTableBody">
               {% for user in users %}
               <tr id="user-row-{{ user.id }}" data-user-id="{{ user.id }}" data-user-role="{{ user.role or '' }}" data-user-scope-mode="{{ user.scope_mode or '' }}" data-user-machine-group-id="{{ user.machine_group_id or '' }}" data-user-department-id="{{ user.department_id or '' }}" data-user-scope-machine-ids="{{ (user.scope_machine_ids or [])|join(',') }}" data-user-scope-machine-group-ids="{{ (user.scope_machine_group_ids or [])|join(',') }}" data-user-scope-department-ids="{{ (user.scope_department_ids or [])|join(',') }}" data-user-display-name="{{ user.display_name }}">
                 <td>
@@ -390,27 +416,32 @@
                 <td>
                   <select class="form-select form-select-sm js-user-field" data-user-field="role" name="role" required>
                     {% for role in user_roles %}
-                      <option value="{{ role }}" {% if user.role == role %}selected{% endif %}>{{ role }}</option>
+                      <option value="{{ role }}" {% if user.role == role %}selected{% endif %}>{{ "Department" if role == "Viewer" else role }}</option>
                     {% endfor %}
                   </select>
                 </td>
                 <td>
-                  <select class="form-select form-select-sm js-user-field" data-user-field="scope_mode" name="scope_mode" required>
+                  <select class="form-select form-select-sm" data-user-field="scope_mode" name="scope_mode" required disabled>
                     {% for scope_mode in user_scope_modes %}
                       <option value="{{ scope_mode }}" {% if user.scope_mode == scope_mode %}selected{% endif %}>{{ scope_mode|title }}</option>
                     {% endfor %}
                   </select>
                 </td>
                 <td>
-                  <div class="small text-secondary js-user-scope-summary">Machines: {{ (user.scope_machine_ids or [])|length }}, Groups: {{ (user.scope_machine_group_ids or [])|length }}</div>
+                  <select class="form-select form-select-sm js-user-field mb-1" data-user-field="department_id" name="department_id">
+                    <option value="">Select a department</option>
+                    {% for department in departments %}
+                      <option value="{{ department.id }}" {% if user.department_id == department.id %}selected{% endif %}>{{ department.name }}</option>
+                    {% endfor %}
+                  </select>
                   <input type="hidden" class="js-user-field" data-user-field="machine_group_id" name="machine_group_id" value="{{ user.machine_group_id or '' }}">
-                  <input type="hidden" class="js-user-field" data-user-field="department_id" name="department_id" value="{{ user.department_id or '' }}">
                   <input type="hidden" class="js-user-field" data-user-field="scope_machine_ids" name="scope_machine_ids" value="{{ (user.scope_machine_ids or [])|join(',') }}">
                   <input type="hidden" class="js-user-field" data-user-field="scope_machine_group_ids" name="scope_machine_group_ids" value="{{ (user.scope_machine_group_ids or [])|join(',') }}">
                   <input type="hidden" class="js-user-field" data-user-field="scope_department_ids" name="scope_department_ids" value="{{ (user.scope_department_ids or [])|join(',') }}">
                 </td>
                 <td class="user-status">{{ "Active" if user.is_active else "Inactive" }}</td>
                 <td class="text-end d-flex justify-content-end gap-2">
+                  <button class="btn btn-sm btn-outline-info js-open-user-scope" type="button">Scope</button>
                   <form class="js-ajax-form" method="post" action="{{ url_for('admin.toggle_user', user_id=user.id) }}" data-kind="user-toggle">
                     <button class="btn btn-sm btn-outline-light">Toggle</button>
                   </form>
@@ -420,8 +451,9 @@
                 </td>
               </tr>
               {% endfor %}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -453,6 +485,44 @@
     </div>
   </div>
 </div>
+<div class="modal fade admin-delete-modal" id="userScopeModal" tabindex="-1" aria-labelledby="userScopeModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content border-0 shadow-lg">
+      <div class="modal-header admin-delete-modal__header">
+        <div>
+          <p class="eyebrow mb-1">User Scope</p>
+          <h5 class="modal-title mb-0" id="userScopeModalLabel">Edit machine access</h5>
+          <p class="small text-secondary mb-0" id="userScopeModalUserName"></p>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-secondary mb-2" id="userScopeModalHint"></p>
+        <div class="admin-scope-controls">
+          <div>
+            <label class="form-label">Machine Groups</label>
+            <div class="admin-scope-group-list" id="userScopeModalGroupList"></div>
+          </div>
+          <div id="userScopeModalMachineBlock">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <label class="form-label mb-0">Machines</label>
+              <label class="admin-scope-check mb-0">
+                <input type="checkbox" id="userScopeModalAllMachines">
+                <span>All machines in selected groups</span>
+              </label>
+            </div>
+            <div class="admin-scope-machine-list" id="userScopeModalMachineList"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="userScopeModalSave">Save Scope</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="adminToastDock" class="management-toast-dock" aria-live="polite" aria-atomic="true"></div>
 <script>
 (function () {
   const sectionButtons = document.querySelectorAll("[data-admin-section-target]");
@@ -467,11 +537,16 @@
   const userTableBody = document.getElementById("userTableBody");
   const userCreateForm = document.getElementById("userCreateForm");
   const userRoleSelect = document.getElementById("userRoleSelect");
-  const userGroupingModeSelect = document.getElementById("userGroupingModeSelect");
+  const userSearchInput = document.getElementById("userSearchInput");
+  const userRoleFilterSelect = document.getElementById("userRoleFilterSelect");
+  const userMachineGroupFilterSelect = document.getElementById("userMachineGroupFilterSelect");
+  const userDepartmentFieldWrap = document.getElementById("userDepartmentFieldWrap");
   const userScopeModeSelect = document.getElementById("userScopeModeSelect");
   const userMachineGroupSelect = document.getElementById("userMachineGroupSelect");
   const userDepartmentSelect = document.getElementById("userDepartmentSelect");
+  const userScopeGroupBlock = document.getElementById("userScopeGroupBlock");
   const userScopeGroupList = document.getElementById("userScopeGroupList");
+  const userScopeMachineBlock = document.getElementById("userScopeMachineBlock");
   const userScopeMachineList = document.getElementById("userScopeMachineList");
   const userScopeAllMachines = document.getElementById("userScopeAllMachines");
   const userScopeMachineIdsInput = document.getElementById("userScopeMachineIdsInput");
@@ -491,6 +566,16 @@
   const adminDeleteModalMessage = document.getElementById("adminDeleteModalMessage");
   const adminDeleteModalConfirm = document.getElementById("adminDeleteModalConfirm");
   const adminDeleteModal = adminDeleteModalElement && window.bootstrap ? new bootstrap.Modal(adminDeleteModalElement) : null;
+  const userScopeModalElement = document.getElementById("userScopeModal");
+  const userScopeModalUserName = document.getElementById("userScopeModalUserName");
+  const userScopeModalHint = document.getElementById("userScopeModalHint");
+  const userScopeModalGroupList = document.getElementById("userScopeModalGroupList");
+  const userScopeModalMachineBlock = document.getElementById("userScopeModalMachineBlock");
+  const userScopeModalMachineList = document.getElementById("userScopeModalMachineList");
+  const userScopeModalAllMachines = document.getElementById("userScopeModalAllMachines");
+  const userScopeModalSave = document.getElementById("userScopeModalSave");
+  const adminToastDock = document.getElementById("adminToastDock");
+  const userScopeModal = userScopeModalElement && window.bootstrap ? new bootstrap.Modal(userScopeModalElement) : null;
   let machineScopeCatalog = {{ machine_scope_catalog|tojson }};
   const userRoleValues = {{ user_roles|tojson }};
   const userScopeModeValues = {{ user_scope_modes|tojson }};
@@ -502,10 +587,101 @@
     issues: {},
     users: {},
   };
+  const sectionPreparedState = {
+    "machine-groups": true,
+    departments: false,
+    users: false,
+    escalation: true,
+  };
   let pendingDeleteForm = null;
-  if (!filter || !issueTableBody || !departmentTableBody || !issueForm || !machineGroupTableBody || !machineTableBody || !machineGroupSelect || !escalationRuleTableBody || !userTableBody || !userCreateForm || !userRoleSelect || !userGroupingModeSelect || !userScopeModeSelect || !userMachineGroupSelect || !userDepartmentSelect || !userScopeGroupList || !userScopeMachineList || !userScopeAllMachines || !userScopeMachineIdsInput || !userScopeMachineGroupIdsInput || !userScopeDepartmentIdsInput || !userScopeRoleHint) return;
+  let activeUserScopeRow = null;
+  let modalScopeSelectedGroupIds = new Set();
+  let modalScopeSelectedMachineIds = new Set();
+  let userScopeModalFallbackOpen = false;
+  let adminDeleteModalFallbackOpen = false;
+  const userRowStore = new Map();
+  let toastId = 0;
+  if (!filter || !issueTableBody || !departmentTableBody || !issueForm || !machineGroupTableBody || !machineTableBody || !machineGroupSelect || !escalationRuleTableBody || !userTableBody || !userCreateForm || !userRoleSelect || !userSearchInput || !userRoleFilterSelect || !userMachineGroupFilterSelect || !userDepartmentFieldWrap || !userScopeModeSelect || !userMachineGroupSelect || !userDepartmentSelect || !userScopeGroupBlock || !userScopeGroupList || !userScopeMachineBlock || !userScopeMachineList || !userScopeAllMachines || !userScopeMachineIdsInput || !userScopeMachineGroupIdsInput || !userScopeDepartmentIdsInput || !userScopeRoleHint || !userScopeModalMachineBlock || !adminToastDock) return;
+
+  function showToast(message, level = "error", title = "Admin") {
+    const normalizedLevel = level === "success" || level === "info" ? level : "error";
+    const toast = document.createElement("div");
+    const id = ++toastId;
+    toast.className = `management-toast management-toast--${normalizedLevel}`;
+    toast.dataset.toastId = String(id);
+    toast.innerHTML = `
+      <div class="management-toast__title">${escapeHtml(title)}</div>
+      <div class="management-toast__message">${escapeHtml(message || "")}</div>
+    `;
+    adminToastDock.prepend(toast);
+    requestAnimationFrame(() => toast.classList.add("is-visible"));
+    window.setTimeout(() => {
+      toast.classList.remove("is-visible");
+      window.setTimeout(() => toast.remove(), 180);
+    }, 3200);
+  }
+
+  function pendingToastMessage(kind, form) {
+    const row = form?.closest("tr");
+    if (kind === "department-create") return "Adding department...";
+    if (kind === "department-toggle") return "Updating department status...";
+    if (kind === "department-update") return "Updating department...";
+    if (kind === "department-delete") return `Removing department ${row?.querySelector("[data-department-filter]")?.textContent?.trim() || ""}...`.trim();
+    if (kind === "machine-group-create") return "Adding machine group...";
+    if (kind === "machine-group-toggle") return "Updating machine group status...";
+    if (kind === "machine-group-update") return "Updating machine group...";
+    if (kind === "machine-group-delete") return `Removing machine group ${row?.dataset.machineGroupName || ""}...`.trim();
+    if (kind === "machine-create") return "Adding machine...";
+    if (kind === "machine-toggle") return "Updating machine status...";
+    if (kind === "machine-delete") return "Removing machine...";
+    if (kind === "issue-create") return "Adding issue...";
+    if (kind === "issue-toggle") return "Updating issue status...";
+    if (kind === "issue-delete") return "Removing issue...";
+    if (kind === "user-create") return "Adding user...";
+    if (kind === "user-toggle") return "Updating user status...";
+    if (kind === "user-delete") return "Removing user...";
+    if (kind === "escalation-update") return "Updating escalation rule...";
+    if (kind === "escalation-toggle") return "Updating escalation rule status...";
+    return "";
+  }
+
+  function successToastMessage(kind, payload) {
+    if (kind === "department-create") return "Department added.";
+    if (kind === "department-toggle") return payload?.department?.is_active ? "Department activated." : "Department deactivated.";
+    if (kind === "department-update") return "Department updated.";
+    if (kind === "department-delete") return "Department removed.";
+    if (kind === "machine-group-create") return "Machine group added.";
+    if (kind === "machine-group-toggle") return payload?.machine_group?.is_active ? "Machine group activated." : "Machine group deactivated.";
+    if (kind === "machine-group-update") return "Machine group updated.";
+    if (kind === "machine-group-delete") return "Machine group removed.";
+    if (kind === "machine-create") return "Machine added.";
+    if (kind === "machine-toggle") return payload?.machine?.is_active ? "Machine activated." : "Machine deactivated.";
+    if (kind === "machine-delete") return "Machine removed.";
+    if (kind === "issue-create") return "Issue added.";
+    if (kind === "issue-toggle") return payload?.problem?.is_active ? "Issue activated." : "Issue deactivated.";
+    if (kind === "issue-delete") return "Issue removed.";
+    if (kind === "user-create") return "User added successfully.";
+    if (kind === "user-toggle") return payload?.user?.is_active ? "User activated." : "User deactivated.";
+    if (kind === "user-delete") return "User removed.";
+    if (kind === "escalation-update") return "Escalation rule updated.";
+    if (kind === "escalation-toggle") return payload?.rule?.is_active ? "Escalation rule activated." : "Escalation rule deactivated.";
+    return "";
+  }
+
   function notifyAndonRefresh() {
     window.AndonRefreshBus?.notify();
+  }
+
+  function registerUserRow(row) {
+    if (!row?.dataset?.userId) return;
+    userRowStore.set(String(row.dataset.userId), row);
+  }
+
+  function rebuildUserRowStoreFromDom() {
+    userRowStore.clear();
+    userTableBody.querySelectorAll("tr[data-user-id]").forEach((row) => {
+      registerUserRow(row);
+    });
   }
 
   function machineGroupNameForId(groupId) {
@@ -535,6 +711,13 @@
   }
 
   function showAdminSection(sectionName) {
+    if (sectionName === "departments" && !sectionPreparedState.departments) {
+      regroupIssues();
+      sectionPreparedState.departments = true;
+    } else if (sectionName === "users" && !sectionPreparedState.users) {
+      regroupUsers();
+      sectionPreparedState.users = true;
+    }
     sections.forEach((section) => {
       section.classList.toggle("d-none", section.dataset.adminSection !== sectionName);
     });
@@ -623,22 +806,101 @@
 
   function openDeleteModal(form) {
     const prompt = getDeletePrompt(form);
-    return window.confirm(`${prompt.title}\n\n${prompt.message}`);
+    pendingDeleteForm = form;
+    if (adminDeleteModalTitle) {
+      adminDeleteModalTitle.textContent = prompt.title;
+    }
+    if (adminDeleteModalTarget) {
+      adminDeleteModalTarget.textContent = prompt.target;
+    }
+    if (adminDeleteModalMessage) {
+      adminDeleteModalMessage.textContent = prompt.message;
+    }
+    if (adminDeleteModal) {
+      adminDeleteModal.show();
+      return;
+    }
+    if (!adminDeleteModalElement) return;
+    adminDeleteModalElement.style.display = "block";
+    adminDeleteModalElement.removeAttribute("aria-hidden");
+    adminDeleteModalElement.setAttribute("aria-modal", "true");
+    adminDeleteModalElement.classList.add("show");
+    document.body.classList.add("modal-open");
+    adminDeleteModalFallbackOpen = true;
+  }
+
+  function closeDeleteModalDialog() {
+    if (adminDeleteModal) {
+      adminDeleteModal.hide();
+      return;
+    }
+    if (!adminDeleteModalElement || !adminDeleteModalFallbackOpen) return;
+    adminDeleteModalElement.classList.remove("show");
+    adminDeleteModalElement.style.display = "none";
+    adminDeleteModalElement.setAttribute("aria-hidden", "true");
+    adminDeleteModalElement.removeAttribute("aria-modal");
+    document.body.classList.remove("modal-open");
+    adminDeleteModalFallbackOpen = false;
+    pendingDeleteForm = null;
+  }
+
+  function openUserScopeModalDialog() {
+    if (userScopeModal) {
+      userScopeModal.show();
+      return;
+    }
+    if (!userScopeModalElement) return;
+    userScopeModalElement.style.display = "block";
+    userScopeModalElement.removeAttribute("aria-hidden");
+    userScopeModalElement.setAttribute("aria-modal", "true");
+    userScopeModalElement.classList.add("show");
+    document.body.classList.add("modal-open");
+    userScopeModalFallbackOpen = true;
+  }
+
+  function closeUserScopeModalDialog() {
+    if (userScopeModal) {
+      userScopeModal.hide();
+      return;
+    }
+    if (!userScopeModalElement || !userScopeModalFallbackOpen) return;
+    userScopeModalElement.classList.remove("show");
+    userScopeModalElement.style.display = "none";
+    userScopeModalElement.setAttribute("aria-hidden", "true");
+    userScopeModalElement.removeAttribute("aria-modal");
+    document.body.classList.remove("modal-open");
+    userScopeModalFallbackOpen = false;
+    activeUserScopeRow = null;
+    modalScopeSelectedGroupIds = new Set();
+    modalScopeSelectedMachineIds = new Set();
+    userScopeModalGroupList.innerHTML = "";
+    userScopeModalMachineList.innerHTML = "";
+    userScopeModalAllMachines.checked = false;
   }
 
   adminDeleteModalConfirm?.addEventListener("click", () => {
     if (!pendingDeleteForm) return;
     const form = pendingDeleteForm;
     pendingDeleteForm = null;
-    if (adminDeleteModal) {
-      adminDeleteModal.hide();
-    }
+    closeDeleteModalDialog();
     form.dataset.skipDeleteConfirm = "true";
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   });
 
   adminDeleteModalElement?.addEventListener("hidden.bs.modal", () => {
     pendingDeleteForm = null;
+  });
+
+  adminDeleteModalElement?.addEventListener("click", (event) => {
+    if (event.target === adminDeleteModalElement) {
+      closeDeleteModalDialog();
+    }
+  });
+
+  adminDeleteModalElement?.querySelectorAll('[data-bs-dismiss="modal"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      closeDeleteModalDialog();
+    });
   });
 
   function applyFilter() {
@@ -770,6 +1032,34 @@
       .join("");
   }
 
+  function roleLabel(role) {
+    if (role === "Viewer") {
+      return "Department";
+    }
+    return role;
+  }
+
+  function buildRoleSelectOptions(values, selectedValue) {
+    return (values || [])
+      .map((value) => {
+        const selected = String(value) === String(selectedValue || "") ? " selected" : "";
+        return `<option value="${escapeHtml(value)}"${selected}>${escapeHtml(roleLabel(value))}</option>`;
+      })
+      .join("");
+  }
+
+  function buildDepartmentSelectOptions(selectedValue) {
+    const baseOption = '<option value="">Select a department</option>';
+    const options = [...departmentsCatalog]
+      .sort((left, right) => String(left?.name || "").localeCompare(String(right?.name || "")))
+      .map((department) => {
+        const selected = String(department.id) === String(selectedValue || "") ? " selected" : "";
+        return `<option value="${escapeHtml(department.id)}"${selected}>${escapeHtml(department.name || "")}</option>`;
+      })
+      .join("");
+    return `${baseOption}${options}`;
+  }
+
   function parseCsvIds(value) {
     return String(value || "")
       .split(",")
@@ -790,32 +1080,82 @@
 
   function roleScopeHint(role) {
     if (role === "Operator") {
-      return "Operator: pick one or more machines. Groups are just a filter helper.";
+      return "Operator: pick one or more machine groups, then choose machines in those groups.";
     }
     if (role === "Viewer") {
-      return "Viewer: pick one or more machine groups. Machines can be specific or all in each selected group.";
+      return "Department: choose a department from the dropdown. Machine groups are optional.";
     }
     if (role === "Manager") {
-      return "Manager: pick machine groups and/or specific machines for dashboard access.";
+      return "Manager: pick machine groups, or leave blank to include all machine groups. Machines are assigned automatically.";
     }
     return "Admin gets full access and does not need scope picks.";
   }
 
   function applyRoleScopeState() {
     const role = userRoleSelect.value || "Operator";
-    const disabled = role === "Admin";
+    const adminMode = role === "Admin";
+    const operatorMode = role === "Operator";
+    const viewerMode = role === "Viewer";
+    const machineSelectionEnabled = operatorMode;
     userScopeRoleHint.textContent = roleScopeHint(role);
+    userDepartmentFieldWrap.classList.toggle("d-none", !viewerMode);
     userScopeGroupList.querySelectorAll("input").forEach((input) => {
-      input.disabled = disabled;
-      if (disabled) {
+      input.disabled = adminMode;
+      if (adminMode) {
         input.checked = false;
       }
     });
-    userScopeAllMachines.disabled = disabled;
-    if (disabled) {
+    userDepartmentSelect.disabled = adminMode ? true : !viewerMode;
+    if (!viewerMode) {
+      userDepartmentSelect.value = "";
+    }
+    if (adminMode) {
+      userScopeMachineIdsInput.value = "";
+      userScopeMachineGroupIdsInput.value = "";
+      userScopeDepartmentIdsInput.value = "";
+    }
+    userScopeGroupBlock.classList.toggle("d-none", adminMode);
+    userScopeMachineBlock.classList.toggle("d-none", !machineSelectionEnabled);
+    userScopeAllMachines.disabled = !machineSelectionEnabled;
+    if (!machineSelectionEnabled) {
       userScopeAllMachines.checked = false;
     }
-    userScopeModeSelect.value = disabled ? "all" : "restricted";
+    userScopeMachineList.classList.toggle("opacity-50", !machineSelectionEnabled);
+    userScopeMachineList.classList.toggle("pe-none", !machineSelectionEnabled);
+    userScopeModeSelect.value = adminMode ? "all" : "restricted";
+  }
+
+  function machineIdsForGroupIds(groupIds) {
+    const selectedGroupIds = new Set(uniqueSortedIds(groupIds));
+    if (!selectedGroupIds.size) {
+      return [];
+    }
+    return uniqueSortedIds(
+      machineScopeCatalog
+        .filter((machine) => machine && machine.id && selectedGroupIds.has(Number(machine.machine_group_id)))
+        .map((machine) => Number(machine.id))
+    );
+  }
+
+  function allActiveMachineGroupIds() {
+    return uniqueSortedIds(
+      (machineGroupsCatalog || [])
+        .filter((group) => group && group.id && group.is_active !== false)
+        .map((group) => Number(group.id))
+    );
+  }
+
+  function machineDepartmentIdsForMachineIds(machineIds) {
+    const selectedMachineIds = new Set(uniqueSortedIds(machineIds));
+    if (!selectedMachineIds.size) {
+      return [];
+    }
+    return uniqueSortedIds(
+      machineScopeCatalog
+        .filter((machine) => machine && machine.id && selectedMachineIds.has(Number(machine.id)))
+        .map((machine) => Number(machine.department_id))
+        .filter((departmentId) => Number.isInteger(departmentId) && departmentId > 0)
+    );
   }
 
   function buildScopeMachineRow(machine, selectedMachineIds) {
@@ -826,13 +1166,20 @@
   }
 
   function renderScopeMachines() {
+    const role = userRoleSelect.value || "Operator";
+    const disableMachineSelection = role !== "Operator";
     const selectedGroupIds = new Set(currentScopeGroupIds());
     const selectedMachineIds = new Set(parseCsvIds(userScopeMachineIdsInput.value));
     const filteredMachines = machineScopeCatalog
       .filter((machine) => machine && machine.id)
-      .filter((machine) => selectedGroupIds.size === 0 || selectedGroupIds.has(Number(machine.machine_group_id)));
-    if (!filteredMachines.length) {
+      .filter((machine) => selectedGroupIds.has(Number(machine.machine_group_id)));
+    if (!selectedGroupIds.size) {
       userScopeMachineList.innerHTML = '<div class="admin-scope-empty">Select a machine group to load machines.</div>';
+      syncScopeHiddenInputs();
+      return;
+    }
+    if (!filteredMachines.length) {
+      userScopeMachineList.innerHTML = '<div class="admin-scope-empty">No active machines found in selected groups.</div>';
       syncScopeHiddenInputs();
       return;
     }
@@ -844,27 +1191,158 @@
         checkbox.checked = true;
       });
     }
+    if (disableMachineSelection) {
+      userScopeMachineList.querySelectorAll(".js-user-scope-machine").forEach((checkbox) => {
+        checkbox.checked = false;
+        checkbox.disabled = true;
+      });
+    }
     syncScopeHiddenInputs();
   }
 
   function syncScopeHiddenInputs() {
-    const selectedGroupIds = uniqueSortedIds(currentScopeGroupIds());
+    const role = userRoleSelect.value || "Operator";
+    const selectedGroupIdsRaw = uniqueSortedIds(currentScopeGroupIds());
+    const selectedGroupIds = role === "Manager" && selectedGroupIdsRaw.length === 0
+      ? allActiveMachineGroupIds()
+      : selectedGroupIdsRaw;
+    const selectedDepartmentId = Number(userDepartmentSelect.value || "");
     const selectedMachineCheckboxes = Array.from(userScopeMachineList.querySelectorAll(".js-user-scope-machine:checked"));
-    const selectedMachineIds = uniqueSortedIds(selectedMachineCheckboxes.map((input) => Number(input.value)));
-    const selectedDepartmentIds = uniqueSortedIds(
+    const selectedMachineIds = role === "Operator"
+      ? uniqueSortedIds(selectedMachineCheckboxes.map((input) => Number(input.value)))
+      : (role === "Manager" ? machineIdsForGroupIds(selectedGroupIds) : []);
+    const selectedMachineDepartmentIds = uniqueSortedIds(
       selectedMachineCheckboxes
         .map((input) => Number(input.dataset.departmentId || ""))
         .filter((value) => Number.isInteger(value) && value > 0)
     );
+    const selectedDepartmentIds = role === "Viewer"
+      ? (Number.isInteger(selectedDepartmentId) && selectedDepartmentId > 0 ? [selectedDepartmentId] : [])
+      : (role === "Operator"
+        ? selectedMachineDepartmentIds
+        : (role === "Manager" ? machineDepartmentIdsForMachineIds(selectedMachineIds) : []));
     userScopeMachineGroupIdsInput.value = selectedGroupIds.join(",");
-    userScopeMachineIdsInput.value = selectedMachineIds.join(",");
+    userScopeMachineIdsInput.value = role === "Operator" || role === "Manager" ? selectedMachineIds.join(",") : "";
     userScopeDepartmentIdsInput.value = selectedDepartmentIds.join(",");
   }
 
-  function scopeSummaryFromUser(user) {
-    const machineCount = Array.isArray(user.scope_machine_ids) ? user.scope_machine_ids.length : parseCsvIds(user.scope_machine_ids).length;
-    const groupCount = Array.isArray(user.scope_machine_group_ids) ? user.scope_machine_group_ids.length : parseCsvIds(user.scope_machine_group_ids).length;
-    return `Machines: ${machineCount}, Groups: ${groupCount}`;
+  function scopeRoleFromRow(row) {
+    return row?.querySelector('[name="role"]')?.value || row?.dataset.userRole || "";
+  }
+
+  function modalScopeGroupIdsFromDom() {
+    return uniqueSortedIds(
+      Array.from(userScopeModalGroupList.querySelectorAll(".js-user-modal-scope-group:checked"))
+        .map((input) => Number(input.value))
+    );
+  }
+
+  function modalScopeFilteredMachines(selectedGroupIds) {
+    const selected = new Set(selectedGroupIds || []);
+    return machineScopeCatalog
+      .filter((machine) => machine && machine.id)
+      .filter((machine) => selected.size === 0 || selected.has(Number(machine.machine_group_id)));
+  }
+
+  function renderUserScopeModalGroups() {
+    const orderedGroups = [...machineGroupsCatalog].sort((left, right) =>
+      String(left?.name || "").localeCompare(String(right?.name || ""))
+    );
+    userScopeModalGroupList.innerHTML = orderedGroups
+      .map((group) => {
+        const checked = modalScopeSelectedGroupIds.has(Number(group.id)) ? " checked" : "";
+        return `<label class="admin-scope-pill"><input type="checkbox" class="js-user-modal-scope-group" value="${group.id}" data-group-name="${escapeHtml(group.name || "")}"${checked}><span>${escapeHtml(group.name || "")}</span></label>`;
+      })
+      .join("");
+  }
+
+  function renderUserScopeModalMachines() {
+    const filteredMachines = modalScopeFilteredMachines(modalScopeSelectedGroupIds);
+    if (!filteredMachines.length) {
+      userScopeModalMachineList.innerHTML = '<div class="admin-scope-empty">Select a machine group to load machines.</div>';
+      userScopeModalAllMachines.checked = false;
+      return;
+    }
+    userScopeModalMachineList.innerHTML = filteredMachines
+      .map((machine) => buildScopeMachineRow(machine, modalScopeSelectedMachineIds).replaceAll("js-user-scope-machine", "js-user-modal-scope-machine"))
+      .join("");
+    const machineInputs = Array.from(userScopeModalMachineList.querySelectorAll(".js-user-modal-scope-machine"));
+    const checkedCount = machineInputs.filter((input) => input.checked).length;
+    userScopeModalAllMachines.checked = checkedCount > 0 && checkedCount === machineInputs.length;
+  }
+
+  function openUserScopeEditor(row) {
+    if (!row || !userScopeModalElement) return;
+    activeUserScopeRow = row;
+    const displayName = row.querySelector('[name="display_name"]')?.value?.trim() || row.dataset.userDisplayName || "User";
+    const role = scopeRoleFromRow(row);
+    userScopeModalUserName.textContent = displayName;
+    userScopeModalHint.textContent = roleScopeHint(role);
+    const groupIds = parseCsvIds(row.querySelector('[name="scope_machine_group_ids"]')?.value || "");
+    const machineIds = parseCsvIds(row.querySelector('[name="scope_machine_ids"]')?.value || "");
+    const normalizedGroupIds = uniqueSortedIds(groupIds);
+    const resolvedGroupIds = role === "Manager" && normalizedGroupIds.length === 0
+      ? allActiveMachineGroupIds()
+      : normalizedGroupIds;
+    modalScopeSelectedGroupIds = new Set(resolvedGroupIds);
+    modalScopeSelectedMachineIds = new Set(uniqueSortedIds(machineIds));
+    renderUserScopeModalGroups();
+    const machineSelectionEnabled = role === "Operator";
+    userScopeModalMachineBlock.classList.toggle("d-none", !machineSelectionEnabled);
+    userScopeModalAllMachines.disabled = !machineSelectionEnabled;
+    userScopeModalMachineList.classList.toggle("opacity-50", !machineSelectionEnabled);
+    userScopeModalMachineList.classList.toggle("pe-none", !machineSelectionEnabled);
+    if (!machineSelectionEnabled) {
+      userScopeModalAllMachines.checked = false;
+      modalScopeSelectedMachineIds = new Set();
+    }
+    renderUserScopeModalMachines();
+    openUserScopeModalDialog();
+  }
+
+  function applyUserScopeToRow(row) {
+    if (!row) return;
+    const role = scopeRoleFromRow(row);
+    const selectedGroupIdsRaw = modalScopeGroupIdsFromDom();
+    const selectedGroupIds = role === "Manager" && selectedGroupIdsRaw.length === 0
+      ? allActiveMachineGroupIds()
+      : selectedGroupIdsRaw;
+    const filteredMachines = modalScopeFilteredMachines(selectedGroupIds);
+    const visibleMachineIds = new Set(filteredMachines.map((machine) => Number(machine.id)));
+    const selectedMachineIdsRaw = uniqueSortedIds(
+      Array.from(userScopeModalMachineList.querySelectorAll(".js-user-modal-scope-machine:checked"))
+        .map((input) => Number(input.value))
+        .filter((machineId) => visibleMachineIds.has(machineId))
+    );
+    const selectedMachineIds = role === "Operator"
+      ? selectedMachineIdsRaw
+      : (role === "Manager"
+        ? (selectedGroupIds.length ? uniqueSortedIds(filteredMachines.map((machine) => Number(machine.id))) : [])
+        : []);
+    const selectedDepartmentIds = role === "Viewer"
+      ? (() => {
+          const selected = Number(row.querySelector('[name="department_id"]')?.value || "");
+          return Number.isInteger(selected) && selected > 0 ? [selected] : [];
+        })()
+      : (role === "Operator"
+        ? uniqueSortedIds(
+          filteredMachines
+            .filter((machine) => selectedMachineIds.includes(Number(machine.id)))
+            .map((machine) => Number(machine.department_id))
+        )
+        : (role === "Manager" ? machineDepartmentIdsForMachineIds(selectedMachineIds) : []));
+    const primaryGroupId = selectedGroupIds.length ? selectedGroupIds[0] : "";
+    const primaryDepartmentId = selectedDepartmentIds.length ? selectedDepartmentIds[0] : "";
+    row.querySelector('[name="machine_group_id"]').value = primaryGroupId ? String(primaryGroupId) : "";
+    row.querySelector('[name="department_id"]').value = primaryDepartmentId ? String(primaryDepartmentId) : "";
+    row.querySelector('[name="scope_machine_group_ids"]').value = selectedGroupIds.join(",");
+    row.querySelector('[name="scope_machine_ids"]').value = selectedMachineIds.join(",");
+    row.querySelector('[name="scope_department_ids"]').value = selectedDepartmentIds.join(",");
+    row.dataset.userMachineGroupId = primaryGroupId ? String(primaryGroupId) : "";
+    row.dataset.userDepartmentId = primaryDepartmentId ? String(primaryDepartmentId) : "";
+    row.dataset.userScopeMachineGroupIds = selectedGroupIds.join(",");
+    row.dataset.userScopeMachineIds = selectedMachineIds.join(",");
+    row.dataset.userScopeDepartmentIds = selectedDepartmentIds.join(",");
   }
 
   function scopeGroupNameById(groupId) {
@@ -946,6 +1424,7 @@
 
   function applyUserCreateDefaults() {
     userRoleSelect.value = "Operator";
+    userDepartmentSelect.value = "";
     userScopeAllMachines.checked = false;
     userScopeMachineIdsInput.value = "";
     userScopeMachineGroupIdsInput.value = "";
@@ -1014,58 +1493,58 @@
     applyFilter();
   }
 
-  function userGroupInfo(row) {
-    const scopeGroupIds = uniqueSortedIds(parseCsvIds(row.dataset.userScopeMachineGroupIds || ""));
-    const scopeDeptIds = uniqueSortedIds(parseCsvIds(row.dataset.userScopeDepartmentIds || ""));
-    const groupNames = scopeGroupIds.map((id) => machineGroupNameForId(id)).filter(Boolean);
-    const deptNames = scopeDeptIds.map((id) => departmentNameForId(id)).filter(Boolean);
-    const mode = userGroupingModeSelect.value || "combined";
-    if (mode === "machine-group") {
-      const label = groupNames.length ? groupNames.join(", ") : "No Machine Group Scope";
-      return { key: `mg:${label}`, label };
+  function userMatchesFilters(row) {
+    const query = String(userSearchInput.value || "").trim().toLowerCase();
+    const roleFilter = String(userRoleFilterSelect.value || "");
+    const groupFilter = String(userMachineGroupFilterSelect.value || "");
+    const nameValue = (row.querySelector('[name="display_name"]')?.value || row.dataset.userDisplayName || "").toLowerCase();
+    const usernameValue = (row.querySelector('[name="username"]')?.value || "").toLowerCase();
+    const emailValue = (row.querySelector('[name="email"]')?.value || "").toLowerCase();
+    if (query && !nameValue.includes(query) && !usernameValue.includes(query) && !emailValue.includes(query)) {
+      return false;
     }
-    if (mode === "department") {
-      const label = deptNames.length ? deptNames.join(", ") : "No Department Scope";
-      return { key: `dept:${label}`, label };
+    const rowRole = row.querySelector('[name="role"]')?.value || row.dataset.userRole || "";
+    if (roleFilter && rowRole !== roleFilter) {
+      return false;
     }
-    const groupLabel = groupNames.length ? groupNames.join(", ") : "No Machine Group";
-    const deptLabel = deptNames.length ? deptNames.join(", ") : "No Department";
-    return {
-      key: `combo:${groupLabel}|${deptLabel}`,
-      label: `${groupLabel} • ${deptLabel}`,
-    };
+    if (groupFilter) {
+      const scopeGroupIds = uniqueSortedIds(parseCsvIds(row.dataset.userScopeMachineGroupIds || ""));
+      const rowMachineGroupId = Number(row.dataset.userMachineGroupId || row.querySelector('[name="machine_group_id"]')?.value || "");
+      const ids = new Set(scopeGroupIds);
+      if (Number.isInteger(rowMachineGroupId) && rowMachineGroupId > 0) {
+        ids.add(rowMachineGroupId);
+      }
+      if (!ids.has(Number(groupFilter))) {
+        return false;
+      }
+    }
+    return true;
   }
 
   function regroupUsers() {
-    const rows = Array.from(userTableBody.querySelectorAll("tr[data-user-id]"));
-    const mode = userGroupingModeSelect.value || "combined";
-    rows.sort((left, right) => {
+    const rows = Array.from(userRowStore.values());
+    const filteredRows = rows.filter((row) => userMatchesFilters(row));
+    filteredRows.sort((left, right) => {
       const leftName = (left.dataset.userDisplayName || left.querySelector('[name="display_name"]')?.value || "").trim();
       const rightName = (right.dataset.userDisplayName || right.querySelector('[name="display_name"]')?.value || "").trim();
       return leftName.localeCompare(rightName);
     });
     userTableBody.innerHTML = "";
-    if (mode === "none") {
-      rows.forEach((row) => userTableBody.appendChild(row));
-      return;
-    }
-    const grouped = new Map();
-    rows.forEach((row) => {
-      const group = userGroupInfo(row);
-      if (!grouped.has(group.key)) {
-        grouped.set(group.key, { label: group.label, rows: [] });
-      }
-      grouped.get(group.key).rows.push(row);
+    filteredRows.forEach((row) => {
+      row.dataset.groupKey = "";
+      row.style.display = "";
+      userTableBody.appendChild(row);
     });
-    const orderedGroups = Array.from(grouped.entries()).sort((left, right) => left[1].label.localeCompare(right[1].label));
-    orderedGroups.forEach(([groupKey, group]) => {
-      userTableBody.insertAdjacentHTML("beforeend", groupHeaderRow("users", groupKey, group.label, group.rows.length, 11, isGroupCollapsed("users", groupKey)));
-      group.rows.forEach((row) => {
-        row.dataset.groupKey = groupKey;
-        row.style.display = isGroupCollapsed("users", groupKey) ? "none" : "";
-        userTableBody.appendChild(row);
-      });
-    });
+  }
+
+  function refreshIssuesView() {
+    if (!sectionPreparedState.departments) return;
+    regroupIssues();
+  }
+
+  function refreshUsersView() {
+    if (!sectionPreparedState.users) return;
+    regroupUsers();
   }
 
   function syncIssueDepartmentOptions() {
@@ -1176,24 +1655,26 @@
         <td><input class="form-control form-control-sm js-user-field" data-user-field="phone_number" name="phone_number" value="${escapeHtml(user.phone_number || "")}" placeholder="Phone number"></td>
         <td>
           <select class="form-select form-select-sm js-user-field" data-user-field="role" name="role" required>
-            ${buildSimpleSelectOptions(userRoleValues, user.role)}
+            ${buildRoleSelectOptions(userRoleValues, user.role)}
           </select>
         </td>
         <td>
-          <select class="form-select form-select-sm js-user-field" data-user-field="scope_mode" name="scope_mode" required>
+          <select class="form-select form-select-sm" data-user-field="scope_mode" name="scope_mode" required disabled>
             ${buildSimpleSelectOptions(userScopeModeValues, user.scope_mode)}
           </select>
         </td>
         <td>
-          <div class="small text-secondary js-user-scope-summary">${escapeHtml(scopeSummaryFromUser(user))}</div>
+          <select class="form-select form-select-sm js-user-field mb-1" data-user-field="department_id" name="department_id">
+            ${buildDepartmentSelectOptions(user.department_id)}
+          </select>
           <input type="hidden" class="js-user-field" data-user-field="machine_group_id" name="machine_group_id" value="${escapeHtml(user.machine_group_id || "")}">
-          <input type="hidden" class="js-user-field" data-user-field="department_id" name="department_id" value="${escapeHtml(user.department_id || "")}">
           <input type="hidden" class="js-user-field" data-user-field="scope_machine_ids" name="scope_machine_ids" value="${escapeHtml(scopeMachineIds)}">
           <input type="hidden" class="js-user-field" data-user-field="scope_machine_group_ids" name="scope_machine_group_ids" value="${escapeHtml(scopeMachineGroupIds)}">
           <input type="hidden" class="js-user-field" data-user-field="scope_department_ids" name="scope_department_ids" value="${escapeHtml(scopeDepartmentIds)}">
         </td>
         <td class="user-status">${user.is_active ? "Active" : "Inactive"}</td>
         <td class="text-end d-flex justify-content-end gap-2">
+          <button class="btn btn-sm btn-outline-info js-open-user-scope" type="button">Scope</button>
           <form class="js-ajax-form" method="post" action="/andon/admin/user/${user.id}/toggle" data-kind="user-toggle">
             <button class="btn btn-sm btn-outline-light">Toggle</button>
           </form>
@@ -1231,8 +1712,26 @@
     machineGroupSelect.appendChild(option);
   }
 
+  function appendUserMachineGroupFilterOption(group) {
+    if (!group?.id || !group?.name) return;
+    if (Array.from(userMachineGroupFilterSelect.options).some((option) => option.value === String(group.id))) {
+      return;
+    }
+    const option = document.createElement("option");
+    option.value = String(group.id);
+    option.textContent = group.name;
+    userMachineGroupFilterSelect.appendChild(option);
+  }
+
   function removeMachineGroupOption(groupName) {
     const option = machineGroupSelect.querySelector(`option[value="${CSS.escape(groupName)}"]`);
+    if (option) {
+      option.remove();
+    }
+  }
+
+  function removeUserMachineGroupFilterOption(groupId) {
+    const option = userMachineGroupFilterSelect.querySelector(`option[value="${CSS.escape(String(groupId))}"]`);
     if (option) {
       option.remove();
     }
@@ -1278,11 +1777,15 @@
 
   function appendUserRow(user) {
     userTableBody.insertAdjacentHTML("beforeend", userRowHtml(user));
+    const row = document.getElementById(`user-row-${user.id}`);
+    registerUserRow(row);
+    applyUserRowRoleState(row);
   }
 
   function updateUserRow(user) {
-    const row = document.getElementById(`user-row-${user.id}`);
+    const row = userRowStore.get(String(user.id)) || document.getElementById(`user-row-${user.id}`);
     if (!row) return;
+    row.dataset.userRole = user.role || "";
     row.dataset.userScopeMode = user.scope_mode || "";
     row.dataset.userMachineGroupId = user.machine_group_id || "";
     row.dataset.userDepartmentId = user.department_id || "";
@@ -1303,15 +1806,40 @@
     row.querySelector('[name="scope_machine_ids"]').value = Array.isArray(user.scope_machine_ids) ? user.scope_machine_ids.join(",") : "";
     row.querySelector('[name="scope_machine_group_ids"]').value = Array.isArray(user.scope_machine_group_ids) ? user.scope_machine_group_ids.join(",") : "";
     row.querySelector('[name="scope_department_ids"]').value = Array.isArray(user.scope_department_ids) ? user.scope_department_ids.join(",") : "";
-    const scopeSummary = row.querySelector(".js-user-scope-summary");
-    if (scopeSummary) {
-      scopeSummary.textContent = scopeSummaryFromUser(user);
-    }
     row.querySelector(".user-status").textContent = user.is_active ? "Active" : "Inactive";
+    applyUserRowRoleState(row);
+  }
+
+  function applyUserRowRoleState(row) {
+    if (!row) return;
+    const role = row.querySelector('[name="role"]')?.value || row.dataset.userRole || "";
+    const isAdmin = role === "Admin";
+    const isViewer = role === "Viewer";
+    const departmentSelect = row.querySelector('[name="department_id"]');
+    const scopeButton = row.querySelector(".js-open-user-scope");
+    if (departmentSelect) {
+      departmentSelect.disabled = isAdmin || !isViewer;
+      if (!isViewer) {
+        departmentSelect.value = "";
+      }
+    }
+    if (scopeButton) {
+      scopeButton.disabled = isAdmin;
+      scopeButton.classList.toggle("disabled", isAdmin);
+      scopeButton.setAttribute("aria-disabled", isAdmin ? "true" : "false");
+      scopeButton.title = isAdmin ? "Admin has full access and does not use scope." : "Edit scope";
+    }
+    if (isAdmin) {
+      row.querySelector('[name="machine_group_id"]').value = "";
+      row.querySelector('[name="scope_machine_ids"]').value = "";
+      row.querySelector('[name="scope_machine_group_ids"]').value = "";
+      row.querySelector('[name="scope_department_ids"]').value = "";
+    }
   }
 
   function clearUserDepartmentById(departmentId) {
-    userTableBody.querySelectorAll(`tr[data-user-department-id="${departmentId}"]`).forEach((row) => {
+    Array.from(userRowStore.values()).forEach((row) => {
+      if (String(row.dataset.userDepartmentId || "") !== String(departmentId)) return;
       row.dataset.userDepartmentId = "";
       const select = row.querySelector('[name="department_id"]');
       if (select) {
@@ -1321,7 +1849,8 @@
   }
 
   function clearUserMachineGroupById(groupId) {
-    userTableBody.querySelectorAll(`tr[data-user-machine-group-id="${groupId}"]`).forEach((row) => {
+    Array.from(userRowStore.values()).forEach((row) => {
+      if (String(row.dataset.userMachineGroupId || "") !== String(groupId)) return;
       row.dataset.userMachineGroupId = "";
       const select = row.querySelector('[name="machine_group_id"]');
       if (select) {
@@ -1330,9 +1859,48 @@
     });
   }
 
+  function syncUserRowScopeForRole(row) {
+    if (!row) return;
+    const role = row.querySelector('[name="role"]')?.value || "";
+    const departmentValue = row.querySelector('[name="department_id"]')?.value || "";
+    const selectedGroupIdsRaw = parseCsvIds(row.querySelector('[name="scope_machine_group_ids"]')?.value || "");
+    const selectedGroupIds = role === "Manager" && selectedGroupIdsRaw.length === 0
+      ? allActiveMachineGroupIds()
+      : selectedGroupIdsRaw;
+    const managerMachineIds = machineIdsForGroupIds(selectedGroupIds);
+    const managerDepartmentIds = machineDepartmentIdsForMachineIds(managerMachineIds);
+    const operatorMachineIds = parseCsvIds(row.querySelector('[name="scope_machine_ids"]')?.value || "");
+    const operatorDepartmentIds = machineDepartmentIdsForMachineIds(operatorMachineIds);
+    if (role === "Admin") {
+      row.querySelector('[name="scope_machine_ids"]').value = "";
+      row.querySelector('[name="scope_machine_group_ids"]').value = "";
+      row.querySelector('[name="scope_department_ids"]').value = "";
+      row.querySelector('[name="department_id"]').value = "";
+      return;
+    }
+    if (role === "Viewer") {
+      row.querySelector('[name="scope_machine_ids"]').value = "";
+      row.querySelector('[name="scope_department_ids"]').value = departmentValue ? String(departmentValue) : "";
+      return;
+    }
+    if (role === "Manager") {
+      row.querySelector('[name="scope_machine_group_ids"]').value = selectedGroupIds.join(",");
+      row.querySelector('[name="scope_machine_ids"]').value = managerMachineIds.join(",");
+      row.querySelector('[name="scope_department_ids"]').value = managerDepartmentIds.join(",");
+      row.querySelector('[name="department_id"]').value = "";
+      return;
+    }
+    if (role === "Operator") {
+      row.querySelector('[name="scope_department_ids"]').value = operatorDepartmentIds.join(",");
+      return;
+    }
+    row.querySelector('[name="scope_department_ids"]').value = "";
+  }
+
   async function submitUserUpdate(row) {
     const userId = row.dataset.userId;
     if (!userId) return;
+    syncUserRowScopeForRole(row);
     const payload = new FormData();
     payload.append("username", row.querySelector('[name="username"]')?.value || "");
     payload.append("password", row.querySelector('[name="password"]')?.value || "");
@@ -1340,8 +1908,9 @@
     payload.append("display_name", row.querySelector('[name="display_name"]')?.value || "");
     payload.append("email", row.querySelector('[name="email"]')?.value || "");
     payload.append("phone_number", row.querySelector('[name="phone_number"]')?.value || "");
-    payload.append("role", row.querySelector('[name="role"]')?.value || "");
-    payload.append("scope_mode", row.querySelector('[name="scope_mode"]')?.value || "");
+    const role = row.querySelector('[name="role"]')?.value || "";
+    payload.append("role", role);
+    payload.append("scope_mode", role === "Admin" ? "all" : "restricted");
     payload.append("machine_group_id", row.querySelector('[name="machine_group_id"]')?.value || "");
     payload.append("department_id", row.querySelector('[name="department_id"]')?.value || "");
     payload.append("scope_machine_ids", row.querySelector('[name="scope_machine_ids"]')?.value || "");
@@ -1362,7 +1931,7 @@
     }
     if (data.user) {
       updateUserRow(data.user);
-      regroupUsers();
+      refreshUsersView();
     }
   }
 
@@ -1424,21 +1993,23 @@
   }
 
   document.addEventListener("submit", async (event) => {
+    if (event.defaultPrevented) return;
     const form = event.target.closest("form.js-ajax-form");
     if (!form) return;
+    const kind = form.dataset.kind || "";
     if (form.dataset.kind?.endsWith("-delete") && form.dataset.skipDeleteConfirm !== "true") {
       event.preventDefault();
-      if (!openDeleteModal(form)) {
-        return;
-      }
-      form.dataset.skipDeleteConfirm = "true";
-      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      openDeleteModal(form);
       return;
     }
     if (form.dataset.skipDeleteConfirm === "true") {
       delete form.dataset.skipDeleteConfirm;
     }
     event.preventDefault();
+    const pendingMessage = pendingToastMessage(kind, form);
+    if (pendingMessage) {
+      showToast(pendingMessage, "info", "Admin");
+    }
     try {
       const payload = await submitAjaxForm(form);
       if (form.dataset.kind === "department-create" && payload.department) {
@@ -1446,8 +2017,8 @@
         departmentsCatalog.push({ id: payload.department.id, name: payload.department.name });
         appendDepartmentOption(payload.department);
         appendUserDepartmentOption(payload.department);
-        regroupIssues();
-        regroupUsers();
+        refreshIssuesView();
+        refreshUsersView();
         form.reset();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "department-toggle" && payload.department) {
@@ -1485,8 +2056,8 @@
         if (deptIndex >= 0) {
           departmentsCatalog[deptIndex].name = payload.department.name;
         }
-        regroupIssues();
-        regroupUsers();
+        refreshIssuesView();
+        refreshUsersView();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "department-delete") {
         const row = form.closest("tr");
@@ -1506,19 +2077,20 @@
           if (deptIndex >= 0) {
             departmentsCatalog.splice(deptIndex, 1);
           }
-          regroupIssues();
-          regroupUsers();
+          refreshIssuesView();
+          refreshUsersView();
           notifyAndonRefresh();
         }
       } else if (form.dataset.kind === "machine-group-create" && payload.machine_group) {
         machineGroupTableBody.insertAdjacentHTML("beforeend", machineGroupRowHtml(payload.machine_group));
         machineGroupsCatalog.push({ id: payload.machine_group.id, name: payload.machine_group.name, is_active: payload.machine_group.is_active, machine_count: payload.machine_group.machine_count });
         appendMachineGroupOption(payload.machine_group);
+        appendUserMachineGroupFilterOption(payload.machine_group);
         appendUserMachineGroupOption(payload.machine_group);
         appendScopeGroupChoice(payload.machine_group);
         form.reset();
         regroupMachines();
-        regroupUsers();
+        refreshUsersView();
         renderScopeMachines();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "machine-group-toggle" && payload.machine_group) {
@@ -1559,6 +2131,10 @@
           if (groupIndex >= 0) {
             machineGroupsCatalog[groupIndex].name = payload.machine_group.name;
           }
+          const filterOption = userMachineGroupFilterSelect.querySelector(`option[value="${CSS.escape(String(payload.machine_group.id))}"]`);
+          if (filterOption) {
+            filterOption.textContent = payload.machine_group.name;
+          }
           machineScopeCatalog.forEach((entry) => {
             if ((entry.machine_group_name || "") === oldName) {
               entry.machine_group_name = payload.machine_group.name;
@@ -1568,7 +2144,7 @@
         }
         renameScopeGroupChoice(payload.machine_group);
         regroupMachines();
-        regroupUsers();
+        refreshUsersView();
         renderScopeMachines();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "machine-group-delete") {
@@ -1580,6 +2156,7 @@
         }
         removeMachinesByIds(payload.affected_machine_ids);
         removeUserMachineGroupOption(groupId);
+        removeUserMachineGroupFilterOption(groupId);
         clearUserMachineGroupById(String(groupId));
         removeScopeGroupChoice(String(groupId));
         if (groupName) {
@@ -1595,8 +2172,11 @@
           machineGroupSelect.value = "";
           applyMachineGroupFilter();
         }
+        if (userMachineGroupFilterSelect.value === String(groupId)) {
+          userMachineGroupFilterSelect.value = "";
+        }
         regroupMachines();
-        regroupUsers();
+        refreshUsersView();
         renderScopeMachines();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "machine-create" && payload.machine) {
@@ -1640,7 +2220,7 @@
         notifyAndonRefresh();
       } else if (form.dataset.kind === "issue-create" && payload.problem) {
         appendIssueRow(payload.problem);
-        regroupIssues();
+        refreshIssuesView();
         const nameInput = form.querySelector('input[name="name"]');
         if (nameInput) {
           nameInput.value = "";
@@ -1649,34 +2229,39 @@
         notifyAndonRefresh();
       } else if (form.dataset.kind === "issue-toggle" && payload.problem) {
         updateIssueRow(payload.problem);
-        regroupIssues();
+        refreshIssuesView();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "issue-delete") {
         const row = form.closest("tr");
         row?.remove();
-        regroupIssues();
+        refreshIssuesView();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "user-create" && payload.user) {
         appendUserRow(payload.user);
-        regroupUsers();
+        refreshUsersView();
         form.reset();
         applyUserCreateDefaults();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "user-toggle" && payload.user) {
         updateUserRow(payload.user);
-        regroupUsers();
+        refreshUsersView();
         notifyAndonRefresh();
       } else if (form.dataset.kind === "user-delete") {
         const row = form.closest("tr");
         const userId = row?.dataset.userId || payload.user_id;
         if (userId) {
+          userRowStore.delete(String(userId));
           document.getElementById(`user-row-${userId}`)?.remove();
         }
-        regroupUsers();
+        refreshUsersView();
         notifyAndonRefresh();
       }
+      const successMessage = successToastMessage(kind, payload);
+      if (successMessage) {
+        showToast(successMessage, "success", "Admin");
+      }
     } catch (error) {
-      alert(error.message || "Request failed");
+      showToast(error.message || "Request failed");
     }
   });
 
@@ -1690,7 +2275,7 @@
     const toggle = event.target.closest('[data-group-toggle="issues"]');
     if (toggle) {
       toggleGroupCollapsed("issues", toggle.dataset.groupKey || "");
-      regroupIssues();
+      refreshIssuesView();
       return;
     }
     const cell = event.target.closest("[data-department-filter]");
@@ -1716,23 +2301,137 @@
     if (!field) return;
     const row = field.closest("tr[data-user-id]");
     if (!row) return;
+    applyUserRowRoleState(row);
+    const roleValue = row.querySelector('[name="role"]')?.value || "";
+    const departmentValue = row.querySelector('[name="department_id"]')?.value || "";
+    if (roleValue === "Viewer" && !departmentValue) {
+      showToast("Department role must have at least one department selected.");
+      return;
+    }
     try {
       await submitUserUpdate(row);
       notifyAndonRefresh();
     } catch (error) {
-      alert(error.message || "Request failed");
+      showToast(error.message || "Request failed");
     }
   });
 
   userTableBody.addEventListener("click", (event) => {
-    const toggle = event.target.closest('[data-group-toggle="users"]');
-    if (!toggle) return;
-    toggleGroupCollapsed("users", toggle.dataset.groupKey || "");
-    regroupUsers();
+    const scopeButton = event.target.closest(".js-open-user-scope");
+    if (scopeButton) {
+      const row = scopeButton.closest("tr[data-user-id]");
+      openUserScopeEditor(row);
+    }
   });
 
-  userGroupingModeSelect.addEventListener("change", () => {
-    regroupUsers();
+  userSearchInput.addEventListener("input", () => {
+    refreshUsersView();
+  });
+
+  userRoleFilterSelect.addEventListener("change", () => {
+    refreshUsersView();
+  });
+
+  userMachineGroupFilterSelect.addEventListener("change", () => {
+    refreshUsersView();
+  });
+
+  userScopeModalGroupList?.addEventListener("change", (event) => {
+    if (!event.target.closest(".js-user-modal-scope-group")) return;
+    modalScopeSelectedGroupIds = new Set(modalScopeGroupIdsFromDom());
+    const filteredIds = new Set(modalScopeFilteredMachines(modalScopeSelectedGroupIds).map((machine) => Number(machine.id)));
+    modalScopeSelectedMachineIds = new Set(
+      Array.from(modalScopeSelectedMachineIds).filter((machineId) => filteredIds.has(Number(machineId)))
+    );
+    renderUserScopeModalMachines();
+  });
+
+  userScopeModalMachineList?.addEventListener("change", (event) => {
+    const input = event.target.closest(".js-user-modal-scope-machine");
+    if (!input) return;
+    const machineId = Number(input.value);
+    if (input.checked) {
+      modalScopeSelectedMachineIds.add(machineId);
+    } else {
+      modalScopeSelectedMachineIds.delete(machineId);
+      userScopeModalAllMachines.checked = false;
+    }
+    renderUserScopeModalMachines();
+  });
+
+  userScopeModalAllMachines?.addEventListener("change", () => {
+    const machineInputs = Array.from(userScopeModalMachineList.querySelectorAll(".js-user-modal-scope-machine"));
+    machineInputs.forEach((input) => {
+      const machineId = Number(input.value);
+      if (userScopeModalAllMachines.checked) {
+        modalScopeSelectedMachineIds.add(machineId);
+      } else {
+        modalScopeSelectedMachineIds.delete(machineId);
+      }
+    });
+    renderUserScopeModalMachines();
+  });
+
+  userScopeModalSave?.addEventListener("click", async () => {
+    if (!activeUserScopeRow) return;
+    const role = scopeRoleFromRow(activeUserScopeRow);
+    const groupCount = modalScopeGroupIdsFromDom().length;
+    const departmentValue = activeUserScopeRow.querySelector('[name="department_id"]')?.value || "";
+    const machineCount = Array.from(userScopeModalMachineList.querySelectorAll(".js-user-modal-scope-machine:checked")).length;
+    const selectedModalMachineIds = uniqueSortedIds(
+      Array.from(userScopeModalMachineList.querySelectorAll(".js-user-modal-scope-machine:checked"))
+        .map((input) => Number(input.value))
+    );
+    const selectedModalDepartmentIds = machineDepartmentIdsForMachineIds(selectedModalMachineIds);
+    if (role === "Operator" && groupCount === 0) {
+      showToast(`${roleLabel(role)} role must have at least one machine group selected.`);
+      return;
+    }
+    if (role === "Operator" && machineCount === 0) {
+      showToast("Operator must have at least one machine selected.");
+      return;
+    }
+    if (role === "Viewer" && !departmentValue) {
+      showToast("Department role must have at least one department selected.");
+      return;
+    }
+    if (role === "Operator" && selectedModalDepartmentIds.length === 0) {
+      showToast("Operator role must include at least one department via selected machines.");
+      return;
+    }
+    if (role === "Manager" && machineDepartmentIdsForMachineIds(modalScopeFilteredMachines(modalScopeGroupIdsFromDom()).map((machine) => Number(machine.id))).length === 0) {
+      showToast("Manager role must include at least one department via selected machine groups.");
+      return;
+    }
+    try {
+      applyUserScopeToRow(activeUserScopeRow);
+      await submitUserUpdate(activeUserScopeRow);
+      closeUserScopeModalDialog();
+      notifyAndonRefresh();
+    } catch (error) {
+      showToast(error.message || "Request failed");
+    }
+  });
+
+  userScopeModalElement?.addEventListener("hidden.bs.modal", () => {
+    activeUserScopeRow = null;
+    modalScopeSelectedGroupIds = new Set();
+    modalScopeSelectedMachineIds = new Set();
+    userScopeModalGroupList.innerHTML = "";
+    userScopeModalMachineList.innerHTML = "";
+    userScopeModalAllMachines.checked = false;
+  });
+
+  userScopeModalElement?.addEventListener("click", (event) => {
+    if (event.target === userScopeModalElement) {
+      closeUserScopeModalDialog();
+    }
+  });
+
+  userScopeModalElement?.querySelectorAll('[data-bs-dismiss="modal"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      closeUserScopeModalDialog();
+    });
   });
 
   userRoleSelect.addEventListener("change", () => {
@@ -1743,6 +2442,10 @@
   userScopeGroupList.addEventListener("change", (event) => {
     if (!event.target.closest(".js-user-scope-group")) return;
     renderScopeMachines();
+  });
+
+  userDepartmentSelect.addEventListener("change", () => {
+    syncScopeHiddenInputs();
   });
 
   userScopeMachineList.addEventListener("change", (event) => {
@@ -1765,19 +2468,25 @@
     const role = userRoleSelect.value || "";
     const machineIds = parseCsvIds(userScopeMachineIdsInput.value);
     const groupIds = parseCsvIds(userScopeMachineGroupIdsInput.value);
+    const departmentIds = parseCsvIds(userScopeDepartmentIdsInput.value);
+    if (role === "Operator" && groupIds.length === 0) {
+      event.preventDefault();
+      showToast(`${roleLabel(role)} role must have at least one machine group selected.`);
+      return;
+    }
     if (role === "Operator" && machineIds.length === 0) {
       event.preventDefault();
-      alert("Operator must have at least one machine selected.");
+      showToast("Operator must have at least one machine selected.");
       return;
     }
-    if (role === "Viewer" && groupIds.length === 0) {
+    if (role === "Viewer" && departmentIds.length === 0) {
       event.preventDefault();
-      alert("Viewer must have at least one machine group selected.");
+      showToast("Department role must have at least one department selected.");
       return;
     }
-    if (role === "Manager" && groupIds.length === 0 && machineIds.length === 0) {
+    if (role !== "Admin" && departmentIds.length === 0) {
       event.preventDefault();
-      alert("Manager must have at least one machine group or machine selected.");
+      showToast(`${roleLabel(role)} role must include at least one department.`);
     }
   });
 
@@ -1809,10 +2518,12 @@
       appendUserMachineGroupOption({ id, name });
     }
   });
+  rebuildUserRowStoreFromDom();
+  Array.from(userRowStore.values()).forEach((row) => {
+    applyUserRowRoleState(row);
+  });
   applyUserCreateDefaults();
   regroupMachines();
-  regroupIssues();
-  regroupUsers();
   restoreAdminSection();
 })();
 </script>

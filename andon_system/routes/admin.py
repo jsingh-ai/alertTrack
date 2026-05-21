@@ -159,10 +159,11 @@ def _int_list_from_form(field_name: str) -> list[int]:
 
 def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], machine_group_ids: list[int], department_ids: list[int]):
     valid_machine_ids = set()
-    machine_department_ids = set()
     valid_group_ids = set()
     valid_department_ids = set()
     group_names_by_id = {}
+    machine_department_ids = set()
+    group_department_ids = set()
 
     if machine_ids:
         rows = Machine.query.with_entities(Machine.id, Machine.department_id).filter(
@@ -189,7 +190,6 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
         valid_department_ids = {row.id for row in rows}
 
     group_machine_ids = set()
-    group_department_ids = set()
     if group_names_by_id:
         rows = Machine.query.with_entities(Machine.id, Machine.department_id).filter(
             Machine.company_id == company_id,
@@ -200,38 +200,52 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
         group_department_ids = {row.department_id for row in rows if row.department_id is not None}
 
     if role == "Operator":
+        if not valid_group_ids:
+            return None, _validation_error("Operator requires at least one machine group in scope")
         if not valid_machine_ids:
             return None, _validation_error("Operator requires at least one machine ID in scope")
+        resolved_department_ids = sorted(machine_department_ids | valid_department_ids)
+        if not resolved_department_ids:
+            return None, _validation_error("Operator requires at least one department in scope")
         return {
             "machine_ids": sorted(valid_machine_ids),
-            "machine_group_ids": [],
-            "department_ids": [],
+            "machine_group_ids": sorted(valid_group_ids),
+            "department_ids": resolved_department_ids,
         }, None
     if role == "Viewer":
-        if not valid_group_ids:
-            return None, _validation_error("Viewer requires at least one machine group ID in scope")
-        resolved_department_ids = set(valid_department_ids)
-        if not resolved_department_ids:
-            resolved_department_ids.update(machine_department_ids)
-            resolved_department_ids.update(group_department_ids)
-        if not resolved_department_ids:
-            return None, _validation_error("Viewer requires at least one department ID in scope")
-        resolved_machine_ids = set(valid_machine_ids)
-        resolved_machine_ids.update(group_machine_ids)
+        if not valid_department_ids:
+            return None, _validation_error("Department role requires at least one department in scope")
         return {
-            "machine_ids": sorted(resolved_machine_ids),
+            "machine_ids": [],
             "machine_group_ids": sorted(valid_group_ids),
-            "department_ids": sorted(resolved_department_ids),
+            "department_ids": sorted(valid_department_ids),
         }, None
     if role == "Manager":
-        if not valid_machine_ids and not valid_group_ids:
-            return None, _validation_error("Manager requires at least one machine ID or machine group ID in scope")
+        if not valid_group_ids:
+            rows = MachineGroup.query.with_entities(MachineGroup.id, MachineGroup.name).filter(
+                MachineGroup.company_id == company_id,
+                MachineGroup.is_active.is_(True),
+            ).all()
+            valid_group_ids = {row.id for row in rows}
+            group_names_by_id = {row.id: row.name for row in rows if row.name}
+            if not valid_group_ids:
+                return None, _validation_error("Manager requires at least one active machine group in scope")
+            rows = Machine.query.with_entities(Machine.id, Machine.department_id).filter(
+                Machine.company_id == company_id,
+                Machine.machine_type.in_(list(group_names_by_id.values())),
+                Machine.is_active.is_(True),
+            ).all()
+            group_machine_ids = {row.id for row in rows}
+            group_department_ids = {row.department_id for row in rows if row.department_id is not None}
         resolved_machine_ids = set(valid_machine_ids)
         resolved_machine_ids.update(group_machine_ids)
+        resolved_department_ids = sorted(group_department_ids | machine_department_ids | valid_department_ids)
+        if not resolved_department_ids:
+            return None, _validation_error("Manager requires at least one department in scope")
         return {
             "machine_ids": sorted(resolved_machine_ids),
             "machine_group_ids": sorted(valid_group_ids),
-            "department_ids": [],
+            "department_ids": resolved_department_ids,
         }, None
     return {
         "machine_ids": [],
@@ -674,8 +688,10 @@ def create_user():
     phone_number = (request.form.get("phone_number") or "").strip() or None
     if not display_name:
         return _validation_error("User name is required")
-    if not username and not email:
-        return _validation_error("Username or email is required")
+    if not username:
+        return _validation_error("Username is required")
+    if not password.strip():
+        return _validation_error("Password is required")
     machine_group, department, error_response = _resolve_membership_scope(
         company_id, role, scope_mode, machine_group_id, department_id
     )
@@ -697,8 +713,6 @@ def create_user():
     if user is None and email:
         user = User.query.filter_by(email=email).one_or_none()
     if user is None:
-        if not password.strip():
-            return _validation_error("Password is required for a new user")
         user = User(
             company_id=company_id,
             employee_id=work_id,
@@ -772,8 +786,8 @@ def update_user(user_id):
 
     if not display_name:
         return _validation_error("User name is required")
-    if not username and not email:
-        return _validation_error("Username or email is required")
+    if not username:
+        return _validation_error("Username is required")
     duplicate_user = User.query.filter(User.id != user.id, User.username == username).one_or_none() if username else None
     if duplicate_user is not None:
         return _validation_error("Username is already in use")
@@ -836,28 +850,45 @@ def toggle_user(user_id):
 @admin_bp.post("/user/<int:user_id>/delete")
 def delete_user(user_id):
     company_id = _company_id()
-    user = User.query.filter_by(id=user_id).one_or_none()
     access = UserCompanyAccess.query.filter_by(user_id=user_id, company_id=company_id).one_or_none()
-    if not user or not access:
+    user = access.user if access else None
+    if user is None or access is None:
         return _error_or_404("User not found")
-    for alert in AndonAlert.query.filter(
-        AndonAlert.company_id == company_id,
-        (AndonAlert.operator_user_id == user.id) | (AndonAlert.responder_user_id == user.id)
-    ).all():
-        if alert.operator_user_id == user.id:
-            alert.operator_user_id = None
-            alert.operator_name_text = None
-        if alert.responder_user_id == user.id:
-            alert.responder_user_id = None
-            alert.responder_name_text = None
+
+    db.session.execute(
+        update(AndonAlert)
+        .where(
+            AndonAlert.company_id == company_id,
+            AndonAlert.operator_user_id == user.id,
+        )
+        .values(operator_user_id=None, operator_name_text=None)
+    )
+    db.session.execute(
+        update(AndonAlert)
+        .where(
+            AndonAlert.company_id == company_id,
+            AndonAlert.responder_user_id == user.id,
+        )
+        .values(responder_user_id=None, responder_name_text=None)
+    )
     db.session.execute(
         update(AndonAlertEvent)
         .where(AndonAlertEvent.company_id == company_id, AndonAlertEvent.user_id == user.id)
         .values(user_id=None, user_name_text=None)
     )
+
     db.session.delete(access)
-    remaining_access = UserCompanyAccess.query.filter_by(user_id=user.id).count()
-    if remaining_access <= 1:
+    has_other_access = (
+        db.session.query(UserCompanyAccess.id)
+        .filter(
+            UserCompanyAccess.user_id == user.id,
+            UserCompanyAccess.id != access.id,
+        )
+        .limit(1)
+        .first()
+        is not None
+    )
+    if not has_other_access:
         user.is_active = False
     db.session.commit()
     _invalidate_company_caches(company_id)

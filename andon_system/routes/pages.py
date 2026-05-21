@@ -3,6 +3,7 @@ import hashlib
 import json
 import threading
 import time
+from collections import defaultdict
 from zoneinfo import ZoneInfo
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
@@ -400,14 +401,16 @@ def admin_page():
     machine_group_id_by_name = {group.name: group.id for group in machine_group_rows}
     departments = Department.query.filter_by(company_id=company_id).order_by(Department.name.asc()).all() if company_id else []
     department_name_by_id = {department.id: department.name for department in departments}
+    machine_count_by_group_name = defaultdict(int)
+    for machine in machines:
+        machine_count_by_group_name[machine.machine_type] += 1
     for group in machine_group_rows:
-        grouped_machines = [machine for machine in machines if machine.machine_type == group.name]
         machine_groups.append(
             {
                 "id": group.id,
                 "name": group.name,
                 "is_active": group.is_active,
-                "machine_count": len(grouped_machines),
+                "machine_count": machine_count_by_group_name.get(group.name, 0),
             }
         )
     machine_scope_catalog = [
@@ -440,17 +443,16 @@ def admin_page():
         if company_id
         else []
     )
+    problems_by_department_id = defaultdict(list)
+    for problem in problems:
+        if problem.category and problem.category.department_id is not None:
+            problems_by_department_id[problem.category.department_id].append(problem)
     issue_groups = []
     for department in departments:
-        department_problems = [
-            problem
-            for problem in problems
-            if problem.category and problem.category.department_id == department.id
-        ]
         issue_groups.append(
             {
                 "department": department,
-                "problems": department_problems,
+                "problems": problems_by_department_id.get(department.id, []),
             }
         )
     return render_template(
