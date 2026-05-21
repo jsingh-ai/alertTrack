@@ -132,6 +132,11 @@ async function boot() {
     console.warn("Failed to restore operator view state.");
   });
   await loadBoardState();
+  try {
+    await loadOperatorMetadata({ force: true });
+  } catch (_error) {
+    console.warn("Unable to load operator metadata during boot.");
+  }
   normalizeViewState();
   wireEvents();
   renderViewControls();
@@ -223,17 +228,15 @@ async function loadOperatorMetadata(options = {}) {
 }
 
 async function ensureOperatorMetadataLoaded() {
-  if (state.metadataLoaded) return;
-  await loadOperatorMetadata();
+  if (state.metadataLoaded && Array.isArray(state.departments) && state.departments.length > 0) return;
+  await loadOperatorMetadata({ force: true });
 }
 
 function scheduleOperatorMetadataWarmup() {
-  if (state.metadataLoaded || operatorMetadataLoadPromise) return;
+  if (operatorMetadataLoadPromise) return;
   const runWarmup = () => {
-    void loadOperatorMetadata().then(() => {
-      if (state.selectedMachine || state.selectedAlert) {
-        renderBoard();
-      }
+    void loadOperatorMetadata({ force: true }).then(() => {
+      renderBoard();
     }).catch((_error) => {
       console.warn("Failed to preload operator metadata.");
     });
@@ -911,16 +914,7 @@ function renderDepartmentButtonsMarkup() {
 }
 
 function getRenderableDepartments() {
-  const departments = [...state.departments];
-  const hasSpot = departments.some((department) => String(department.name || "").toLowerCase() === "spot");
-  if (!hasSpot) {
-    departments.push({
-      id: "spot-placeholder",
-      name: "SPOT",
-      isPlaceholder: true,
-    });
-  }
-  return departments;
+  return [...state.departments];
 }
 
 function renderProblemOptionsMarkup(problems) {

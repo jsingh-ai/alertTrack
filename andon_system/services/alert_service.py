@@ -29,7 +29,7 @@ from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.user import User, UserCompanyAccess
 from ..models.department import Department
-from ..security import get_scope_filters
+from ..security import get_current_membership, get_scope_filters
 from .cache_service import invalidate_cache
 from .realtime_service import emit_alert_created, emit_alert_updated
 
@@ -64,6 +64,8 @@ def _ensure_aware(value):
 def list_active_alerts(status: str | None = None):
     company_id = get_current_company_id()
     scope = get_scope_filters()
+    membership = get_current_membership()
+    role = membership.role if membership else None
     machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
@@ -72,7 +74,7 @@ def list_active_alerts(status: str | None = None):
         query = query.filter(AndonAlert.company_id == company_id)
     if machine_ids:
         query = query.filter(AndonAlert.machine_id.in_(machine_ids))
-    if department_ids:
+    if department_ids and role != "Operator":
         query = query.filter(AndonAlert.department_id.in_(department_ids))
     if machine_group_names:
         query = query.filter(AndonAlert.machine.has(Machine.machine_type.in_(machine_group_names)))
@@ -86,6 +88,8 @@ def list_active_alerts(status: str | None = None):
 def get_alert(alert_id: int):
     company_id = get_current_company_id()
     scope = get_scope_filters()
+    membership = get_current_membership()
+    role = membership.role if membership else None
     machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
@@ -94,7 +98,7 @@ def get_alert(alert_id: int):
         query = query.filter(AndonAlert.company_id == company_id)
     if machine_ids:
         query = query.filter(AndonAlert.machine_id.in_(machine_ids))
-    if department_ids:
+    if department_ids and role != "Operator":
         query = query.filter(AndonAlert.department_id.in_(department_ids))
     if machine_group_names:
         query = query.filter(AndonAlert.machine.has(Machine.machine_type.in_(machine_group_names)))
@@ -459,6 +463,7 @@ def get_active_alert_metrics():
 
 def _invalidate_live_caches(company_id):
     invalidate_cache("board_state", company_id)
+    invalidate_cache("operator_snapshot", company_id)
     invalidate_cache("report_summary", company_id)
     invalidate_cache("report_machine_details", company_id)
     invalidate_cache("report_machine_stats", company_id)

@@ -13,6 +13,7 @@ from sqlalchemy.orm import joinedload, load_only, noload
 
 from .extensions import db
 from .models.company import Company
+from .models.department import Department
 from .models.machine import Machine
 from .models.machine_group import MachineGroup
 from .models.user import User, UserCompanyAccess, UserViewPreference

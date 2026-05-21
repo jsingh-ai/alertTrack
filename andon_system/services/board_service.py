@@ -176,23 +176,20 @@ def _load_board_context(company_id, include_alerts: bool, include_metadata: bool
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
     metadata_department_ids = list(department_ids)
 
-    if include_metadata and role == "Operator" and machine_group_names and company_id:
-        # Operator department buttons should come from the allowed machine groups
-        # so "Call Maintenance/Quality/etc." are consistently available.
-        group_department_rows = (
-            Machine.query.options(noload("*"))
-            .with_entities(Machine.department_id)
+    if include_metadata and role == "Operator" and company_id:
+        # Operator "Call <Department>" choices should be stable company-wide
+        # and not depend on machine group or user scope narrowing.
+        all_department_rows = (
+            Department.query.options(noload("*"))
+            .with_entities(Department.id)
             .filter(
-                Machine.company_id == company_id,
-                Machine.machine_type.in_(machine_group_names),
-                Machine.is_active.is_(True),
-                Machine.department_id.isnot(None),
+                Department.company_id == company_id,
             )
             .all()
         )
-        group_department_ids = sorted({row.department_id for row in group_department_rows if row.department_id is not None})
-        if group_department_ids:
-            metadata_department_ids = group_department_ids
+        all_department_ids = sorted({row.id for row in all_department_rows if row.id is not None})
+        if all_department_ids:
+            metadata_department_ids = all_department_ids
     machine_query = Machine.query.options(
         load_only(
             Machine.id,
@@ -278,7 +275,11 @@ def _load_board_context(company_id, include_alerts: bool, include_metadata: bool
         alert_query = alert_query.filter(AndonAlert.machine_id.in_(machine_ids))
     if department_ids:
         machine_query = machine_query.filter(Machine.department_id.in_(department_ids))
-        alert_query = alert_query.filter(AndonAlert.department_id.in_(department_ids))
+        # For Operator scope we anchor on allowed machine IDs; filtering alerts
+        # again by alert.department_id can hide valid calls when the selected
+        # call department differs from the machine's native department.
+        if role != "Operator":
+            alert_query = alert_query.filter(AndonAlert.department_id.in_(department_ids))
     if include_metadata and metadata_department_ids:
         department_query = department_query.filter(Department.id.in_(metadata_department_ids))
         issue_query = issue_query.filter(IssueCategory.department_id.in_(metadata_department_ids))
@@ -290,10 +291,17 @@ def _load_board_context(company_id, include_alerts: bool, include_metadata: bool
         alert_query = alert_query.filter(AndonAlert.machine.has(Machine.machine_type.in_(machine_group_names)))
 
     machines = machine_query.order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all()
-    departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all() if include_metadata else []
+    if include_metadata and role == "Operator":
+        departments = department_query.order_by(Department.name.asc()).all()
+    else:
+        departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all() if include_metadata else []
     issue_categories = issue_query.filter_by(is_active=True).order_by(IssueCategory.name.asc()).all() if include_metadata else []
     visible_machines = [machine for machine in machines if machine.is_active and (machine.department is None or machine.department.is_active)]
-    visible_departments = departments
+    visible_departments = [
+        department
+        for department in departments
+        if role == "Operator" or department.is_active
+    ]
     visible_issue_categories = [
         category
         for category in issue_categories
