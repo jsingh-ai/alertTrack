@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..extensions import db
@@ -126,8 +126,16 @@ def create_alert(payload: dict):
     ).filter(Machine.id == payload.get("machine_id"))
     if company_id:
         machine_query = machine_query.filter(Machine.company_id == company_id)
-    machine_query = machine_query.with_for_update()
-    machine = machine_query.one_or_none()
+    machine_query = machine_query.with_for_update(nowait=True)
+    try:
+        machine = machine_query.one_or_none()
+    except OperationalError as exc:
+        # On PostgreSQL, NOWAIT raises when another transaction currently holds
+        # the row lock; returning quickly avoids multi-second UI jitter.
+        raise AlertServiceError(
+            "Machine is busy with another in-progress call. Please try again.",
+            status_code=409,
+        ) from exc
     department_id = payload.get("department_id")
     issue_category = None
     if payload.get("issue_category_id"):
@@ -468,12 +476,9 @@ def get_active_alert_metrics():
 
 
 def _invalidate_live_caches(company_id):
-    invalidate_cache("board_state", company_id)
-    invalidate_cache("operator_snapshot", company_id)
-    invalidate_cache("report_summary", company_id)
-    invalidate_cache("report_machine_details", company_id)
-    invalidate_cache("report_machine_stats", company_id)
-    invalidate_cache("report_problem_details", company_id)
+    # One company-scope bump invalidates all company cache namespaces and
+    # avoids multiple synchronous cache backend roundtrips per alert action.
+    invalidate_cache(company_id=company_id)
 
 
 def _get_active_alert_for_machine(machine_id, company_id):
