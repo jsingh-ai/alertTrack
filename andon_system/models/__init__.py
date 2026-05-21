@@ -6,6 +6,7 @@ from .escalation import EscalationRule
 from .issue import IssueCategory, IssueProblem
 from .machine import Machine
 from .machine_group import MachineGroup
+from .pager_device import PagerDevice
 from .user import User, UserBoard, UserBoardItem, UserCompanyAccess, UserViewPreference
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "AndonAlertEvent",
     "andon_alert_escalation_map",
     "EscalationRule",
+    "PagerDevice",
 ]

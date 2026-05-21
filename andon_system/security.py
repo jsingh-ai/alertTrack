@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import secrets
 import time
+from datetime import datetime, timezone
 from hmac import compare_digest
 from types import SimpleNamespace
 from urllib.parse import urlparse
@@ -10,12 +11,14 @@ from urllib.parse import urlparse
 from flask import abort, current_app, g, has_request_context, request, session
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload, load_only, noload
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from .extensions import db
 from .models.company import Company
 from .models.department import Department
 from .models.machine import Machine
 from .models.machine_group import MachineGroup
+from .models.pager_device import PagerDevice
 from .models.user import User, UserCompanyAccess, UserViewPreference
 
 USER_SESSION_KEY = "andon_user_id"
@@ -79,8 +82,74 @@ def validate_csrf_request() -> bool:
 def enforce_csrf() -> None:
     if request.method in {"GET", "HEAD", "OPTIONS", "TRACE"}:
         return
+    if request.path.startswith("/api/andon/pager/") and get_authenticated_pager_device(update_last_seen=False):
+        return
     if not validate_csrf_request():
         abort(400, description="CSRF validation failed")
+
+
+def parse_bearer_token() -> str | None:
+    auth_header = str(request.headers.get("Authorization") or "").strip()
+    if not auth_header:
+        return None
+    scheme, _, value = auth_header.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    token = value.strip()
+    return token or None
+
+
+def hash_pager_token(raw_token: str) -> str:
+    token = str(raw_token or "").strip()
+    if not token:
+        raise ValueError("Pager token cannot be blank")
+    return generate_password_hash(token)
+
+
+def verify_pager_token(token_hash: str | None, raw_token: str | None) -> bool:
+    if not token_hash or not raw_token:
+        return False
+    return check_password_hash(token_hash, str(raw_token))
+
+
+def get_authenticated_pager_device(update_last_seen: bool = True) -> PagerDevice | None:
+    if not has_request_context():
+        return None
+    if hasattr(g, "authenticated_pager_device"):
+        device = getattr(g, "authenticated_pager_device")
+        if device is not None and update_last_seen and not getattr(g, "authenticated_pager_device_last_seen_updated", False):
+            device.last_seen_at = datetime.now(timezone.utc)
+            db.session.commit()
+            g.authenticated_pager_device_last_seen_updated = True
+        return device
+
+    token = parse_bearer_token()
+    if not token:
+        g.authenticated_pager_device = None
+        g.authenticated_pager_device_last_seen_updated = False
+        return None
+
+    devices = PagerDevice.query.options(
+        joinedload(PagerDevice.department).load_only(Department.id, Department.company_id, Department.is_active, Department.name),
+        noload(PagerDevice.company),
+    ).filter(
+        PagerDevice.active.is_(True),
+    ).all()
+    for device in devices:
+        if verify_pager_token(device.token_hash, token):
+            if not device.department or not device.department.is_active or device.department.company_id != device.company_id:
+                continue
+            g.authenticated_pager_device = device
+            g.authenticated_pager_device_last_seen_updated = False
+            if update_last_seen:
+                device.last_seen_at = datetime.now(timezone.utc)
+                db.session.commit()
+                g.authenticated_pager_device_last_seen_updated = True
+            return device
+
+    g.authenticated_pager_device = None
+    g.authenticated_pager_device_last_seen_updated = False
+    return None
 
 
 def get_authenticated_user() -> User | None:

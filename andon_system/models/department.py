@@ -23,6 +23,7 @@ class Department(db.Model):
     users = db.relationship("User", back_populates="department", lazy="selectin")
     issue_categories = db.relationship("IssueCategory", back_populates="department", lazy="selectin")
     alerts = db.relationship("AndonAlert", back_populates="department", lazy="selectin")
+    pager_devices = db.relationship("PagerDevice", back_populates="department", lazy="selectin")
     escalation_rules = db.relationship("EscalationRule", back_populates="department", lazy="selectin")
 
     def to_dict(self):

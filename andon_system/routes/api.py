@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from flask import Blueprint, abort, jsonify, request
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..company_context import get_current_company_id
@@ -12,6 +13,8 @@ from ..models.alert import (
     ALERT_STATUS_CANCELLED,
     ALERT_STATUS_OPEN,
     ALERT_STATUS_RESOLVED,
+    AndonAlert,
+    AndonAlertEvent,
 )
 from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
@@ -24,6 +27,7 @@ from ..security import (
     PAGE_OPERATOR,
     PAGE_REPORTS,
     get_authenticated_user,
+    get_authenticated_pager_device,
     get_scope_filters,
     get_view_preference,
     require_authentication,
@@ -62,6 +66,10 @@ api_bp = Blueprint("api", __name__, url_prefix="/api/andon")
 
 @api_bp.before_request
 def require_user_session():
+    if request.path.startswith("/api/andon/pager/"):
+        if get_authenticated_pager_device():
+            return
+        abort(403)
     require_authentication()
 
 
@@ -295,6 +303,238 @@ def api_acknowledge_alert(alert_id):
         return jsonify({"success": True, "data": alert.to_dict()})
     except AlertServiceError as exc:
         return _error(str(exc), 400)
+
+
+@api_bp.get("/pager/alerts/active")
+def api_pager_active_alerts():
+    pager = get_authenticated_pager_device()
+    if pager is None:
+        abort(403)
+
+    alerts = (
+        AndonAlert.query.options(
+            joinedload(AndonAlert.machine).load_only(Machine.id, Machine.name, Machine.machine_code),
+            joinedload(AndonAlert.department).load_only(Department.id, Department.name),
+            joinedload(AndonAlert.issue_category).load_only(IssueCategory.id, IssueCategory.name),
+            joinedload(AndonAlert.issue_problem).load_only(IssueProblem.id, IssueProblem.name),
+            noload(AndonAlert.company),
+            noload(AndonAlert.events),
+            noload(AndonAlert.escalations),
+        )
+        .filter(
+            AndonAlert.company_id == pager.company_id,
+            AndonAlert.department_id == pager.department_id,
+            AndonAlert.status.in_([ALERT_STATUS_OPEN, ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED]),
+        )
+        .order_by(AndonAlert.priority.desc(), AndonAlert.created_at.asc())
+        .all()
+    )
+    status_labels = {
+        ALERT_STATUS_OPEN: "Open",
+        ALERT_STATUS_ACKNOWLEDGED: "Acknowledged",
+        ALERT_STATUS_ARRIVED: "Working",
+        ALERT_STATUS_RESOLVED: "Resolved",
+        ALERT_STATUS_CANCELLED: "Cancelled",
+    }
+
+    return jsonify(
+        {
+            "success": True,
+            "data": [
+                {
+                    "id": alert.id,
+                    "alert_number": alert.alert_number,
+                    "department": {
+                        "id": alert.department.id if alert.department else alert.department_id,
+                        "name": alert.department.name if alert.department else None,
+                    },
+                    "machine": {
+                        "id": alert.machine.id if alert.machine else alert.machine_id,
+                        "name": alert.machine.name if alert.machine else None,
+                        "machine_code": alert.machine.machine_code if alert.machine else None,
+                    },
+                    "issue_category": {
+                        "id": alert.issue_category.id if alert.issue_category else alert.issue_category_id,
+                        "name": alert.issue_category.name if alert.issue_category else None,
+                    },
+                    "issue_problem": {
+                        "id": alert.issue_problem.id if alert.issue_problem else alert.issue_problem_id,
+                        "name": alert.issue_problem.name if alert.issue_problem else None,
+                    },
+                    "status": alert.status,
+                    "status_label": status_labels.get(alert.status, alert.status.title() if alert.status else None),
+                    "action_available": (
+                        "acknowledge"
+                        if alert.status == ALERT_STATUS_OPEN
+                        else "resolve"
+                        if alert.status in {ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED}
+                        else None
+                    ),
+                    "priority": alert.priority,
+                    "created_at": alert.created_at.isoformat() if alert.created_at else None,
+                    "acknowledged_at": alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
+                    "elapsed_seconds": alert.elapsed_seconds,
+                    "acknowledged_seconds": alert.acknowledged_seconds,
+                    "note": alert.note,
+                }
+                for alert in alerts
+            ],
+        }
+    )
+
+
+@api_bp.post("/pager/alerts/<int:alert_id>/acknowledge")
+def api_pager_acknowledge_alert(alert_id: int):
+    pager = get_authenticated_pager_device()
+    if pager is None:
+        abort(403)
+
+    payload = _payload()
+    now = datetime.now(timezone.utc)
+    responder_name_text = str(payload.get("responder_name_text") or "").strip() or pager.name
+    note = str(payload.get("note") or "").strip() or "Acknowledged on department pager"
+
+    alert_query = AndonAlert.query.filter(
+        AndonAlert.id == alert_id,
+        AndonAlert.company_id == pager.company_id,
+        AndonAlert.department_id == pager.department_id,
+        AndonAlert.status == ALERT_STATUS_OPEN,
+    )
+    try:
+        alert = alert_query.with_for_update(nowait=True).one_or_none()
+    except OperationalError:
+        return _error("Alert is busy. Please retry.", 409)
+
+    if alert is None:
+        scoped_alert = AndonAlert.query.options(noload("*")).filter(
+            AndonAlert.id == alert_id,
+            AndonAlert.company_id == pager.company_id,
+            AndonAlert.department_id == pager.department_id,
+        ).one_or_none()
+        if scoped_alert is None:
+            return _error("Alert not found", 404)
+        if scoped_alert.status != ALERT_STATUS_OPEN:
+            return _error("Alert can only be acknowledged from OPEN state", 409)
+        return _error("Alert is busy. Please retry.", 409)
+
+    alert.acknowledged_at = now
+    if alert.created_at:
+        alert.acknowledged_seconds = max(0, int((now - alert.created_at).total_seconds()))
+    alert.status = ALERT_STATUS_ACKNOWLEDGED
+    alert.responder_name_text = responder_name_text
+    alert.note = note
+    db.session.add(
+        AndonAlertEvent(
+            company_id=alert.company_id,
+            alert=alert,
+            event_type="ACKNOWLEDGED",
+            user_id=None,
+            user_name_text=responder_name_text,
+            message="Alert acknowledged from pager",
+            metadata_json={"source": "pager_device", "pager_device_id": pager.id, "pager_name": pager.name},
+        )
+    )
+    db.session.commit()
+    invalidate_cache(company_id=alert.company_id)
+    emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="acknowledged")
+    return jsonify(
+        {
+            "success": True,
+            "data": {
+                "id": alert.id,
+                "alert_number": alert.alert_number,
+                "status": alert.status,
+                "status_label": "Acknowledged",
+                "created_at": alert.created_at.isoformat() if alert.created_at else None,
+                "acknowledged_at": alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
+                "elapsed_seconds": alert.elapsed_seconds,
+                "acknowledged_seconds": alert.acknowledged_seconds,
+                "note": alert.note,
+                "responder_name_text": alert.responder_name_text,
+            },
+        }
+    )
+
+
+@api_bp.post("/pager/alerts/<int:alert_id>/resolve")
+def api_pager_resolve_alert(alert_id: int):
+    pager = get_authenticated_pager_device()
+    if pager is None:
+        abort(403)
+
+    payload = _payload()
+    now = datetime.now(timezone.utc)
+    responder_name_text = str(payload.get("responder_name_text") or "").strip() or pager.name
+    note = str(payload.get("note") or "").strip() or "Resolved on department pager"
+
+    alert_query = AndonAlert.query.filter(
+        AndonAlert.id == alert_id,
+        AndonAlert.company_id == pager.company_id,
+        AndonAlert.department_id == pager.department_id,
+        AndonAlert.status.in_([ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED]),
+    )
+    try:
+        alert = alert_query.with_for_update(nowait=True).one_or_none()
+    except OperationalError:
+        return _error("Alert is busy. Please retry.", 409)
+
+    if alert is None:
+        scoped_alert = AndonAlert.query.options(noload("*")).filter(
+            AndonAlert.id == alert_id,
+            AndonAlert.company_id == pager.company_id,
+            AndonAlert.department_id == pager.department_id,
+        ).one_or_none()
+        if scoped_alert is None:
+            return _error("Alert not found", 404)
+        if scoped_alert.status == ALERT_STATUS_OPEN:
+            return _error("Alert must be acknowledged before resolving", 409)
+        if scoped_alert.status in [ALERT_STATUS_RESOLVED, ALERT_STATUS_CANCELLED]:
+            return _error("Alert is already closed", 409)
+        return _error("Alert is busy. Please retry.", 409)
+
+    alert.resolved_at = now
+    if alert.acknowledged_at:
+        alert.ack_to_clear_seconds = max(0, int((now - alert.acknowledged_at).total_seconds()))
+    alert.status = ALERT_STATUS_RESOLVED
+    alert.responder_name_text = responder_name_text
+    if note:
+        if alert.note:
+            alert.note = f"{alert.note}\n{note}".strip()
+        else:
+            alert.note = note
+    db.session.add(
+        AndonAlertEvent(
+            company_id=alert.company_id,
+            alert=alert,
+            event_type="RESOLVED",
+            user_id=None,
+            user_name_text=responder_name_text,
+            message="Alert resolved from pager",
+            metadata_json={"source": "pager_device", "pager_device_id": pager.id, "pager_name": pager.name},
+        )
+    )
+    db.session.commit()
+    invalidate_cache(company_id=alert.company_id)
+    emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="resolved")
+    return jsonify(
+        {
+            "success": True,
+            "data": {
+                "id": alert.id,
+                "alert_number": alert.alert_number,
+                "status": alert.status,
+                "status_label": "Resolved",
+                "created_at": alert.created_at.isoformat() if alert.created_at else None,
+                "acknowledged_at": alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
+                "resolved_at": alert.resolved_at.isoformat() if alert.resolved_at else None,
+                "elapsed_seconds": alert.elapsed_seconds,
+                "acknowledged_seconds": alert.acknowledged_seconds,
+                "ack_to_clear_seconds": alert.ack_to_clear_seconds,
+                "note": alert.note,
+                "responder_name_text": alert.responder_name_text,
+            },
+        }
+    )
 
 
 @api_bp.post("/alerts/<int:alert_id>/arrive")
