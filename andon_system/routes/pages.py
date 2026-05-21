@@ -23,7 +23,7 @@ from ..security import (
     PAGE_MANAGEMENT,
     PAGE_OPERATOR,
     PAGE_REPORTS,
-    authenticate_user,
+    authenticate_user_with_reason,
     ensure_session_company,
     get_authenticated_user,
     get_current_membership,
@@ -176,15 +176,35 @@ def login_page():
     identity = request.form.get("identity")
     password = request.form.get("password")
     next_url = request.form.get("next")
+    identity_key = _login_rate_limit_key(identity, request.remote_addr)
+    identity_fingerprint = identity_key.split(":", 1)[-1]
     is_blocked, retry_after = _is_login_rate_limited(identity, request.remote_addr)
     if is_blocked:
+        current_app.logger.info(
+            "LOGIN blocked reason=rate_limited identity=%s remote=%s retry_after=%s",
+            identity_fingerprint,
+            request.remote_addr,
+            retry_after,
+        )
         flash(f"Too many login attempts. Please try again in {retry_after} seconds.", "warning")
         return redirect(url_for("pages.home_page"))
-    user = authenticate_user(identity, password)
+    user, auth_reason = authenticate_user_with_reason(identity, password)
     if user is None:
+        current_app.logger.info(
+            "LOGIN failed reason=%s identity=%s remote=%s",
+            auth_reason,
+            identity_fingerprint,
+            request.remote_addr,
+        )
         _record_login_failure(identity, request.remote_addr)
         flash("Invalid username/email or password.", "warning")
         return redirect(url_for("pages.home_page"))
+    current_app.logger.info(
+        "LOGIN success identity=%s user_id=%s remote=%s",
+        identity_fingerprint,
+        user.id,
+        request.remote_addr,
+    )
     _clear_login_failures(identity, request.remote_addr)
     login_user(user)
     memberships = get_user_memberships(user=user, active_only=True)

@@ -2,7 +2,7 @@ import os
 import shlex
 import time
 
-from flask import Flask, g, has_request_context, request, session
+from flask import Flask, flash, g, has_request_context, redirect, request, session, url_for
 from sqlalchemy import inspect, text
 
 from .company_context import get_companies, get_current_company
@@ -465,6 +465,10 @@ def create_app(config_name: str | None = None) -> Flask:
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        if request.path in {"/andon/home", "/andon/login"}:
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
         if not app.config.get("ANDON_PERF_LOGS"):
             return response
         started_at = getattr(g, "request_started_at", None)
@@ -483,6 +487,19 @@ def create_app(config_name: str | None = None) -> Flask:
                 request.remote_addr,
             )
         return response
+
+    @app.errorhandler(400)
+    def handle_bad_request(error):
+        description = str(getattr(error, "description", "") or "")
+        is_login_csrf = (
+            request.path == "/andon/login"
+            and request.method == "POST"
+            and "CSRF validation failed" in description
+        )
+        if is_login_csrf:
+            flash("Your session expired. Please sign in again.", "warning")
+            return redirect(url_for("pages.home_page"))
+        return error
 
     with app.app_context():
         if app.config.get("ANDON_AUTO_SCHEMA_MAINTENANCE"):

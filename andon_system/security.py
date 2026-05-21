@@ -137,15 +137,22 @@ def logout_user() -> None:
 
 
 def authenticate_user(identity: str | None, password: str | None) -> User | None:
+    user, _reason = authenticate_user_with_reason(identity, password)
+    return user
+
+
+def authenticate_user_with_reason(identity: str | None, password: str | None) -> tuple[User | None, str]:
     normalized_identity = str(identity or "").strip()
     if not normalized_identity:
-        return None
+        return None, "missing_identity"
     user = _find_user_by_identity(normalized_identity)
-    if not user or not user.is_active:
-        return None
+    if not user:
+        return None, "unknown_identity"
+    if not user.is_active:
+        return None, "inactive_user"
     if not user.check_password(password):
-        return None
-    return user
+        return None, "invalid_password"
+    return user, "ok"
 
 
 def _find_user_by_identity(identity: str) -> User | None:
