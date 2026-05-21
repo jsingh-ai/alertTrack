@@ -534,6 +534,53 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
     all_department_ids = sorted(set(legacy_department_ids + config_department_ids))
     all_group_ids = sorted(set(legacy_group_ids + config_group_ids))
 
+    if effective_membership.role == "Viewer":
+        valid_department_ids = []
+        if all_department_ids:
+            valid_department_ids = [
+                row.id
+                for row in Department.query.options(noload("*")).with_entities(Department.id).filter(
+                    Department.company_id == company_id,
+                    Department.id.in_(all_department_ids),
+                    Department.is_active.is_(True),
+                ).all()
+                if row.id is not None
+            ]
+        resolved_department_ids = sorted(set(valid_department_ids))
+        return {
+            "company_id": company_id,
+            "department_id": resolved_department_ids[0] if len(resolved_department_ids) == 1 else None,
+            "department_ids": resolved_department_ids,
+            "machine_group_name": None,
+            "machine_group_names": [],
+            "machine_ids": [],
+            "restricted": True,
+        }
+
+    if effective_membership.role == "Operator" and config_machine_ids:
+        scoped_rows = (
+            Machine.query.options(noload("*"))
+            .with_entities(Machine.id, Machine.department_id, Machine.machine_type)
+            .filter(
+                Machine.company_id == company_id,
+                Machine.id.in_(config_machine_ids),
+                Machine.is_active.is_(True),
+            )
+            .all()
+        )
+        machine_ids = sorted({row.id for row in scoped_rows if row.id is not None})
+        resolved_department_ids = sorted({row.department_id for row in scoped_rows if row.department_id is not None})
+        machine_group_names = sorted({row.machine_type for row in scoped_rows if row.machine_type})
+        return {
+            "company_id": company_id,
+            "department_id": resolved_department_ids[0] if len(resolved_department_ids) == 1 else None,
+            "department_ids": resolved_department_ids,
+            "machine_group_name": machine_group_names[0] if len(machine_group_names) == 1 else None,
+            "machine_group_names": machine_group_names,
+            "machine_ids": machine_ids,
+            "restricted": True,
+        }
+
     machine_query = Machine.query.options(noload("*")).with_entities(
         Machine.id,
         Machine.department_id,

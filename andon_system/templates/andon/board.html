@@ -3,7 +3,7 @@
 {% block content %}
 <div class="container-fluid board-page-shell" id="departmentBoardShell">
   {% set page_title = "Department View" %}
-  {% set page_subtitle = "Active alerts for acknowledge, assignment, and closure." %}
+  {% set page_subtitle = (scope_summary_text ~ " | Active alerts for acknowledge, assignment, and closure.") if scope_summary_text else "Active alerts for acknowledge, assignment, and closure." %}
   {% include "andon/_page_header.html" %}
 
   <div id="boardStatusDock" class="operator-status-dock mb-1" aria-live="polite"></div>

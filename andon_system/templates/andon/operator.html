@@ -3,7 +3,7 @@
 {% block content %}
 <div class="container-fluid button-board-shell">
   {% set page_title = "Operator Station" %}
-  {% set page_subtitle = "" %}
+  {% set page_subtitle = scope_summary_text or "" %}
   {% set page_action_html %}
     <button class="btn btn-light btn-sm operator-page-header__badge" type="button" data-bs-toggle="collapse" data-bs-target="#operatorViewPanel" aria-expanded="false" aria-controls="operatorViewPanel">
       <i class="bi bi-house-door-fill"></i>

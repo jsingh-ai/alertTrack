@@ -80,6 +80,33 @@ def _management_shift_window(now: datetime | None = None):
 def _landing_redirect():
     return redirect(url_for(get_default_landing_endpoint()))
 
+def _scope_summary_text(company_id: int | None) -> str:
+    scope = get_scope_filters()
+    if not scope.get("restricted"):
+        return "Scope: Full company access"
+    machine_ids = scope.get("machine_ids") or []
+    department_ids = scope.get("department_ids") or []
+    group_names = scope.get("machine_group_names") or []
+
+    parts = []
+    if department_ids and company_id:
+        dept_rows = (
+            Department.query.with_entities(Department.name)
+            .filter(Department.company_id == company_id, Department.id.in_(department_ids))
+            .order_by(Department.name.asc())
+            .all()
+        )
+        dept_names = [row.name for row in dept_rows if row.name]
+        if dept_names:
+            parts.append(f"Departments: {', '.join(dept_names)}")
+    if group_names:
+        parts.append(f"Groups: {', '.join(group_names)}")
+    if machine_ids:
+        parts.append(f"Machines: {len(machine_ids)} selected")
+    if not parts:
+        return "Scope: Restricted"
+    return f"Scope: {' | '.join(parts)}"
+
 
 def _require_page_or_redirect(page_key: str):
     if not is_authenticated():
@@ -292,7 +319,12 @@ def operator_page():
     redirect_response = _require_page_or_redirect(PAGE_OPERATOR)
     if redirect_response is not None:
         return redirect_response
-    return render_template("andon/operator.html", current_company=get_current_company())
+    company = get_current_company()
+    return render_template(
+        "andon/operator.html",
+        current_company=company,
+        scope_summary_text=_scope_summary_text(company.id if company else None),
+    )
 
 
 @pages_bp.route("/andon/management")
@@ -335,7 +367,12 @@ def board_page():
     redirect_response = _require_page_or_redirect(PAGE_BOARD)
     if redirect_response is not None:
         return redirect_response
-    return render_template("andon/board.html", current_company=get_current_company())
+    company = get_current_company()
+    return render_template(
+        "andon/board.html",
+        current_company=company,
+        scope_summary_text=_scope_summary_text(company.id if company else None),
+    )
 
 
 @pages_bp.route("/andon/reports")
