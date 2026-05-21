@@ -648,6 +648,35 @@
     }, 3200);
   }
 
+  function revealPagerToken(token) {
+    const value = String(token || "").trim();
+    if (!value) return;
+    let copied = false;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(value).then(() => {
+        copied = true;
+        showToast("Pager token copied to clipboard.", "success", "Admin");
+      }).catch(() => {});
+    }
+    const textArea = document.createElement("textarea");
+    textArea.value = value;
+    textArea.setAttribute("readonly", "readonly");
+    textArea.style.position = "fixed";
+    textArea.style.left = "-9999px";
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      copied = document.execCommand("copy") || copied;
+    } catch (_error) {
+      // Ignore fallback copy errors.
+    }
+    document.body.removeChild(textArea);
+    if (copied) {
+      showToast("Pager token copied to clipboard.", "success", "Admin");
+    }
+    window.prompt("Copy pager token now (shown once):", value);
+  }
+
   function pendingToastMessage(kind, form) {
     const row = form?.closest("tr");
     if (kind === "department-create") return "Adding department...";
@@ -2179,6 +2208,7 @@
             <div class="text-secondary small">Last seen: ${escapeHtml(payload.pager_device.last_seen_at || "Never")}</div>
           `;
         }
+        notifyAndonRefresh();
       } else if (form.dataset.kind === "department-pager-token-rotate" && payload.pager_token) {
         const row = document.getElementById(`department-row-${payload.department_id}`);
         if (row && payload.pager_device) {
@@ -2188,7 +2218,8 @@
             <div class="text-secondary small">Last seen: ${escapeHtml(payload.pager_device.last_seen_at || "Never")}</div>
           `;
         }
-        window.prompt("Copy pager token now (shown once):", payload.pager_token);
+        revealPagerToken(payload.pager_token);
+        notifyAndonRefresh();
       } else if (form.dataset.kind === "department-update" && payload.department) {
         const row = document.getElementById(`department-row-${payload.department.id}`);
         if (row) {
