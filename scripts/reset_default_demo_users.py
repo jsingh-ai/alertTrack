@@ -89,13 +89,17 @@ def _delete_only_target_users() -> None:
 
 
 def _create_target_users() -> None:
-    primary_company = Company.query.filter_by(slug=TARGET_COMPANY_SLUG, is_active=True).one_or_none()
+    primary_company = (
+        Company.query.filter_by(slug=TARGET_COMPANY_SLUG, is_active=True)
+        .order_by(Company.id.asc())
+        .first()
+    )
     if primary_company is None:
         raise RuntimeError(f"Active company with slug '{TARGET_COMPANY_SLUG}' was not found.")
     first_department = (
         Department.query.filter_by(company_id=primary_company.id, is_active=True)
         .order_by(Department.id.asc())
-        .one_or_none()
+        .first()
     )
 
     for spec in TARGET_USERS:
