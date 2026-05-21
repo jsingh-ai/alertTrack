@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 
 from flask import current_app
+from sqlalchemy.orm import load_only, noload
 
 from ..company_context import get_current_company_id
 from ..extensions import db
@@ -241,11 +242,27 @@ def ensure_fixed_escalation_rules():
     if company_id is None:
         return {}
     existing_rules = (
-        EscalationRule.query.filter(EscalationRule.company_id == company_id)
+        EscalationRule.query.options(
+            noload("*"),
+            load_only(
+                EscalationRule.id,
+                EscalationRule.company_id,
+                EscalationRule.level,
+                EscalationRule.delay_seconds,
+                EscalationRule.notify_role,
+                EscalationRule.notify_target,
+                EscalationRule.is_active,
+                EscalationRule.department_id,
+                EscalationRule.issue_category_id,
+                EscalationRule.issue_problem_id,
+                EscalationRule.machine_id,
+            ),
+        ).filter(EscalationRule.company_id == company_id)
         .order_by(EscalationRule.level.asc(), EscalationRule.id.asc())
         .all()
     )
     canonical_by_level = {}
+    changed = False
 
     for level in FIXED_ESCALATION_PHASES:
         level_rules = [rule for rule in existing_rules if rule.level == level]
@@ -261,24 +278,43 @@ def ensure_fixed_escalation_rules():
             )
             db.session.add(canonical)
             db.session.flush()
+            changed = True
         else:
-            canonical.department_id = None
-            canonical.issue_category_id = None
-            canonical.issue_problem_id = None
-            canonical.machine_id = None
-            canonical.notify_role = None
-            canonical.notify_target = None
+            if canonical.department_id is not None:
+                canonical.department_id = None
+                changed = True
+            if canonical.issue_category_id is not None:
+                canonical.issue_category_id = None
+                changed = True
+            if canonical.issue_problem_id is not None:
+                canonical.issue_problem_id = None
+                changed = True
+            if canonical.machine_id is not None:
+                canonical.machine_id = None
+                changed = True
+            if canonical.notify_role is not None:
+                canonical.notify_role = None
+                changed = True
+            if canonical.notify_target is not None:
+                canonical.notify_target = None
+                changed = True
             if canonical.delay_seconds is None:
                 canonical.delay_seconds = FIXED_ESCALATION_PHASES[level]["delay_seconds"]
-            canonical.is_active = True
+                changed = True
+            if not canonical.is_active:
+                canonical.is_active = True
+                changed = True
         canonical_by_level[level] = canonical
 
         for duplicate in level_rules[1:]:
             db.session.delete(duplicate)
+            changed = True
 
     for rule in existing_rules:
         if rule.level not in FIXED_ESCALATION_PHASES:
             db.session.delete(rule)
+            changed = True
 
-    db.session.commit()
+    if changed:
+        db.session.commit()
     return canonical_by_level

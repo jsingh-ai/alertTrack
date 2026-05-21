@@ -7,7 +7,8 @@ from collections import defaultdict
 from zoneinfo import ZoneInfo
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
-from sqlalchemy.orm import joinedload, load_only
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..company_context import get_current_company, set_current_company_id, set_current_company_slug
 from ..extensions import db
@@ -368,6 +369,7 @@ def admin_page():
     needs_issue_data = active_section == "departments"
     machines = (
         Machine.query.options(
+            noload("*"),
             load_only(
                 Machine.id,
                 Machine.name,
@@ -381,69 +383,64 @@ def admin_page():
         else []
     )
     access_rows = (
-        UserCompanyAccess.query.options(
-            load_only(
-                UserCompanyAccess.id,
+        db.session.execute(
+            select(
+                UserCompanyAccess.id.label("access_id"),
                 UserCompanyAccess.role,
                 UserCompanyAccess.scope_mode,
                 UserCompanyAccess.department_id,
                 UserCompanyAccess.machine_group_id,
                 UserCompanyAccess.scope_config_json,
                 UserCompanyAccess.is_active,
-            ),
-            joinedload(UserCompanyAccess.user).load_only(
-                User.id,
+                User.id.label("user_id"),
                 User.display_name,
                 User.username,
                 User.employee_id,
                 User.email,
                 User.phone_number,
                 User.password_hash,
-            ),
-            joinedload(UserCompanyAccess.department).load_only(Department.id, Department.name),
-            joinedload(UserCompanyAccess.machine_group).load_only(MachineGroup.id, MachineGroup.name),
-        )
-        .filter_by(company_id=company_id)
-        .order_by(UserCompanyAccess.is_active.desc(), UserCompanyAccess.role.asc(), UserCompanyAccess.id.asc())
-        .all()
+            )
+            .select_from(UserCompanyAccess)
+            .join(User, User.id == UserCompanyAccess.user_id)
+            .where(UserCompanyAccess.company_id == company_id)
+            .order_by(UserCompanyAccess.is_active.desc(), UserCompanyAccess.role.asc(), UserCompanyAccess.id.asc())
+        ).mappings().all()
         if company_id and needs_user_data
         else []
     )
     users = []
     for access in access_rows:
-        user = access.user
-        if user is None:
-            continue
         try:
-            scope_config = json.loads(access.scope_config_json or "{}")
+            scope_config = json.loads(access.get("scope_config_json") or "{}")
         except json.JSONDecodeError:
             scope_config = {}
         users.append(
             {
-                "id": user.id,
+                "id": access.get("user_id"),
                 "company_id": company_id,
-                "employee_id": user.employee_id,
-                "work_id": user.employee_id,
-                "display_name": user.display_name,
-                "username": user.username,
-                "email": user.email,
-                "phone_number": user.phone_number,
-                "has_password": bool(user.password_hash),
-                "department_id": access.department_id,
-                "department_name": access.department.name if access.department else None,
-                "machine_group_id": access.machine_group_id,
-                "machine_group_name": access.machine_group.name if access.machine_group else None,
-                "role": access.role,
-                "scope_mode": access.scope_mode,
+                "employee_id": access.get("employee_id"),
+                "work_id": access.get("employee_id"),
+                "display_name": access.get("display_name"),
+                "username": access.get("username"),
+                "email": access.get("email"),
+                "phone_number": access.get("phone_number"),
+                "has_password": bool(access.get("password_hash")),
+                "department_id": access.get("department_id"),
+                "department_name": None,
+                "machine_group_id": access.get("machine_group_id"),
+                "machine_group_name": None,
+                "role": access.get("role"),
+                "scope_mode": access.get("scope_mode"),
                 "scope_machine_ids": scope_config.get("machine_ids") or [],
                 "scope_machine_group_ids": scope_config.get("machine_group_ids") or [],
                 "scope_department_ids": scope_config.get("department_ids") or [],
-                "is_active": access.is_active,
+                "is_active": bool(access.get("is_active")),
             }
         )
     machine_groups = []
     machine_group_rows = (
         MachineGroup.query.options(
+            noload("*"),
             load_only(MachineGroup.id, MachineGroup.name, MachineGroup.is_active)
         ).filter_by(company_id=company_id).order_by(MachineGroup.name.asc()).all()
         if company_id and (needs_machine_data or needs_user_data or needs_department_data)
@@ -452,6 +449,7 @@ def admin_page():
     machine_group_id_by_name = {group.name: group.id for group in machine_group_rows}
     departments = (
         Department.query.options(
+            noload("*"),
             load_only(Department.id, Department.name, Department.is_active)
         ).filter_by(company_id=company_id).order_by(Department.name.asc()).all()
         if company_id and needs_department_data
@@ -493,6 +491,7 @@ def admin_page():
     ]
     problems = (
         IssueProblem.query.options(
+            noload("*"),
             load_only(IssueProblem.id, IssueProblem.name, IssueProblem.is_active),
             joinedload(IssueProblem.category).load_only(IssueCategory.department_id),
         ).join(IssueCategory)

@@ -104,6 +104,7 @@ class UserCompanyAccess(db.Model):
         db.Index("ix_user_company_access_user_active_company", "user_id", "is_active", "company_id"),
         db.Index("ix_user_company_access_company_id", "company_id"),
         db.Index("ix_user_company_access_is_active", "is_active"),
+        db.Index("ix_user_company_access_company_active_role_id", "company_id", "is_active", "role", "id"),
     )
 
     id = db.Column(db.Integer, primary_key=True)

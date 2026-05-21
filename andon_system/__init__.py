@@ -355,6 +355,7 @@ def _ensure_sqlite_user_role_constraints() -> None:
         db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_user_active_company ON user_company_access (user_id, is_active, company_id)"))
         db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_company_id ON user_company_access (company_id)"))
         db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_is_active ON user_company_access (is_active)"))
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_company_active_role_id ON user_company_access (company_id, is_active, role, id)"))
         db.session.execute(text("COMMIT"))
     except Exception:
         db.session.execute(text("ROLLBACK"))
