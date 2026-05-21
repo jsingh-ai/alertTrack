@@ -16,7 +16,9 @@ from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
+from ..models.pager_device import PagerDevice
 from ..models.user import USER_ROLES, USER_SCOPE_MODES, User, UserCompanyAccess
+from ..security import hash_pager_token
 from ..security import (
     PAGE_ADMIN,
     PAGE_BOARD,
@@ -516,6 +518,33 @@ def admin_page():
         if company_id and needs_department_data
         else []
     )
+    pager_devices = (
+        PagerDevice.query.options(
+            noload(PagerDevice.company),
+            noload(PagerDevice.department),
+            load_only(PagerDevice.id, PagerDevice.company_id, PagerDevice.department_id, PagerDevice.name, PagerDevice.active, PagerDevice.last_seen_at),
+        ).filter_by(company_id=company_id).order_by(PagerDevice.id.asc()).all()
+        if company_id and needs_department_data
+        else []
+    )
+    pager_by_department_id = {device.department_id: device for device in pager_devices}
+    pager_rows_added = False
+    for department in departments:
+        if department.id in pager_by_department_id:
+            continue
+        placeholder = PagerDevice(
+            company_id=department.company_id,
+            department_id=department.id,
+            name=f"{department.name} Pager",
+            token_hash=hash_pager_token(f"init-{department.id}-{datetime.now(timezone.utc).timestamp()}"),
+            active=False,
+        )
+        db.session.add(placeholder)
+        db.session.flush()
+        pager_by_department_id[department.id] = placeholder
+        pager_rows_added = True
+    if pager_rows_added:
+        db.session.commit()
     department_name_by_id = {department.id: department.name for department in departments}
     machine_count_by_group_name = defaultdict(int)
     for machine in machines:
@@ -547,6 +576,15 @@ def admin_page():
             "id": department.id,
             "name": department.name,
             "is_active": department.is_active,
+            "pager_device": {
+                "active": bool(pager_by_department_id.get(department.id).active) if pager_by_department_id.get(department.id) else False,
+                "name": pager_by_department_id.get(department.id).name if pager_by_department_id.get(department.id) else None,
+                "last_seen_at": (
+                    pager_by_department_id.get(department.id).last_seen_at.isoformat()
+                    if pager_by_department_id.get(department.id) and pager_by_department_id.get(department.id).last_seen_at
+                    else None
+                ),
+            },
         }
         for department in departments
     ]

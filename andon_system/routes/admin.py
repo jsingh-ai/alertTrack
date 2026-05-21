@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import secrets
+from datetime import datetime, timezone
 
 from sqlalchemy import update
 from flask import Blueprint, jsonify, flash, redirect, request, url_for
@@ -14,8 +16,9 @@ from ..models.escalation import EscalationRule
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
+from ..models.pager_device import PagerDevice
 from ..models.user import USER_ROLES, USER_SCOPE_MODES, User, UserCompanyAccess
-from ..security import require_admin_authentication
+from ..security import hash_pager_token, require_admin_authentication
 from ..services.cache_service import invalidate_cache
 from ..services.radius_service import resolve_radius_machine_id
 from ..services.realtime_service import emit_admin_metadata_updated
@@ -253,6 +256,36 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
     }, None
 
 
+def _serialize_pager_device(device: PagerDevice | None) -> dict:
+    if device is None:
+        return {"active": False, "name": None, "last_seen_at": None}
+    return {
+        "active": bool(device.active),
+        "name": device.name,
+        "last_seen_at": device.last_seen_at.isoformat() if device.last_seen_at else None,
+    }
+
+
+def _ensure_department_pager_device(department: Department) -> PagerDevice:
+    device = PagerDevice.query.filter_by(
+        company_id=department.company_id,
+        department_id=department.id,
+    ).order_by(PagerDevice.id.asc()).first()
+    if device is not None:
+        return device
+    placeholder_token_hash = hash_pager_token(secrets.token_urlsafe(32))
+    device = PagerDevice(
+        company_id=department.company_id,
+        department_id=department.id,
+        name=f"{department.name} Pager",
+        token_hash=placeholder_token_hash,
+        active=False,
+    )
+    db.session.add(device)
+    db.session.flush()
+    return device
+
+
 def _validation_error(message: str):
     if _is_ajax_request():
         return jsonify({"ok": False, "message": message}), 400
@@ -272,6 +305,8 @@ def create_department():
 
     department = Department(company_id=company_id, name=name, is_active=True)
     db.session.add(department)
+    db.session.flush()
+    pager_device = _ensure_department_pager_device(department)
     db.session.commit()
     _invalidate_company_caches(company_id)
     if _is_ajax_request():
@@ -281,6 +316,7 @@ def create_department():
                 "id": department.id,
                 "name": department.name,
                 "is_active": department.is_active,
+                "pager_device": _serialize_pager_device(pager_device),
             },
         )
     flash("Department created", "success")
@@ -297,12 +333,14 @@ def toggle_department(department_id):
     db.session.commit()
     _invalidate_company_caches(company_id)
     if _is_ajax_request():
+        pager_device = PagerDevice.query.filter_by(company_id=company_id, department_id=department.id).order_by(PagerDevice.id.asc()).first()
         return _json_response(
             "Department updated",
             department={
                 "id": department.id,
                 "name": department.name,
                 "is_active": department.is_active,
+                "pager_device": _serialize_pager_device(pager_device),
             },
         )
     flash("Department updated", "success")
@@ -384,6 +422,8 @@ def delete_department(department_id):
         access.department_id = None
         if access.scope_mode == "restricted":
             access.scope_mode = "all"
+    for pager in PagerDevice.query.filter_by(company_id=company_id, department_id=department.id).all():
+        db.session.delete(pager)
 
     db.session.delete(department)
     db.session.commit()
@@ -392,6 +432,50 @@ def delete_department(department_id):
         return _json_response("Department and linked issues removed", department_id=department_id, affected_user_ids=affected_user_ids)
     flash("Department and linked issues removed", "success")
     return redirect(url_for("pages.admin_page"))
+
+
+@admin_bp.post("/department/<int:department_id>/pager-token/rotate")
+def rotate_department_pager_token(department_id: int):
+    company_id = _company_id()
+    department = Department.query.filter_by(id=department_id, company_id=company_id).one_or_none()
+    if not department:
+        return _error_or_404("Department not found")
+    pager_device = _ensure_department_pager_device(department)
+    raw_token = secrets.token_urlsafe(32)
+    pager_device.token_hash = hash_pager_token(raw_token)
+    pager_device.active = True
+    pager_device.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    _invalidate_company_caches(company_id)
+    if _is_ajax_request():
+        return _json_response(
+            "Pager token generated",
+            department_id=department.id,
+            pager_device=_serialize_pager_device(pager_device),
+            pager_token=raw_token,
+        )
+    flash("Pager token generated", "success")
+    return redirect(url_for("pages.admin_page", section="departments"))
+
+
+@admin_bp.post("/department/<int:department_id>/pager-token/toggle")
+def toggle_department_pager_token(department_id: int):
+    company_id = _company_id()
+    department = Department.query.filter_by(id=department_id, company_id=company_id).one_or_none()
+    if not department:
+        return _error_or_404("Department not found")
+    pager_device = _ensure_department_pager_device(department)
+    pager_device.active = not bool(pager_device.active)
+    db.session.commit()
+    _invalidate_company_caches(company_id)
+    if _is_ajax_request():
+        return _json_response(
+            "Pager device updated",
+            department_id=department.id,
+            pager_device=_serialize_pager_device(pager_device),
+        )
+    flash("Pager device updated", "success")
+    return redirect(url_for("pages.admin_page", section="departments"))
 
 
 @admin_bp.post("/machine/create")

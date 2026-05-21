@@ -143,15 +143,29 @@
         </form>
         <div class="table-responsive">
           <table class="table table-sm table-dark table-striped align-middle">
-            <thead><tr><th>Name</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Status</th><th>Pager</th><th></th></tr></thead>
             <tbody id="departmentTableBody">
               {% for department in departments %}
+              {% set pager = (departments_catalog | selectattr('id', 'equalto', department.id) | list | first).pager_device %}
               <tr id="department-row-{{ department.id }}" data-department-id="{{ department.id }}">
                 <td>
                   <div class="admin-filter-link fw-semibold mb-1" data-department-filter="{{ department.id }}" role="button" tabindex="0" title="Click to filter issues">{{ department.name }}</div>
                 </td>
                 <td class="department-status">{{ "Active" if department.is_active else "Inactive" }}</td>
+                <td class="department-pager-status">
+                  <div class="small fw-semibold">{{ "Enabled" if pager and pager.active else "Disabled" }}</div>
+                  <div class="text-secondary small">{{ pager.name if pager and pager.name else "No pager device" }}</div>
+                  <div class="text-secondary small">
+                    Last seen: {{ pager.last_seen_at if pager and pager.last_seen_at else "Never" }}
+                  </div>
+                </td>
                 <td class="text-end d-flex justify-content-end gap-2">
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.rotate_department_pager_token', department_id=department.id) }}" data-kind="department-pager-token-rotate">
+                    <button class="btn btn-sm btn-outline-info">Generate Token</button>
+                  </form>
+                  <form class="js-ajax-form" method="post" action="{{ url_for('admin.toggle_department_pager_token', department_id=department.id) }}" data-kind="department-pager-token-toggle">
+                    <button class="btn btn-sm btn-outline-warning">Pager Toggle</button>
+                  </form>
                   <form class="js-ajax-form" method="post" action="{{ url_for('admin.toggle_department', department_id=department.id) }}" data-kind="department-toggle">
                     <button class="btn btn-sm btn-outline-light">Toggle</button>
                   </form>
@@ -638,6 +652,8 @@
     const row = form?.closest("tr");
     if (kind === "department-create") return "Adding department...";
     if (kind === "department-toggle") return "Updating department status...";
+    if (kind === "department-pager-token-rotate") return "Generating pager token...";
+    if (kind === "department-pager-token-toggle") return "Updating pager token status...";
     if (kind === "department-update") return "Updating department...";
     if (kind === "department-delete") return `Removing department ${row?.querySelector("[data-department-filter]")?.textContent?.trim() || ""}...`.trim();
     if (kind === "machine-group-create") return "Adding machine group...";
@@ -661,6 +677,8 @@
   function successToastMessage(kind, payload) {
     if (kind === "department-create") return "Department added.";
     if (kind === "department-toggle") return payload?.department?.is_active ? "Department activated." : "Department deactivated.";
+    if (kind === "department-pager-token-rotate") return "Pager token generated.";
+    if (kind === "department-pager-token-toggle") return payload?.pager_device?.active ? "Pager token enabled." : "Pager token disabled.";
     if (kind === "department-update") return "Department updated.";
     if (kind === "department-delete") return "Department removed.";
     if (kind === "machine-group-create") return "Machine group added.";
@@ -1631,13 +1649,26 @@
   }
 
   function departmentRowHtml(department) {
+    const pager = department.pager_device || {};
+    const lastSeen = pager.last_seen_at || "Never";
     return `
       <tr id="department-row-${department.id}" data-department-id="${department.id}">
         <td>
           <div class="admin-filter-link fw-semibold mb-1" data-department-filter="${department.id}" role="button" tabindex="0" title="Click to filter issues">${escapeHtml(department.name)}</div>
         </td>
         <td class="department-status">${department.is_active ? "Active" : "Inactive"}</td>
+        <td class="department-pager-status">
+          <div class="small fw-semibold">${pager.active ? "Enabled" : "Disabled"}</div>
+          <div class="text-secondary small">${escapeHtml(pager.name || "No pager device")}</div>
+          <div class="text-secondary small">Last seen: ${escapeHtml(String(lastSeen))}</div>
+        </td>
         <td class="text-end d-flex justify-content-end gap-2">
+          <form class="js-ajax-form" method="post" action="/andon/admin/department/${department.id}/pager-token/rotate" data-kind="department-pager-token-rotate">
+            <button class="btn btn-sm btn-outline-info">Generate Token</button>
+          </form>
+          <form class="js-ajax-form" method="post" action="/andon/admin/department/${department.id}/pager-token/toggle" data-kind="department-pager-token-toggle">
+            <button class="btn btn-sm btn-outline-warning">Pager Toggle</button>
+          </form>
           <form class="js-ajax-form" method="post" action="/andon/admin/department/${department.id}/toggle" data-kind="department-toggle">
             <button class="btn btn-sm btn-outline-light">Toggle</button>
           </form>
@@ -2119,7 +2150,7 @@
       const payload = await submitAjaxForm(form);
       if (form.dataset.kind === "department-create" && payload.department) {
         departmentTableBody.insertAdjacentHTML("beforeend", departmentRowHtml(payload.department));
-        departmentsCatalog.push({ id: payload.department.id, name: payload.department.name });
+        departmentsCatalog.push({ id: payload.department.id, name: payload.department.name, is_active: payload.department.is_active, pager_device: payload.department.pager_device || null });
         appendDepartmentOption(payload.department);
         appendUserDepartmentOption(payload.department);
         refreshIssuesView();
@@ -2130,8 +2161,34 @@
         const row = document.getElementById(`department-row-${payload.department.id}`);
         if (row) {
           row.querySelector(".department-status").textContent = payload.department.is_active ? "Active" : "Inactive";
+          if (payload.department.pager_device) {
+            row.querySelector(".department-pager-status").innerHTML = `
+              <div class="small fw-semibold">${payload.department.pager_device.active ? "Enabled" : "Disabled"}</div>
+              <div class="text-secondary small">${escapeHtml(payload.department.pager_device.name || "No pager device")}</div>
+              <div class="text-secondary small">Last seen: ${escapeHtml(payload.department.pager_device.last_seen_at || "Never")}</div>
+            `;
+          }
         }
         notifyAndonRefresh();
+      } else if (form.dataset.kind === "department-pager-token-toggle" && payload.pager_device) {
+        const row = document.getElementById(`department-row-${payload.department_id}`);
+        if (row) {
+          row.querySelector(".department-pager-status").innerHTML = `
+            <div class="small fw-semibold">${payload.pager_device.active ? "Enabled" : "Disabled"}</div>
+            <div class="text-secondary small">${escapeHtml(payload.pager_device.name || "No pager device")}</div>
+            <div class="text-secondary small">Last seen: ${escapeHtml(payload.pager_device.last_seen_at || "Never")}</div>
+          `;
+        }
+      } else if (form.dataset.kind === "department-pager-token-rotate" && payload.pager_token) {
+        const row = document.getElementById(`department-row-${payload.department_id}`);
+        if (row && payload.pager_device) {
+          row.querySelector(".department-pager-status").innerHTML = `
+            <div class="small fw-semibold">${payload.pager_device.active ? "Enabled" : "Disabled"}</div>
+            <div class="text-secondary small">${escapeHtml(payload.pager_device.name || "No pager device")}</div>
+            <div class="text-secondary small">Last seen: ${escapeHtml(payload.pager_device.last_seen_at || "Never")}</div>
+          `;
+        }
+        window.prompt("Copy pager token now (shown once):", payload.pager_token);
       } else if (form.dataset.kind === "department-update" && payload.department) {
         const row = document.getElementById(`department-row-${payload.department.id}`);
         if (row) {
