@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import time
 
 from flask import Blueprint, abort, current_app, jsonify, request
+from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload, load_only, noload
 
@@ -64,12 +65,15 @@ from ..services.realtime_service import emit_alert_updated, emit_machine_updated
 
 api_bp = Blueprint("api", __name__, url_prefix="/api/andon")
 PAGER_ACTIVE_ALERTS_CACHE_TTL_SECONDS = 15
+PAGER_ACTIVE_ALERTS_STALE_TTL_SECONDS = 120
 
 
 @api_bp.before_request
 def require_user_session():
+    if current_app.config.get("ANDON_PAGER_API_ONLY") and not request.path.startswith("/api/andon/pager/"):
+        abort(404)
     if request.path.startswith("/api/andon/pager/"):
-        if get_authenticated_pager_device():
+        if get_authenticated_pager_device(update_last_seen=False):
             return
         abort(403)
     require_authentication()
@@ -326,12 +330,13 @@ def api_acknowledge_alert(alert_id):
 @api_bp.get("/pager/alerts/active")
 def api_pager_active_alerts():
     started_at = time.perf_counter()
-    pager = get_authenticated_pager_device()
+    pager = get_authenticated_pager_device(update_last_seen=False)
     if pager is None:
         abort(403)
     auth_ms = (time.perf_counter() - started_at) * 1000
 
     cache_key = ("pager_active_alerts", pager.company_id, pager.department_id)
+    stale_cache_key = ("pager_active_alerts_stale", pager.company_id, pager.department_id)
     cached = get_cached(cache_key)
     if cached is not None:
         if current_app.config.get("ANDON_PERF_LOGS"):
@@ -342,40 +347,57 @@ def api_pager_active_alerts():
             )
         return jsonify({"success": True, "data": cached})
 
+    stale_cached = get_cached(stale_cache_key)
     query_started_at = time.perf_counter()
-    alerts = (
-        AndonAlert.query.options(
-            load_only(
-                AndonAlert.id,
-                AndonAlert.company_id,
-                AndonAlert.alert_number,
-                AndonAlert.machine_id,
-                AndonAlert.department_id,
-                AndonAlert.issue_category_id,
-                AndonAlert.issue_problem_id,
-                AndonAlert.status,
-                AndonAlert.priority,
-                AndonAlert.created_at,
-                AndonAlert.acknowledged_at,
-                AndonAlert.acknowledged_seconds,
-                AndonAlert.note,
-            ),
-            joinedload(AndonAlert.machine).load_only(Machine.id, Machine.name, Machine.machine_code),
-            joinedload(AndonAlert.department).load_only(Department.id, Department.name),
-            joinedload(AndonAlert.issue_category).load_only(IssueCategory.id, IssueCategory.name),
-            joinedload(AndonAlert.issue_problem).load_only(IssueProblem.id, IssueProblem.name),
-            noload(AndonAlert.company),
-            noload(AndonAlert.events),
-            noload(AndonAlert.escalations),
+    try:
+        if db.engine.dialect.name == "postgresql":
+            timeout_ms = int(current_app.config.get("PAGER_ACTIVE_ALERTS_QUERY_TIMEOUT_MS", 2000))
+            db.session.execute(text("SET LOCAL statement_timeout = :timeout_ms"), {"timeout_ms": timeout_ms})
+        alerts = (
+            AndonAlert.query.options(
+                load_only(
+                    AndonAlert.id,
+                    AndonAlert.company_id,
+                    AndonAlert.alert_number,
+                    AndonAlert.machine_id,
+                    AndonAlert.department_id,
+                    AndonAlert.issue_category_id,
+                    AndonAlert.issue_problem_id,
+                    AndonAlert.status,
+                    AndonAlert.priority,
+                    AndonAlert.created_at,
+                    AndonAlert.acknowledged_at,
+                    AndonAlert.acknowledged_seconds,
+                    AndonAlert.note,
+                ),
+                joinedload(AndonAlert.machine).load_only(Machine.id, Machine.name, Machine.machine_code),
+                joinedload(AndonAlert.department).load_only(Department.id, Department.name),
+                joinedload(AndonAlert.issue_category).load_only(IssueCategory.id, IssueCategory.name),
+                joinedload(AndonAlert.issue_problem).load_only(IssueProblem.id, IssueProblem.name),
+                noload(AndonAlert.company),
+                noload(AndonAlert.events),
+                noload(AndonAlert.escalations),
+            )
+            .filter(
+                AndonAlert.company_id == pager.company_id,
+                AndonAlert.department_id == pager.department_id,
+                AndonAlert.status.in_([ALERT_STATUS_OPEN, ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED]),
+            )
+            .order_by(AndonAlert.priority.desc(), AndonAlert.created_at.asc())
+            .all()
         )
-        .filter(
-            AndonAlert.company_id == pager.company_id,
-            AndonAlert.department_id == pager.department_id,
-            AndonAlert.status.in_([ALERT_STATUS_OPEN, ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED]),
-        )
-        .order_by(AndonAlert.priority.desc(), AndonAlert.created_at.asc())
-        .all()
-    )
+    except OperationalError:
+        db.session.rollback()
+        if stale_cached is not None:
+            if current_app.config.get("ANDON_PERF_LOGS"):
+                current_app.logger.debug(
+                    "PERF pager_active_alerts auth_ms=%.1f cache=stale_fallback query_ms=%.1f serialize_ms=0.0 count=%s",
+                    auth_ms,
+                    (time.perf_counter() - query_started_at) * 1000,
+                    len(stale_cached) if isinstance(stale_cached, list) else -1,
+                )
+            return jsonify({"success": True, "data": stale_cached})
+        alerts = []
     query_ms = (time.perf_counter() - query_started_at) * 1000
     status_labels = {
         ALERT_STATUS_OPEN: "Open",
@@ -427,6 +449,7 @@ def api_pager_active_alerts():
     ]
     serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
     set_cached(cache_key, payload, ttl_seconds=PAGER_ACTIVE_ALERTS_CACHE_TTL_SECONDS)
+    set_cached(stale_cache_key, payload, ttl_seconds=PAGER_ACTIVE_ALERTS_STALE_TTL_SECONDS)
     if current_app.config.get("ANDON_PERF_LOGS"):
         current_app.logger.debug(
             "PERF pager_active_alerts auth_ms=%.1f cache=miss query_ms=%.1f serialize_ms=%.1f count=%s",

@@ -422,6 +422,8 @@ def create_app(config_name: str | None = None) -> Flask:
 
     config_key = config_name or os.getenv("FLASK_CONFIG") or os.getenv("APP_ENV") or "default"
     app.config.from_object(config_by_name.get(config_key, config_by_name["default"]))
+    if app.config.get("ANDON_PAGER_API_ONLY"):
+        app.config["SOCKETIO_ENABLED"] = False
     if not app.config.get("SQLALCHEMY_DATABASE_URI"):
         raise RuntimeError("DATABASE_URL must be configured for PostgreSQL.")
     if config_key == "production":
@@ -495,7 +497,11 @@ def create_app(config_name: str | None = None) -> Flask:
             g.request_started_at = time.perf_counter()
         # Static assets, Socket.IO handshakes, and logout should not pay
         # auth/company preload cost.
-        if request.path.startswith("/static/") or request.path.startswith("/socket.io/"):
+        if (
+            request.path.startswith("/static/")
+            or request.path.startswith("/socket.io/")
+            or request.path.startswith("/api/andon/pager/")
+        ):
             return
         enforce_csrf()
         if request.endpoint == "pages.logout_page":

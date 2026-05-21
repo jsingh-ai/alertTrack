@@ -35,6 +35,10 @@ class BaseConfig:
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": _env_flag("SQLALCHEMY_POOL_PRE_PING", "true"),
         "pool_recycle": int(os.getenv("SQLALCHEMY_POOL_RECYCLE", "300")),
+        "pool_size": int(os.getenv("SQLALCHEMY_POOL_SIZE", "20")),
+        "max_overflow": int(os.getenv("SQLALCHEMY_MAX_OVERFLOW", "40")),
+        "pool_timeout": int(os.getenv("SQLALCHEMY_POOL_TIMEOUT", "30")),
+        "pool_use_lifo": _env_flag("SQLALCHEMY_POOL_USE_LIFO", "true"),
     }
     JSON_SORT_KEYS = False
     TIMEZONE = os.getenv("APP_TIMEZONE", "America/Chicago")
@@ -58,6 +62,7 @@ class BaseConfig:
     SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
     SESSION_COOKIE_SECURE = _env_flag("SESSION_COOKIE_SECURE")
     ANDON_PERF_LOGS = _env_flag("ANDON_PERF_LOGS")
+    ANDON_PAGER_API_ONLY = _env_flag("ANDON_PAGER_API_ONLY")
 
     ESCALATION_EMAIL_ENABLED = _env_flag("ESCALATION_EMAIL_ENABLED")
     ESCALATION_EMAIL_SMTP_HOST = os.getenv("ESCALATION_EMAIL_SMTP_HOST")

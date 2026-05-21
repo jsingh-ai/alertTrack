@@ -88,6 +88,14 @@ For local Socket.IO testing with the production entrypoint:
 python run_socketio.py
 ```
 
+For pager-only API isolation (no pages/admin/socket), run:
+
+```bash
+python run_pager_api.py
+```
+
+This defaults to `0.0.0.0:5003` and serves only API routes needed by pager traffic.
+
 `run_socketio.py` reads `.env` automatically and defaults to `0.0.0.0:5001` when `HOST` and `PORT` are not set.
 
 For production deployments, use a WebSocket-capable worker and Redis-backed Socket.IO fanout.

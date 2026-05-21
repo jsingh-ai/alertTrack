@@ -827,16 +827,32 @@ def get_view_preference(page_key: str, company_id: int | None = None, user: User
     if resolved_company_id is None:
         membership = get_current_membership(user=current_user)
         resolved_company_id = membership.company_id if membership else None
+    cache_key = None
+    if has_request_context():
+        cache_key = (current_user.id, resolved_company_id, page_key)
+        pref_cache = getattr(g, "view_preferences_cache", None)
+        if pref_cache is None:
+            pref_cache = {}
+            g.view_preferences_cache = pref_cache
+        if cache_key in pref_cache:
+            return pref_cache[cache_key]
     preference = UserViewPreference.query.filter_by(
         user_id=current_user.id,
         company_id=resolved_company_id,
         page_key=page_key,
     ).one_or_none()
     if preference is None or not preference.preferences_json:
+        if has_request_context() and cache_key is not None:
+            g.view_preferences_cache[cache_key] = {}
         return {}
     try:
-        return json.loads(preference.preferences_json)
+        result = json.loads(preference.preferences_json)
+        if has_request_context() and cache_key is not None:
+            g.view_preferences_cache[cache_key] = result
+        return result
     except json.JSONDecodeError:
+        if has_request_context() and cache_key is not None:
+            g.view_preferences_cache[cache_key] = {}
         return {}
 
 
@@ -870,9 +886,24 @@ def save_view_preference(page_key: str, payload: dict, company_id: int | None = 
             preferences_json=serialized,
         )
         db.session.add(preference)
+        db.session.commit()
     else:
+        if preference.preferences_json == serialized:
+            if has_request_context():
+                pref_cache = getattr(g, "view_preferences_cache", None)
+                if pref_cache is None:
+                    pref_cache = {}
+                    g.view_preferences_cache = pref_cache
+                pref_cache[(current_user.id, resolved_company_id, page_key)] = payload or {}
+            return payload or {}
         preference.preferences_json = serialized
-    db.session.commit()
+        db.session.commit()
+    if has_request_context():
+        pref_cache = getattr(g, "view_preferences_cache", None)
+        if pref_cache is None:
+            pref_cache = {}
+            g.view_preferences_cache = pref_cache
+        pref_cache[(current_user.id, resolved_company_id, page_key)] = payload or {}
     return payload or {}
 
 
