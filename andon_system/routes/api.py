@@ -58,7 +58,7 @@ from ..services.reporting_service import (
     build_problem_details,
 )
 from ..services.escalation_service import check_escalations
-from ..services.cache_service import invalidate_cache
+from ..services.cache_service import get_cached, invalidate_cache, set_cached
 from ..services.realtime_service import emit_machine_updated
 
 api_bp = Blueprint("api", __name__, url_prefix="/api/andon")
@@ -327,6 +327,11 @@ def api_pager_active_alerts():
     if pager is None:
         abort(403)
 
+    cache_key = ("pager_active_alerts", pager.company_id, pager.department_id)
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return jsonify({"success": True, "data": cached})
+
     alerts = (
         AndonAlert.query.options(
             joinedload(AndonAlert.machine).load_only(Machine.id, Machine.name, Machine.machine_code),
@@ -353,50 +358,47 @@ def api_pager_active_alerts():
         ALERT_STATUS_CANCELLED: "Cancelled",
     }
 
-    return jsonify(
+    payload = [
         {
-            "success": True,
-            "data": [
-                {
-                    "id": alert.id,
-                    "alert_number": alert.alert_number,
-                    "department": {
-                        "id": alert.department.id if alert.department else alert.department_id,
-                        "name": alert.department.name if alert.department else None,
-                    },
-                    "machine": {
-                        "id": alert.machine.id if alert.machine else alert.machine_id,
-                        "name": alert.machine.name if alert.machine else None,
-                        "machine_code": alert.machine.machine_code if alert.machine else None,
-                    },
-                    "issue_category": {
-                        "id": alert.issue_category.id if alert.issue_category else alert.issue_category_id,
-                        "name": alert.issue_category.name if alert.issue_category else None,
-                    },
-                    "issue_problem": {
-                        "id": alert.issue_problem.id if alert.issue_problem else alert.issue_problem_id,
-                        "name": alert.issue_problem.name if alert.issue_problem else None,
-                    },
-                    "status": alert.status,
-                    "status_label": status_labels.get(alert.status, alert.status.title() if alert.status else None),
-                    "action_available": (
-                        "acknowledge"
-                        if alert.status == ALERT_STATUS_OPEN
-                        else "resolve"
-                        if alert.status in {ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED}
-                        else None
-                    ),
-                    "priority": alert.priority,
-                    "created_at": alert.created_at.isoformat() if alert.created_at else None,
-                    "acknowledged_at": alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
-                    "elapsed_seconds": alert.elapsed_seconds,
-                    "acknowledged_seconds": alert.acknowledged_seconds,
-                    "note": alert.note,
-                }
-                for alert in alerts
-            ],
+            "id": alert.id,
+            "alert_number": alert.alert_number,
+            "department": {
+                "id": alert.department.id if alert.department else alert.department_id,
+                "name": alert.department.name if alert.department else None,
+            },
+            "machine": {
+                "id": alert.machine.id if alert.machine else alert.machine_id,
+                "name": alert.machine.name if alert.machine else None,
+                "machine_code": alert.machine.machine_code if alert.machine else None,
+            },
+            "issue_category": {
+                "id": alert.issue_category.id if alert.issue_category else alert.issue_category_id,
+                "name": alert.issue_category.name if alert.issue_category else None,
+            },
+            "issue_problem": {
+                "id": alert.issue_problem.id if alert.issue_problem else alert.issue_problem_id,
+                "name": alert.issue_problem.name if alert.issue_problem else None,
+            },
+            "status": alert.status,
+            "status_label": status_labels.get(alert.status, alert.status.title() if alert.status else None),
+            "action_available": (
+                "acknowledge"
+                if alert.status == ALERT_STATUS_OPEN
+                else "resolve"
+                if alert.status in {ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED}
+                else None
+            ),
+            "priority": alert.priority,
+            "created_at": alert.created_at.isoformat() if alert.created_at else None,
+            "acknowledged_at": alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
+            "elapsed_seconds": alert.elapsed_seconds,
+            "acknowledged_seconds": alert.acknowledged_seconds,
+            "note": alert.note,
         }
-    )
+        for alert in alerts
+    ]
+    set_cached(cache_key, payload, ttl_seconds=2)
+    return jsonify({"success": True, "data": payload})
 
 
 @api_bp.post("/pager/alerts/<int:alert_id>/acknowledge")

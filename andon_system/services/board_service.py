@@ -101,7 +101,12 @@ def build_operator_snapshot():
     if cached is not None:
         return cached
 
-    context = _load_board_context(company_id, include_alerts=True, include_metadata=False)
+    context = _load_board_context(
+        company_id,
+        include_alerts=True,
+        include_metadata=False,
+        include_radius=False,
+    )
     result = {
         "machines": [
             _serialize_machine(
@@ -124,7 +129,12 @@ def build_operator_metadata():
     if cached is not None:
         return cached
 
-    context = _load_board_context(company_id, include_alerts=False, include_metadata=True)
+    context = _load_board_context(
+        company_id,
+        include_alerts=False,
+        include_metadata=True,
+        include_radius=False,
+    )
     result = {
         "departments": [
             {
@@ -167,7 +177,7 @@ def build_operator_metadata():
     return result
 
 
-def _load_board_context(company_id, include_alerts: bool, include_metadata: bool = True):
+def _load_board_context(company_id, include_alerts: bool, include_metadata: bool = True, include_radius: bool = True):
     scope = get_scope_filters()
     membership = get_current_membership()
     role = membership.role if membership else None
@@ -319,7 +329,7 @@ def _load_board_context(company_id, include_alerts: bool, include_metadata: bool
         if include_metadata
         else []
     )
-    radius_status_by_machine = build_radius_status_map(visible_machines)
+    radius_status_by_machine = build_radius_status_map(visible_machines) if include_radius else {}
 
     alert_by_machine = {}
     created_notes_by_alert_id = {}
