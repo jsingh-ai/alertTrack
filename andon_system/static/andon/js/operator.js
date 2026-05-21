@@ -124,6 +124,10 @@ function handleVisibilityChange() {
 
 async function boot() {
   hydrateOperatorMetadataFromCache();
+  const metadataBootstrapPromise = loadOperatorMetadata({ force: true }).catch((_error) => {
+    console.warn("Unable to load operator metadata during boot.");
+    return null;
+  });
   void restoreViewState().then(() => {
     normalizeViewState();
     renderViewControls();
@@ -132,15 +136,15 @@ async function boot() {
     console.warn("Failed to restore operator view state.");
   });
   await loadBoardState();
-  try {
-    await loadOperatorMetadata({ force: true });
-  } catch (_error) {
-    console.warn("Unable to load operator metadata during boot.");
-  }
   normalizeViewState();
   wireEvents();
   renderViewControls();
   renderBoard();
+  void metadataBootstrapPromise.then(() => {
+    normalizeViewState();
+    renderViewControls();
+    renderBoard();
+  });
   startElapsedTimers();
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.AndonRefreshBus?.onRefresh(scheduleOperatorRefresh);
@@ -1238,14 +1242,16 @@ async function refreshBoardState() {
   operatorRefreshInFlight = true;
   try {
     await loadBoardState();
-    try {
-      await loadOperatorMetadata();
-    } catch (_error) {
-      console.warn("Failed to refresh operator metadata.");
-    }
     normalizeViewState();
     renderViewControls();
     renderBoard();
+    void loadOperatorMetadata().then(() => {
+      normalizeViewState();
+      renderViewControls();
+      renderBoard();
+    }).catch((_error) => {
+      console.warn("Failed to refresh operator metadata.");
+    });
   } finally {
     operatorRefreshInFlight = false;
     if (operatorRefreshQueued) {

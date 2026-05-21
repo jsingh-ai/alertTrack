@@ -23,6 +23,9 @@ const state = {
 
 let timerIntervalId = null;
 let operatorMetadataLoadPromise = null;
+let boardRefreshInFlight = false;
+let boardRefreshQueued = false;
+let boardRefreshTimeoutId = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -452,12 +455,12 @@ async function onListClick(event) {
       const updated = await acknowledgeAlert(alert);
       applyAlertUpdate(updated, alert);
       render();
-      void refresh();
+      scheduleRefresh(60);
     } else if (action === "resolve") {
       const updated = await resolveAlert(alert);
       applyAlertUpdate(updated, alert);
       render();
-      void refresh();
+      scheduleRefresh(60);
     }
   } catch (error) {
     window.alert(error.message || "Action failed");
@@ -491,6 +494,34 @@ function startTimer() {
 }
 
 async function refresh() {
+  if (boardRefreshInFlight) {
+    boardRefreshQueued = true;
+    return;
+  }
+  boardRefreshInFlight = true;
+  try {
+    await loadAlerts();
+    render();
+  } finally {
+    boardRefreshInFlight = false;
+    if (boardRefreshQueued) {
+      boardRefreshQueued = false;
+      scheduleRefresh(80);
+    }
+  }
+}
+
+function scheduleRefresh(delayMs = 120) {
+  if (boardRefreshTimeoutId) {
+    clearTimeout(boardRefreshTimeoutId);
+  }
+  boardRefreshTimeoutId = window.setTimeout(() => {
+    boardRefreshTimeoutId = null;
+    void refresh();
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
+async function refreshImmediately() {
   await loadAlerts();
   render();
 }
@@ -503,19 +534,18 @@ async function boot() {
   workingAlertsList?.addEventListener("input", onListInput);
 
   window.AndonRefreshBus?.onRefresh(() => {
-    void refresh();
+    scheduleRefresh(100);
   });
   window.AndonRealtime?.onEvent((event) => {
     if (["alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
-      void refresh();
+      scheduleRefresh(100);
       if (event.type === "admin_metadata_updated") {
         void ensureOperatorMetadataLoaded({ force: true }).then(render).catch(() => {});
       }
     }
   });
 
-  await loadAlerts();
-  render();
+  await refreshImmediately();
   startTimer();
   void ensureOperatorMetadataLoaded().then(render).catch(() => {});
 }

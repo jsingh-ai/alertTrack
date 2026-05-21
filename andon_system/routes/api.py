@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from flask import Blueprint, abort, jsonify, request
+from flask import Blueprint, abort, current_app, jsonify, request
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload, load_only, noload
 
@@ -77,6 +77,22 @@ def _require_any_page_access(*page_keys: str):
     if any(user_can_access_page(page_key) for page_key in page_keys):
         return
     abort(403)
+
+
+def _ensure_aware_datetime(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _seconds_between(start, end):
+    start_aware = _ensure_aware_datetime(start)
+    end_aware = _ensure_aware_datetime(end)
+    if start_aware is None or end_aware is None:
+        return None
+    return max(0, int((end_aware - start_aware).total_seconds()))
 
 
 @api_bp.get("/machines")
@@ -417,24 +433,29 @@ def api_pager_acknowledge_alert(alert_id: int):
             return _error("Alert can only be acknowledged from OPEN state", 409)
         return _error("Alert is busy. Please retry.", 409)
 
-    alert.acknowledged_at = now
-    if alert.created_at:
-        alert.acknowledged_seconds = max(0, int((now - alert.created_at).total_seconds()))
-    alert.status = ALERT_STATUS_ACKNOWLEDGED
-    alert.responder_name_text = responder_name_text
-    alert.note = note
-    db.session.add(
-        AndonAlertEvent(
-            company_id=alert.company_id,
-            alert=alert,
-            event_type="ACKNOWLEDGED",
-            user_id=None,
-            user_name_text=responder_name_text,
-            message="Alert acknowledged from pager",
-            metadata_json={"source": "pager_device", "pager_device_id": pager.id, "pager_name": pager.name},
+    try:
+        alert.acknowledged_at = now
+        if alert.created_at:
+            alert.acknowledged_seconds = _seconds_between(alert.created_at, now)
+        alert.status = ALERT_STATUS_ACKNOWLEDGED
+        alert.responder_name_text = responder_name_text
+        alert.note = note
+        db.session.add(
+            AndonAlertEvent(
+                company_id=alert.company_id,
+                alert=alert,
+                event_type="ACKNOWLEDGED",
+                user_id=None,
+                user_name_text=responder_name_text,
+                message="Alert acknowledged from pager",
+                metadata_json={"source": "pager_device", "pager_device_id": pager.id, "pager_name": pager.name},
+            )
         )
-    )
-    db.session.commit()
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Pager acknowledge failed alert_id=%s pager_device_id=%s", alert_id, pager.id)
+        return _error(f"Unable to acknowledge alert: {exc}", 400)
     invalidate_cache(company_id=alert.company_id)
     emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="acknowledged")
     return jsonify(
@@ -492,28 +513,33 @@ def api_pager_resolve_alert(alert_id: int):
             return _error("Alert is already closed", 409)
         return _error("Alert is busy. Please retry.", 409)
 
-    alert.resolved_at = now
-    if alert.acknowledged_at:
-        alert.ack_to_clear_seconds = max(0, int((now - alert.acknowledged_at).total_seconds()))
-    alert.status = ALERT_STATUS_RESOLVED
-    alert.responder_name_text = responder_name_text
-    if note:
-        if alert.note:
-            alert.note = f"{alert.note}\n{note}".strip()
-        else:
-            alert.note = note
-    db.session.add(
-        AndonAlertEvent(
-            company_id=alert.company_id,
-            alert=alert,
-            event_type="RESOLVED",
-            user_id=None,
-            user_name_text=responder_name_text,
-            message="Alert resolved from pager",
-            metadata_json={"source": "pager_device", "pager_device_id": pager.id, "pager_name": pager.name},
+    try:
+        alert.resolved_at = now
+        if alert.acknowledged_at:
+            alert.ack_to_clear_seconds = _seconds_between(alert.acknowledged_at, now)
+        alert.status = ALERT_STATUS_RESOLVED
+        alert.responder_name_text = responder_name_text
+        if note:
+            if alert.note:
+                alert.note = f"{alert.note}\n{note}".strip()
+            else:
+                alert.note = note
+        db.session.add(
+            AndonAlertEvent(
+                company_id=alert.company_id,
+                alert=alert,
+                event_type="RESOLVED",
+                user_id=None,
+                user_name_text=responder_name_text,
+                message="Alert resolved from pager",
+                metadata_json={"source": "pager_device", "pager_device_id": pager.id, "pager_name": pager.name},
+            )
         )
-    )
-    db.session.commit()
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Pager resolve failed alert_id=%s pager_device_id=%s", alert_id, pager.id)
+        return _error(f"Unable to resolve alert: {exc}", 400)
     invalidate_cache(company_id=alert.company_id)
     emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="resolved")
     return jsonify(
