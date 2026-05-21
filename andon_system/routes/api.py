@@ -351,8 +351,17 @@ def api_pager_active_alerts():
     query_started_at = time.perf_counter()
     try:
         if db.engine.dialect.name == "postgresql":
-            timeout_ms = int(current_app.config.get("PAGER_ACTIVE_ALERTS_QUERY_TIMEOUT_MS", 2000))
-            db.session.execute(text("SET LOCAL statement_timeout = :timeout_ms"), {"timeout_ms": timeout_ms})
+            raw_timeout_ms = current_app.config.get("PAGER_ACTIVE_ALERTS_QUERY_TIMEOUT_MS", 2000)
+            try:
+                timeout_ms = int(raw_timeout_ms)
+            except (TypeError, ValueError):
+                timeout_ms = 0
+            if timeout_ms > 0:
+                timeout_ms = max(1, min(timeout_ms, 60000))
+                db.session.execute(
+                    text("SELECT set_config('statement_timeout', :timeout_value, true)"),
+                    {"timeout_value": f"{timeout_ms}ms"},
+                )
         alerts = (
             AndonAlert.query.options(
                 load_only(
