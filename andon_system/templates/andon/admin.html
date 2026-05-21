@@ -391,7 +391,7 @@
           </div>
           <div class="table-responsive">
             <table class="table table-sm table-dark table-striped align-middle mb-0">
-              <thead><tr><th>Username</th><th>Password</th><th>Work ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Scope</th><th>Scope Details Department</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>Username</th><th>Password</th><th>Work ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Scope</th><th>Department</th><th>Status</th><th></th></tr></thead>
               <tbody id="userTableBody">
               {% for user in users %}
               <tr id="user-row-{{ user.id }}" data-user-id="{{ user.id }}" data-user-role="{{ user.role or '' }}" data-user-scope-mode="{{ user.scope_mode or '' }}" data-user-machine-group-id="{{ user.machine_group_id or '' }}" data-user-department-id="{{ user.department_id or '' }}" data-user-scope-machine-ids="{{ (user.scope_machine_ids or [])|join(',') }}" data-user-scope-machine-group-ids="{{ (user.scope_machine_group_ids or [])|join(',') }}" data-user-scope-department-ids="{{ (user.scope_department_ids or [])|join(',') }}" data-user-display-name="{{ user.display_name }}">
@@ -498,6 +498,15 @@
       </div>
       <div class="modal-body">
         <p class="small text-secondary mb-2" id="userScopeModalHint"></p>
+        <div class="mb-3 d-none" id="userScopeModalDepartmentBlock">
+          <label class="form-label" for="userScopeModalDepartmentSelect">Department</label>
+          <select class="form-select" id="userScopeModalDepartmentSelect">
+            <option value="">Select a department</option>
+            {% for department in departments %}
+              <option value="{{ department.id }}">{{ department.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
         <div class="admin-scope-controls">
           <div>
             <label class="form-label">Machine Groups</label>
@@ -570,6 +579,8 @@
   const userScopeModalElement = document.getElementById("userScopeModal");
   const userScopeModalUserName = document.getElementById("userScopeModalUserName");
   const userScopeModalHint = document.getElementById("userScopeModalHint");
+  const userScopeModalDepartmentBlock = document.getElementById("userScopeModalDepartmentBlock");
+  const userScopeModalDepartmentSelect = document.getElementById("userScopeModalDepartmentSelect");
   const userScopeModalGroupList = document.getElementById("userScopeModalGroupList");
   const userScopeModalMachineBlock = document.getElementById("userScopeModalMachineBlock");
   const userScopeModalMachineList = document.getElementById("userScopeModalMachineList");
@@ -599,6 +610,7 @@
   let modalScopeSelectedGroupIds = new Set();
   let modalScopeSelectedMachineIds = new Set();
   let userScopeModalFallbackOpen = false;
+  const userRowSaveState = new Map();
   let adminDeleteModalFallbackOpen = false;
   const userRowStore = new Map();
   let toastId = 0;
@@ -702,6 +714,8 @@
   function registerUserRow(row) {
     if (!row?.dataset?.userId) return;
     userRowStore.set(String(row.dataset.userId), row);
+    syncUserRowScopeForRole(row);
+    row.dataset.userLastSavedSignature = userUpdateSignature(row);
   }
 
   function rebuildUserRowStoreFromDom() {
@@ -1106,7 +1120,7 @@
       return "Operator: pick one or more machine groups, then choose machines in those groups.";
     }
     if (role === "Viewer") {
-      return "Department: choose a department from the dropdown. Machine groups are optional.";
+      return "Department: choose a department. Machine groups are optional.";
     }
     if (role === "Manager") {
       return "Manager: pick machine groups, or leave blank to include all machine groups. Machines are assigned automatically.";
@@ -1301,6 +1315,11 @@
     const role = scopeRoleFromRow(row);
     userScopeModalUserName.textContent = displayName;
     userScopeModalHint.textContent = roleScopeHint(role);
+    const viewerMode = role === "Viewer";
+    if (userScopeModalDepartmentBlock && userScopeModalDepartmentSelect) {
+      userScopeModalDepartmentBlock.classList.toggle("d-none", !viewerMode);
+      userScopeModalDepartmentSelect.value = row.querySelector('[name="department_id"]')?.value || "";
+    }
     const groupIds = parseCsvIds(row.querySelector('[name="scope_machine_group_ids"]')?.value || "");
     const machineIds = parseCsvIds(row.querySelector('[name="scope_machine_ids"]')?.value || "");
     const normalizedGroupIds = uniqueSortedIds(groupIds);
@@ -1344,7 +1363,9 @@
         : []);
     const selectedDepartmentIds = role === "Viewer"
       ? (() => {
-          const selected = Number(row.querySelector('[name="department_id"]')?.value || "");
+          const selected = Number(
+            (userScopeModalDepartmentSelect?.value ?? row.querySelector('[name="department_id"]')?.value) || ""
+          );
           return Number.isInteger(selected) && selected > 0 ? [selected] : [];
         })()
       : (role === "Operator"
@@ -1803,6 +1824,7 @@
     const row = document.getElementById(`user-row-${user.id}`);
     registerUserRow(row);
     applyUserRowRoleState(row);
+    row.dataset.userLastSavedSignature = userUpdateSignature(row);
   }
 
   function updateUserRow(user) {
@@ -1831,6 +1853,7 @@
     row.querySelector('[name="scope_department_ids"]').value = Array.isArray(user.scope_department_ids) ? user.scope_department_ids.join(",") : "";
     row.querySelector(".user-status").textContent = user.is_active ? "Active" : "Inactive";
     applyUserRowRoleState(row);
+    row.dataset.userLastSavedSignature = userUpdateSignature(row);
   }
 
   function applyUserRowRoleState(row) {
@@ -1920,10 +1943,33 @@
     row.querySelector('[name="scope_department_ids"]').value = "";
   }
 
+  function userUpdateSignature(row) {
+    const role = row.querySelector('[name="role"]')?.value || "";
+    return JSON.stringify({
+      username: row.querySelector('[name="username"]')?.value || "",
+      password: row.querySelector('[name="password"]')?.value || "",
+      work_id: row.querySelector('[name="work_id"]')?.value || "",
+      display_name: row.querySelector('[name="display_name"]')?.value || "",
+      email: row.querySelector('[name="email"]')?.value || "",
+      phone_number: row.querySelector('[name="phone_number"]')?.value || "",
+      role,
+      scope_mode: role === "Admin" ? "all" : "restricted",
+      machine_group_id: row.querySelector('[name="machine_group_id"]')?.value || "",
+      department_id: row.querySelector('[name="department_id"]')?.value || "",
+      scope_machine_ids: row.querySelector('[name="scope_machine_ids"]')?.value || "",
+      scope_machine_group_ids: row.querySelector('[name="scope_machine_group_ids"]')?.value || "",
+      scope_department_ids: row.querySelector('[name="scope_department_ids"]')?.value || "",
+    });
+  }
+
   async function submitUserUpdate(row) {
     const userId = row.dataset.userId;
-    if (!userId) return;
+    if (!userId) return false;
     syncUserRowScopeForRole(row);
+    const signature = userUpdateSignature(row);
+    if (row.dataset.userLastSavedSignature === signature) {
+      return false;
+    }
     const payload = new FormData();
     payload.append("username", row.querySelector('[name="username"]')?.value || "");
     payload.append("password", row.querySelector('[name="password"]')?.value || "");
@@ -1956,6 +2002,34 @@
       updateUserRow(data.user);
       refreshUsersView();
     }
+    row.dataset.userLastSavedSignature = signature;
+    return true;
+  }
+
+  function queueUserUpdate(row) {
+    const userId = row?.dataset?.userId;
+    if (!userId) return;
+    const state = userRowSaveState.get(userId) || { inFlight: false, queued: false };
+    state.queued = true;
+    userRowSaveState.set(userId, state);
+    if (state.inFlight) return;
+    const run = async () => {
+      while (state.queued) {
+        state.queued = false;
+        state.inFlight = true;
+        try {
+          const changed = await submitUserUpdate(row);
+          if (changed) {
+            showToast("User updated.", "success", "Admin");
+            notifyAndonRefresh();
+          }
+        } catch (error) {
+          showToast(error.message || "Request failed");
+        }
+      }
+      state.inFlight = false;
+    };
+    run();
   }
 
   function removeMachineRow(machineId) {
@@ -2337,19 +2411,32 @@
     if (!field) return;
     const row = field.closest("tr[data-user-id]");
     if (!row) return;
+    const changedField = field.dataset.userField || "";
+    const previousRoleValue = row.dataset.userRole || "";
     applyUserRowRoleState(row);
     const roleValue = row.querySelector('[name="role"]')?.value || "";
     const departmentValue = row.querySelector('[name="department_id"]')?.value || "";
     if (roleValue === "Viewer" && !departmentValue) {
-      showToast("Department role must have at least one department selected.");
+      showToast("Department is required.");
       return;
     }
-    try {
-      await submitUserUpdate(row);
-      notifyAndonRefresh();
-    } catch (error) {
-      showToast(error.message || "Request failed");
+    queueUserUpdate(row);
+    if (changedField === "role" && roleValue === "Operator" && previousRoleValue !== "Operator") {
+      openUserScopeEditor(row);
     }
+  });
+
+  userTableBody.addEventListener("focusout", (event) => {
+    const field = event.target.closest(".js-user-field");
+    if (!field) return;
+    const row = field.closest("tr[data-user-id]");
+    if (!row) return;
+    const roleValue = row.querySelector('[name="role"]')?.value || "";
+    const departmentValue = row.querySelector('[name="department_id"]')?.value || "";
+    if (roleValue === "Viewer" && !departmentValue) {
+      return;
+    }
+    queueUserUpdate(row);
   });
 
   userTableBody.addEventListener("click", (event) => {
@@ -2412,7 +2499,7 @@
     if (!activeUserScopeRow) return;
     const role = scopeRoleFromRow(activeUserScopeRow);
     const groupCount = modalScopeGroupIdsFromDom().length;
-    const departmentValue = activeUserScopeRow.querySelector('[name="department_id"]')?.value || "";
+    const departmentValue = (userScopeModalDepartmentSelect?.value || activeUserScopeRow.querySelector('[name="department_id"]')?.value || "");
     const machineCount = Array.from(userScopeModalMachineList.querySelectorAll(".js-user-modal-scope-machine:checked")).length;
     const selectedModalMachineIds = uniqueSortedIds(
       Array.from(userScopeModalMachineList.querySelectorAll(".js-user-modal-scope-machine:checked"))
@@ -2427,7 +2514,7 @@
       return;
     }
     if (role === "Viewer" && !departmentValue) {
-      showToast("Department role must have at least one department selected.");
+      showToast("Department is required.");
       return;
     }
     const rowToUpdate = activeUserScopeRow;
@@ -2450,6 +2537,9 @@
     userScopeModalGroupList.innerHTML = "";
     userScopeModalMachineList.innerHTML = "";
     userScopeModalAllMachines.checked = false;
+    if (userScopeModalDepartmentSelect) {
+      userScopeModalDepartmentSelect.value = "";
+    }
   });
 
   userScopeModalElement?.addEventListener("click", (event) => {
@@ -2511,7 +2601,7 @@
     }
     if (role === "Viewer" && departmentIds.length === 0) {
       event.preventDefault();
-      showToast("Department role must have at least one department selected.");
+      showToast("Department is required.");
       return;
     }
   });

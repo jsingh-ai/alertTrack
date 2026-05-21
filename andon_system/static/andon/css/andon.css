@@ -1731,6 +1731,18 @@ body.admin-screen-shell .admin-delete-modal__header {
   border: 0;
 }
 
+body.admin-screen-shell #userScopeModal .admin-delete-modal__header .eyebrow {
+  color: rgba(255, 255, 255, 0.96);
+}
+
+body.admin-screen-shell #userScopeModal #userScopeModalLabel {
+  color: #ffffff;
+}
+
+body.admin-screen-shell #userScopeModal #userScopeModalUserName {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
 body.admin-screen-shell .admin-delete-modal__badge {
   width: 3rem;
   height: 3rem;

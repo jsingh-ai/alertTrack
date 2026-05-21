@@ -720,7 +720,7 @@ def create_user():
             role=role,
             email=email,
             phone_number=phone_number,
-            department_id=department.id if role == "Admin" and department else None,
+            department_id=department.id if role in {"Admin", "Viewer"} and department else None,
             machine_group_id=machine_group.id if role == "Admin" and machine_group else None,
             is_active=True,
         )
@@ -744,7 +744,7 @@ def create_user():
         company_id=company_id,
         role=role,
         scope_mode="all" if role == "Admin" else scope_mode,
-        department_id=department.id if role == "Admin" and department else None,
+        department_id=department.id if role in {"Admin", "Viewer"} and department else None,
         machine_group_id=machine_group.id if role == "Admin" and machine_group else None,
         scope_config_json=json.dumps(scope_config or {}, separators=(",", ":"), sort_keys=True),
         is_active=True,
@@ -815,13 +815,13 @@ def update_user(user_id):
     user.phone_number = phone_number
     user.role = role
     user.machine_group_id = machine_group.id if role == "Admin" and machine_group else None
-    user.department_id = department.id if role == "Admin" and department else None
+    user.department_id = department.id if role in {"Admin", "Viewer"} and department else None
     if password.strip():
         user.set_password(password.strip())
     access.role = role
     access.scope_mode = "all" if role == "Admin" else scope_mode
     access.machine_group_id = machine_group.id if role == "Admin" and machine_group else None
-    access.department_id = department.id if role == "Admin" and department else None
+    access.department_id = department.id if role in {"Admin", "Viewer"} and department else None
     access.scope_config_json = json.dumps(scope_config or {}, separators=(",", ":"), sort_keys=True)
     db.session.commit()
     _invalidate_company_caches(company_id)
