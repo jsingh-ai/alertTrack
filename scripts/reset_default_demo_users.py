@@ -16,7 +16,7 @@ from andon_system.extensions import db
 from andon_system.models.alert import AndonAlert, AndonAlertEvent
 from andon_system.models.company import Company
 from andon_system.models.department import Department
-from andon_system.models.user import User, UserBoard, UserCompanyAccess, UserViewPreference
+from andon_system.models.user import User, UserBoard, UserBoardItem, UserCompanyAccess, UserViewPreference
 
 
 TARGET_USERS = [
@@ -78,6 +78,11 @@ def _delete_only_target_users() -> None:
 
     db.session.query(UserCompanyAccess).filter(UserCompanyAccess.user_id.in_(user_ids)).delete(synchronize_session=False)
     db.session.query(UserViewPreference).filter(UserViewPreference.user_id.in_(user_ids)).delete(synchronize_session=False)
+    db.session.query(UserBoardItem).filter(
+        UserBoardItem.board_id.in_(
+            db.session.query(UserBoard.id).filter(UserBoard.user_id.in_(user_ids))
+        )
+    ).delete(synchronize_session=False)
     db.session.query(UserBoard).filter(UserBoard.user_id.in_(user_ids)).delete(synchronize_session=False)
     db.session.query(User).filter(User.id.in_(user_ids)).delete(synchronize_session=False)
     db.session.flush()
