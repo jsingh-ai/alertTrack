@@ -228,20 +228,17 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
             ).all()
             valid_group_ids = {row.id for row in rows}
             group_names_by_id = {row.id: row.name for row in rows if row.name}
-            if not valid_group_ids:
-                return None, _validation_error("Manager requires at least one active machine group in scope")
-            rows = Machine.query.with_entities(Machine.id, Machine.department_id).filter(
-                Machine.company_id == company_id,
-                Machine.machine_type.in_(list(group_names_by_id.values())),
-                Machine.is_active.is_(True),
-            ).all()
-            group_machine_ids = {row.id for row in rows}
-            group_department_ids = {row.department_id for row in rows if row.department_id is not None}
+            if valid_group_ids:
+                rows = Machine.query.with_entities(Machine.id, Machine.department_id).filter(
+                    Machine.company_id == company_id,
+                    Machine.machine_type.in_(list(group_names_by_id.values())),
+                    Machine.is_active.is_(True),
+                ).all()
+                group_machine_ids = {row.id for row in rows}
+                group_department_ids = {row.department_id for row in rows if row.department_id is not None}
         resolved_machine_ids = set(valid_machine_ids)
         resolved_machine_ids.update(group_machine_ids)
         resolved_department_ids = sorted(group_department_ids | machine_department_ids | valid_department_ids)
-        if not resolved_department_ids:
-            return None, _validation_error("Manager requires at least one department in scope")
         return {
             "machine_ids": sorted(resolved_machine_ids),
             "machine_group_ids": sorted(valid_group_ids),

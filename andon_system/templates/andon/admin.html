@@ -681,6 +681,20 @@
     });
   }
 
+  function setRowActionBusyState(form, isBusy) {
+    if (!form) return;
+    const row = form.closest("tr");
+    if (!row) return;
+    if (isBusy) {
+      row.dataset.busy = "true";
+    } else {
+      delete row.dataset.busy;
+    }
+    row.querySelectorAll("button").forEach((button) => {
+      button.disabled = Boolean(isBusy);
+    });
+  }
+
   function notifyAndonRefresh() {
     window.AndonRefreshBus?.notify();
   }
@@ -2024,6 +2038,9 @@
       showToast(pendingMessage, "info", "Admin");
     }
     setFormBusyState(form, true);
+    if (kind.endsWith("-delete")) {
+      setRowActionBusyState(form, true);
+    }
     try {
       const payload = await submitAjaxForm(form);
       if (form.dataset.kind === "department-create" && payload.department) {
@@ -2278,6 +2295,9 @@
       showToast(error.message || "Request failed");
     } finally {
       setFormBusyState(form, false);
+      if (kind.endsWith("-delete")) {
+        setRowActionBusyState(form, false);
+      }
     }
   });
 
@@ -2415,10 +2435,6 @@
       showToast("Operator role must include at least one department via selected machines.");
       return;
     }
-    if (role === "Manager" && machineDepartmentIdsForMachineIds(modalScopeFilteredMachines(modalScopeGroupIdsFromDom()).map((machine) => Number(machine.id))).length === 0) {
-      showToast("Manager role must include at least one department via selected machine groups.");
-      return;
-    }
     try {
       applyUserScopeToRow(activeUserScopeRow);
       await submitUserUpdate(activeUserScopeRow);
@@ -2500,7 +2516,7 @@
       showToast("Department role must have at least one department selected.");
       return;
     }
-    if (role !== "Admin" && departmentIds.length === 0) {
+    if (role === "Operator" && departmentIds.length === 0) {
       event.preventDefault();
       showToast(`${roleLabel(role)} role must include at least one department.`);
     }

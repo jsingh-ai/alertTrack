@@ -411,28 +411,36 @@ def admin_page():
     )
     users = []
     for access in access_rows:
-        if access.user is None:
+        user = access.user
+        if user is None:
             continue
-        user_payload = access.user.to_dict()
         try:
             scope_config = json.loads(access.scope_config_json or "{}")
         except json.JSONDecodeError:
             scope_config = {}
-        user_payload.update(
+        users.append(
             {
-                "role": access.role,
-                "scope_mode": access.scope_mode,
+                "id": user.id,
+                "company_id": company_id,
+                "employee_id": user.employee_id,
+                "work_id": user.employee_id,
+                "display_name": user.display_name,
+                "username": user.username,
+                "email": user.email,
+                "phone_number": user.phone_number,
+                "has_password": bool(user.password_hash),
                 "department_id": access.department_id,
                 "department_name": access.department.name if access.department else None,
                 "machine_group_id": access.machine_group_id,
                 "machine_group_name": access.machine_group.name if access.machine_group else None,
+                "role": access.role,
+                "scope_mode": access.scope_mode,
                 "scope_machine_ids": scope_config.get("machine_ids") or [],
                 "scope_machine_group_ids": scope_config.get("machine_group_ids") or [],
                 "scope_department_ids": scope_config.get("department_ids") or [],
                 "is_active": access.is_active,
             }
         )
-        users.append(user_payload)
     machine_groups = []
     machine_group_rows = (
         MachineGroup.query.options(
