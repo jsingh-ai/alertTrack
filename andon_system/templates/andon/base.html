@@ -82,6 +82,7 @@
             <div class="app-sidebar__meta-label">Live System</div>
             {% if companies %}
             <form method="post" action="{{ url_for('pages.select_company') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') if request.full_path else request.path }}">
               <select class="form-select form-select-sm mt-2" name="company_id" onchange="this.form.submit()">
                 {% for company in companies %}
@@ -104,6 +105,7 @@
           </button>
           {% if user_authenticated %}
           <form method="post" action="{{ url_for('pages.logout_page') }}" class="mt-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button class="btn app-logout-btn w-100" type="submit" aria-label="Logout">
               <i class="bi bi-box-arrow-right"></i>
               <span class="app-logout-btn__label">Logout</span>

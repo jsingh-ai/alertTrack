@@ -18,6 +18,7 @@ from .security import (
     get_current_membership,
     is_admin_authenticated,
     is_authenticated,
+    logout_user,
     validate_production_security_config,
 )
 
@@ -497,6 +498,7 @@ def create_app(config_name: str | None = None) -> Flask:
             and "CSRF validation failed" in description
         )
         if is_login_csrf:
+            logout_user()
             flash("Your session expired. Please sign in again.", "warning")
             return redirect(url_for("pages.home_page"))
         return error

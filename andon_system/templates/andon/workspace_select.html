@@ -11,6 +11,7 @@
         {% for company in companies %}
         <div class="col-12 col-md-6 col-lg-4">
           <form method="post" action="{{ url_for('pages.workspace_select_submit') }}" class="h-100">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="company_id" value="{{ company.id }}">
             <button class="btn btn-outline-light w-100 h-100 text-start p-3" type="submit">
               <div class="fw-semibold">{{ company.name }}</div>

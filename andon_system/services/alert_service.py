@@ -115,8 +115,14 @@ def create_alert(payload: dict):
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
     machine_query = Machine.query.options(
-        joinedload(Machine.department).load_only(Department.id, Department.name),
-        noload(Machine.alerts),
+        load_only(
+            Machine.id,
+            Machine.company_id,
+            Machine.machine_type,
+            Machine.department_id,
+            Machine.is_active,
+        ),
+        noload("*"),
     ).filter(Machine.id == payload.get("machine_id"))
     if company_id:
         machine_query = machine_query.filter(Machine.company_id == company_id)

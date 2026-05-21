@@ -200,6 +200,10 @@ def home_page():
 
 @pages_bp.post("/andon/login")
 def login_page():
+    # If a user is already signed in, treat an explicit login submit as a user switch
+    # and clear old session context up front.
+    if is_authenticated():
+        logout_user()
     identity = request.form.get("identity")
     password = request.form.get("password")
     next_url = request.form.get("next")
