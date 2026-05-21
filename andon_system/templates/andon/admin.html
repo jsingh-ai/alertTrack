@@ -2418,7 +2418,6 @@
       Array.from(userScopeModalMachineList.querySelectorAll(".js-user-modal-scope-machine:checked"))
         .map((input) => Number(input.value))
     );
-    const selectedModalDepartmentIds = machineDepartmentIdsForMachineIds(selectedModalMachineIds);
     if (role === "Operator" && groupCount === 0) {
       showToast(`${roleLabel(role)} role must have at least one machine group selected.`);
       return;
@@ -2429,10 +2428,6 @@
     }
     if (role === "Viewer" && !departmentValue) {
       showToast("Department role must have at least one department selected.");
-      return;
-    }
-    if (role === "Operator" && selectedModalDepartmentIds.length === 0) {
-      showToast("Operator role must include at least one department via selected machines.");
       return;
     }
     try {
@@ -2515,10 +2510,6 @@
       event.preventDefault();
       showToast("Department role must have at least one department selected.");
       return;
-    }
-    if (role === "Operator" && departmentIds.length === 0) {
-      event.preventDefault();
-      showToast(`${roleLabel(role)} role must include at least one department.`);
     }
   });
 

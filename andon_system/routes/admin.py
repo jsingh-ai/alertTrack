@@ -205,8 +205,6 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
         if not valid_machine_ids:
             return None, _validation_error("Operator requires at least one machine ID in scope")
         resolved_department_ids = sorted(machine_department_ids | valid_department_ids)
-        if not resolved_department_ids:
-            return None, _validation_error("Operator requires at least one department in scope")
         return {
             "machine_ids": sorted(valid_machine_ids),
             "machine_group_ids": sorted(valid_group_ids),
