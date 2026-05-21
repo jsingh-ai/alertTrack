@@ -11,7 +11,7 @@ from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
 from ..models.user import User, UserCompanyAccess
-from ..security import get_scope_filters
+from ..security import get_current_membership, get_scope_filters
 from .cache_service import get_cached, set_cached
 from .radius_service import build_radius_status_map
 
@@ -169,9 +169,30 @@ def build_operator_metadata():
 
 def _load_board_context(company_id, include_alerts: bool, include_metadata: bool = True):
     scope = get_scope_filters()
+    membership = get_current_membership()
+    role = membership.role if membership else None
     machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+    metadata_department_ids = list(department_ids)
+
+    if include_metadata and role == "Operator" and machine_group_names and company_id:
+        # Operator department buttons should come from the allowed machine groups
+        # so "Call Maintenance/Quality/etc." are consistently available.
+        group_department_rows = (
+            Machine.query.options(noload("*"))
+            .with_entities(Machine.department_id)
+            .filter(
+                Machine.company_id == company_id,
+                Machine.machine_type.in_(machine_group_names),
+                Machine.is_active.is_(True),
+                Machine.department_id.isnot(None),
+            )
+            .all()
+        )
+        group_department_ids = sorted({row.department_id for row in group_department_rows if row.department_id is not None})
+        if group_department_ids:
+            metadata_department_ids = group_department_ids
     machine_query = Machine.query.options(
         load_only(
             Machine.id,
@@ -257,11 +278,11 @@ def _load_board_context(company_id, include_alerts: bool, include_metadata: bool
         alert_query = alert_query.filter(AndonAlert.machine_id.in_(machine_ids))
     if department_ids:
         machine_query = machine_query.filter(Machine.department_id.in_(department_ids))
-        if include_metadata:
-            department_query = department_query.filter(Department.id.in_(department_ids))
-            issue_query = issue_query.filter(IssueCategory.department_id.in_(department_ids))
-            user_query = user_query.filter(UserCompanyAccess.department_id.in_(department_ids))
         alert_query = alert_query.filter(AndonAlert.department_id.in_(department_ids))
+    if include_metadata and metadata_department_ids:
+        department_query = department_query.filter(Department.id.in_(metadata_department_ids))
+        issue_query = issue_query.filter(IssueCategory.department_id.in_(metadata_department_ids))
+        user_query = user_query.filter(UserCompanyAccess.department_id.in_(metadata_department_ids))
     if machine_group_names:
         machine_query = machine_query.filter(Machine.machine_type.in_(machine_group_names))
         if include_metadata:
