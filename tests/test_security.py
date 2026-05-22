@@ -376,6 +376,37 @@ def test_create_alert_duplicate_check_is_machine_company_scoped(client, app, mon
     assert captured["company_id"] == fixtures["company_id"]
 
 
+def test_create_alert_uses_live_alert_cache_invalidation_only(client, app, monkeypatch):
+    fixtures = _create_alert_api_fixtures(app)
+    csrf_token = _seed_csrf(client)
+    with client.session_transaction() as session:
+        session["andon_company_slug"] = fixtures["company_slug"]
+
+    from andon_system.services import alert_service as alert_service_module
+
+    calls = {"live": 0}
+
+    def fake_invalidate_live_alert_caches(company_id):
+        calls["live"] += 1
+        assert company_id == fixtures["company_id"]
+        return {"mode": "local", "total_ms": 0.1}
+
+    monkeypatch.setattr(alert_service_module, "invalidate_live_alert_caches", fake_invalidate_live_alert_caches)
+
+    response = client.post(
+        "/api/andon/alerts",
+        json={
+            "machine_id": fixtures["machine_id"],
+            "department_id": fixtures["department_id"],
+            "issue_problem_id": fixtures["problem_id"],
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert response.status_code == 201
+    assert calls["live"] == 1
+
+
 def test_database_unique_index_rejects_duplicate_active_alerts(app):
     fixtures = _create_alert_api_fixtures(app)
     with app.app_context():

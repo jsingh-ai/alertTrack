@@ -33,7 +33,7 @@ from ..models.machine import Machine
 from ..models.user import User, UserCompanyAccess
 from ..models.department import Department
 from ..security import get_current_membership, get_scope_filters
-from .cache_service import invalidate_cache
+from .cache_service import invalidate_live_alert_caches
 from .active_alerts_service import fetch_active_alert_payloads
 from .active_alerts_service import fetch_alert_payload_by_id
 from .realtime_service import emit_alert_created, emit_alert_updated
@@ -560,10 +560,8 @@ def get_active_alert_metrics():
 
 
 def _invalidate_live_caches(company_id):
-    # Alert lifecycle updates do not change operator metadata. Keep cache
-    # invalidation scoped to live board/report/pager views to avoid expensive
-    # metadata recompute on every call/ack/close.
-    invalidate_cache(company_id=company_id)
+    # Keep invalidation scoped to live alert views only.
+    invalidate_live_alert_caches(company_id)
 
 
 def _get_active_alert_for_machine(machine_id, company_id):

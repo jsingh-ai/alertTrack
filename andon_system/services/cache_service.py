@@ -25,6 +25,7 @@ _CACHE_PREFIX = "andon:cache"
 _VERSION_PREFIX = "andon:cachever"
 _LOCAL_CACHE_MAX_ENTRIES = 2048
 _LOCAL_VERSION_MAX_ENTRIES = 512
+_LIVE_ALERT_NAMESPACES = ("active_alerts_list", "operator_snapshot", "board_state", "pager_active_alerts")
 
 
 def get_cached(key):
@@ -110,6 +111,56 @@ def invalidate_cache(namespace: str | None = None, company_id=None):
         _bump_version("namespace", company_id, namespace)
 
 
+def invalidate_live_alert_caches(company_id) -> dict:
+    started_at = time.perf_counter()
+    metrics = {
+        "namespace": "live_alerts",
+        "mode": "local",
+        "lock_wait_ms": 0.0,
+        "per_company_invalidate_ms": 0.0,
+        "per_namespace_invalidate_ms": 0.0,
+        "version_bump_ms": 0.0,
+        "redis_incr_ms": 0.0,
+        "redis_get_ms": 0.0,
+        "redis_set_ms": 0.0,
+        "redis_delete_ms": 0.0,
+        "scan_ms": 0.0,
+        "delete_ms": 0.0,
+        "local_cache_clear_ms": 0.0,
+        "local_prune_ms": 0.0,
+    }
+    company_started_at = time.perf_counter()
+    _bump_version("company", company_id, _perf=metrics, prefer_local_fast=True)
+    metrics["per_company_invalidate_ms"] = (time.perf_counter() - company_started_at) * 1000
+    namespace_started_at = time.perf_counter()
+    for ns in _LIVE_ALERT_NAMESPACES:
+        _bump_version("namespace", company_id, ns, _perf=metrics, prefer_local_fast=True)
+    metrics["per_namespace_invalidate_ms"] = (time.perf_counter() - namespace_started_at) * 1000
+    metrics["total_ms"] = (time.perf_counter() - started_at) * 1000
+    if has_app_context() and current_app.config.get("ANDON_PERF_LOGS"):
+        current_app.logger.debug(
+            "PERF cache_invalidate namespace=%s mode=%s lock_wait_ms=%.1f per_company_invalidate_ms=%.1f "
+            "per_namespace_invalidate_ms=%.1f version_bump_ms=%.1f redis_incr_ms=%.1f redis_get_ms=%.1f redis_set_ms=%.1f "
+            "redis_delete_ms=%.1f scan_ms=%.1f delete_ms=%.1f local_cache_clear_ms=%.1f local_prune_ms=%.1f total_ms=%.1f",
+            metrics["namespace"],
+            metrics["mode"],
+            metrics["lock_wait_ms"],
+            metrics["per_company_invalidate_ms"],
+            metrics["per_namespace_invalidate_ms"],
+            metrics["version_bump_ms"],
+            metrics["redis_incr_ms"],
+            metrics["redis_get_ms"],
+            metrics["redis_set_ms"],
+            metrics["redis_delete_ms"],
+            metrics["scan_ms"],
+            metrics["delete_ms"],
+            metrics["local_cache_clear_ms"],
+            metrics["local_prune_ms"],
+            metrics["total_ms"],
+        )
+    return metrics
+
+
 def _build_cache_key(key):
     namespace, company_id, logical_key = _scope_from_key(key)
     version_parts = [_get_version_token("global")]
@@ -159,21 +210,50 @@ def _get_version_token(scope_type, company_id=None, namespace=None):
         return str(_LOCAL_VERSIONS.get(_version_key(scope_type, company_id, namespace), 0))
 
 
-def _bump_version(scope_type, company_id=None, namespace=None):
+def _bump_version(scope_type, company_id=None, namespace=None, _perf: dict | None = None, prefer_local_fast: bool = False):
+    if prefer_local_fast and not _redis_required():
+        started_local_at = time.perf_counter()
+        with _LOCAL_LOCK:
+            _prune_local_versions_locked()
+            _LOCAL_VERSIONS[_version_key(scope_type, company_id, namespace)] = (
+                _LOCAL_VERSIONS.get(_version_key(scope_type, company_id, namespace), 0) + 1
+            )
+        if _perf is not None:
+            _perf["mode"] = "local"
+            _perf["version_bump_ms"] = _perf.get("version_bump_ms", 0.0) + ((time.perf_counter() - started_local_at) * 1000)
+            _perf["local_prune_ms"] = _perf.get("local_prune_ms", 0.0) + 0.0
+        return
+
+    client_started_at = time.perf_counter()
     client = _get_redis_client()
+    if _perf is not None:
+        _perf["redis_get_ms"] = _perf.get("redis_get_ms", 0.0) + ((time.perf_counter() - client_started_at) * 1000)
     version_key = _version_key(scope_type, company_id, namespace)
     if client is not None:
         try:
+            redis_incr_started_at = time.perf_counter()
             client.incr(version_key)
+            if _perf is not None:
+                _perf["mode"] = "redis"
+                _perf["redis_incr_ms"] = _perf.get("redis_incr_ms", 0.0) + ((time.perf_counter() - redis_incr_started_at) * 1000)
             return
         except _redis_transport_errors():
             _mark_redis_unavailable()
             if _redis_required():
                 raise
 
+    lock_wait_started_at = time.perf_counter()
     with _LOCAL_LOCK:
+        lock_wait_ms = (time.perf_counter() - lock_wait_started_at) * 1000
+        prune_started_at = time.perf_counter()
         _prune_local_versions_locked()
+        prune_ms = (time.perf_counter() - prune_started_at) * 1000
         _LOCAL_VERSIONS[version_key] = _LOCAL_VERSIONS.get(version_key, 0) + 1
+    if _perf is not None:
+        _perf["mode"] = "local"
+        _perf["lock_wait_ms"] = _perf.get("lock_wait_ms", 0.0) + lock_wait_ms
+        _perf["local_prune_ms"] = _perf.get("local_prune_ms", 0.0) + prune_ms
+        _perf["version_bump_ms"] = _perf.get("version_bump_ms", 0.0) + lock_wait_ms + prune_ms
 
 
 def _version_key(scope_type, company_id=None, namespace=None):
