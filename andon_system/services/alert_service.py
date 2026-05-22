@@ -331,17 +331,23 @@ def create_alert(payload: dict, metrics: dict | None = None):
     gap_started_at = time.perf_counter()
     previous_step_at = _perf_step("gap_enter_after_duplicate", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     if not department_id and not issue_category:
-        raise AlertServiceError("department_id is required")
+        if current_app.config.get("ANDON_PERF_LOGS"):
+            current_app.logger.debug(
+                "PERF alert_create_category_fallback query_ms=0.0 used=false reason=missing_issue_category_id",
+            )
+        raise AlertServiceError("issue_category_id is required")
     previous_step_at = _perf_step("gap_after_department_required_check", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
-    if not issue_category:
-        category_fallback_started_at = time.perf_counter()
-        category_query = IssueCategory.query.filter_by(department_id=department_id, is_active=True)
-        if company_id:
-            category_query = category_query.filter(IssueCategory.company_id == company_id)
-        previous_step_at = _perf_step("gap_before_category_fallback_lookup", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
-        issue_category = category_query.one_or_none()
-        perf["issue_category_fallback_lookup_ms"] = (time.perf_counter() - category_fallback_started_at) * 1000
-        previous_step_at = _perf_step("gap_after_category_fallback_lookup", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
+    if issue_category:
+        if current_app.config.get("ANDON_PERF_LOGS"):
+            current_app.logger.debug(
+                "PERF alert_create_category_fallback query_ms=0.0 used=false reason=category_id_provided",
+            )
+    else:
+        if current_app.config.get("ANDON_PERF_LOGS"):
+            current_app.logger.debug(
+                "PERF alert_create_category_fallback query_ms=0.0 used=false reason=fallback_disabled",
+            )
+        raise AlertServiceError("Valid issue_category_id is required")
     if not issue_category:
         previous_step_at = _perf_step("gap_missing_issue_category", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
         raise AlertServiceError("Valid issue category is required for the selected department")
@@ -370,7 +376,7 @@ def create_alert(payload: dict, metrics: dict | None = None):
         current_app.logger.debug(
             "PERF alert_create_gap after_duplicate_to_before_build_ms=%.1f detail=category_fallback_ms:%s",
             gap_ms,
-            round(float(perf.get("issue_category_fallback_lookup_ms") or 0.0), 1),
+            0.0,
         )
 
     previous_step_at = _perf_step("before_alert_build", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)

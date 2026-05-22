@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-
 from dotenv import load_dotenv
 
 
@@ -22,20 +21,6 @@ def _env_int(name: str, default: int = 0) -> int:
         return default
 
 
-def _local_sqlite_uri() -> str:
-    sqlite_path = os.getenv("LOCAL_SQLITE_PATH") or str(BASE_DIR / "instance" / "andon_local.sqlite3")
-    return f"sqlite:///{Path(sqlite_path).expanduser()}"
-
-
-def _development_database_uri() -> str | None:
-    database_url = os.getenv("DATABASE_URL")
-    if database_url:
-        return database_url
-    if _env_flag("LOCAL_SQLITE_FALLBACK", "true"):
-        return _local_sqlite_uri()
-    return None
-
-
 class BaseConfig:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-andon-secret-key")
     ADMIN_PASSWORD = os.getenv("ANDON_ADMIN_PASSWORD")
@@ -54,7 +39,6 @@ class BaseConfig:
     TIMEZONE = os.getenv("APP_TIMEZONE", "America/Chicago")
     ANDON_DEFAULT_PAGE_SIZE = int(os.getenv("ANDON_DEFAULT_PAGE_SIZE", "50"))
     ANDON_AUTO_SCHEMA_MAINTENANCE = _env_flag("ANDON_AUTO_SCHEMA_MAINTENANCE")
-    ANDON_RUNTIME_SCHEMA_REPAIR = _env_flag("ANDON_RUNTIME_SCHEMA_REPAIR", "true")
     PREFERENCE_PAYLOAD_MAX_BYTES = int(os.getenv("PREFERENCE_PAYLOAD_MAX_BYTES", "16384"))
     LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "300"))
     LOGIN_RATE_LIMIT_MAX_ATTEMPTS = int(os.getenv("LOGIN_RATE_LIMIT_MAX_ATTEMPTS", "8"))
@@ -111,8 +95,8 @@ class BaseConfig:
 
 class DevelopmentConfig(BaseConfig):
     DEBUG = True
-    SQLALCHEMY_DATABASE_URI = _development_database_uri()
-    ANDON_AUTO_SCHEMA_MAINTENANCE = True
+    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
+    ANDON_AUTO_SCHEMA_MAINTENANCE = False
     ANDON_PERF_LOGS = True
     SQLALCHEMY_ENGINE_OPTIONS = {
         **BaseConfig.SQLALCHEMY_ENGINE_OPTIONS,
@@ -122,13 +106,12 @@ class DevelopmentConfig(BaseConfig):
 
 class TestingConfig(BaseConfig):
     TESTING = True
-    SQLALCHEMY_DATABASE_URI = os.getenv("TEST_DATABASE_URL") or _development_database_uri()
+    SQLALCHEMY_DATABASE_URI = os.getenv("TEST_DATABASE_URL") or "sqlite:///:memory:"
 
 
 class ProductionConfig(BaseConfig):
     DEBUG = False
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
-    ANDON_RUNTIME_SCHEMA_REPAIR = _env_flag("ANDON_RUNTIME_SCHEMA_REPAIR")
     SESSION_COOKIE_SECURE = _env_flag("SESSION_COOKIE_SECURE", "true")
     ESCALATION_INLINE_CHECKS_ENABLED = _env_flag("ESCALATION_INLINE_CHECKS_ENABLED")
     PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME") or "https"

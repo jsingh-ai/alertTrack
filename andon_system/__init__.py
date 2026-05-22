@@ -6,6 +6,7 @@ from flask import Flask, current_app, flash, g, has_request_context, redirect, r
 from flask import jsonify
 from sqlalchemy import event
 from sqlalchemy import inspect, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -233,202 +234,6 @@ def _ensure_auth_schema() -> None:
         _ensure_postgres_performance_indexes()
     _ensure_pager_device_token_fingerprint_schema(allow_alter=True)
     db.session.commit()
-    _ensure_sqlite_user_role_constraints()
-    _ensure_sqlite_active_alert_unique_index()
-
-
-def _ensure_sqlite_active_alert_unique_index() -> None:
-    if db.engine.dialect.name != "sqlite":
-        return
-
-    inspector = inspect(db.engine)
-    if "andon_alerts" not in inspector.get_table_names():
-        return
-
-    expected_where = "WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')"
-    existing_sql = db.session.execute(
-        text(
-            "SELECT sql FROM sqlite_master "
-            "WHERE type = 'index' AND name = 'uq_andon_alerts_active_machine'"
-        )
-    ).scalar()
-
-    normalized_sql = (existing_sql or "").upper()
-    if expected_where in normalized_sql:
-        return
-
-    duplicate_rows = db.session.execute(
-        text(
-            "SELECT machine_id, COUNT(*) AS row_count "
-            "FROM andon_alerts "
-            "WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED') "
-            "GROUP BY machine_id "
-            "HAVING COUNT(*) > 1"
-        )
-    ).mappings().all()
-    if duplicate_rows:
-        row_preview = ", ".join(f"machine_id={row['machine_id']} count={row['row_count']}" for row in duplicate_rows[:5])
-        raise RuntimeError(
-            "Cannot repair uq_andon_alerts_active_machine because duplicate active alerts exist: "
-            f"{row_preview}"
-        )
-
-    db.session.execute(text("DROP INDEX IF EXISTS uq_andon_alerts_active_machine"))
-    db.session.execute(
-        text(
-            "CREATE UNIQUE INDEX uq_andon_alerts_active_machine "
-            "ON andon_alerts (machine_id) "
-            "WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')"
-        )
-    )
-    db.session.commit()
-
-
-def _ensure_sqlite_user_role_constraints() -> None:
-    if db.engine.dialect.name != "sqlite":
-        return
-
-    inspector = inspect(db.engine)
-    table_names = set(inspector.get_table_names())
-    if "users" not in table_names or "user_company_access" not in table_names:
-        return
-
-    users_sql = db.session.execute(
-        text("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'")
-    ).scalar() or ""
-    access_sql = db.session.execute(
-        text("SELECT sql FROM sqlite_master WHERE type='table' AND name='user_company_access'")
-    ).scalar() or ""
-
-    users_ok = "ROLE IN ('ADMIN', 'MANAGER', 'OPERATOR', 'VIEWER')" in users_sql.upper()
-    access_ok = "ROLE IN ('ADMIN', 'MANAGER', 'OPERATOR', 'VIEWER')" in access_sql.upper()
-    has_scope_config = "scope_config_json" in {column["name"] for column in inspector.get_columns("user_company_access")}
-    if users_ok and access_ok and has_scope_config:
-        return
-
-    db.session.execute(text("PRAGMA foreign_keys=OFF"))
-    db.session.execute(text("BEGIN"))
-    try:
-        db.session.execute(
-            text(
-                """
-                CREATE TABLE users_new (
-                    id INTEGER NOT NULL PRIMARY KEY,
-                    company_id INTEGER NOT NULL,
-                    employee_id VARCHAR(64),
-                    display_name VARCHAR(160) NOT NULL,
-                    username VARCHAR(80),
-                    role VARCHAR(80) NOT NULL,
-                    email VARCHAR(160),
-                    phone_number VARCHAR(32),
-                    password_hash VARCHAR(255),
-                    department_id INTEGER,
-                    machine_group_id INTEGER,
-                    is_active BOOLEAN NOT NULL DEFAULT 1,
-                    last_login_at DATETIME,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT uq_users_company_username UNIQUE (company_id, username),
-                    CONSTRAINT ck_users_role_allowed CHECK (role IN ('Admin', 'Manager', 'Operator', 'Viewer')),
-                    FOREIGN KEY(company_id) REFERENCES companies (id),
-                    FOREIGN KEY(department_id) REFERENCES departments (id),
-                    FOREIGN KEY(machine_group_id) REFERENCES machine_groups (id)
-                )
-                """
-            )
-        )
-        db.session.execute(
-            text(
-                """
-                INSERT INTO users_new
-                (id, company_id, employee_id, display_name, username, role, email, phone_number, password_hash, department_id, machine_group_id, is_active, last_login_at, created_at)
-                SELECT id, company_id, employee_id, display_name, username,
-                    CASE WHEN role = 'Supervisor' THEN 'Manager' ELSE role END,
-                    email, phone_number, password_hash, department_id, machine_group_id, is_active, last_login_at, created_at
-                FROM users
-                """
-            )
-        )
-        db.session.execute(text("DROP TABLE users"))
-        db.session.execute(text("ALTER TABLE users_new RENAME TO users"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_company_id ON users (company_id)"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_department_id ON users (department_id)"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_machine_group_id ON users (machine_group_id)"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_is_active ON users (is_active)"))
-        db.session.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON users (username)"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_email ON users (email)"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_role ON users (role)"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_phone_number ON users (phone_number)"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_users_employee_id ON users (employee_id)"))
-
-        db.session.execute(
-            text(
-                """
-                CREATE TABLE user_company_access_new (
-                    id INTEGER NOT NULL PRIMARY KEY,
-                    user_id INTEGER NOT NULL,
-                    company_id INTEGER NOT NULL,
-                    role VARCHAR(80) NOT NULL,
-                    scope_mode VARCHAR(32) NOT NULL,
-                    department_id INTEGER,
-                    machine_group_id INTEGER,
-                    scope_config_json TEXT NOT NULL DEFAULT '{}',
-                    is_active BOOLEAN NOT NULL DEFAULT 1,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT uq_user_company_access_user_company UNIQUE (user_id, company_id),
-                    CONSTRAINT ck_user_company_access_role CHECK (role IN ('Admin', 'Manager', 'Operator', 'Viewer')),
-                    CONSTRAINT ck_user_company_access_scope_mode CHECK (scope_mode IN ('all', 'restricted')),
-                    FOREIGN KEY(user_id) REFERENCES users (id),
-                    FOREIGN KEY(company_id) REFERENCES companies (id),
-                    FOREIGN KEY(department_id) REFERENCES departments (id),
-                    FOREIGN KEY(machine_group_id) REFERENCES machine_groups (id)
-                )
-                """
-            )
-        )
-        if has_scope_config:
-            db.session.execute(
-                text(
-                    """
-                    INSERT INTO user_company_access_new
-                    (id, user_id, company_id, role, scope_mode, department_id, machine_group_id, scope_config_json, is_active, created_at, updated_at)
-                    SELECT id, user_id, company_id,
-                        CASE WHEN role = 'Supervisor' THEN 'Manager' ELSE role END,
-                        scope_mode, department_id, machine_group_id,
-                        COALESCE(scope_config_json, '{}'),
-                        is_active, created_at, updated_at
-                    FROM user_company_access
-                    """
-                )
-            )
-        else:
-            db.session.execute(
-                text(
-                    """
-                    INSERT INTO user_company_access_new
-                    (id, user_id, company_id, role, scope_mode, department_id, machine_group_id, scope_config_json, is_active, created_at, updated_at)
-                    SELECT id, user_id, company_id,
-                        CASE WHEN role = 'Supervisor' THEN 'Manager' ELSE role END,
-                        scope_mode, department_id, machine_group_id, '{}',
-                        is_active, created_at, updated_at
-                    FROM user_company_access
-                    """
-                )
-            )
-        db.session.execute(text("DROP TABLE user_company_access"))
-        db.session.execute(text("ALTER TABLE user_company_access_new RENAME TO user_company_access"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_user_id ON user_company_access (user_id)"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_user_active_company ON user_company_access (user_id, is_active, company_id)"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_company_id ON user_company_access (company_id)"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_is_active ON user_company_access (is_active)"))
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_user_company_access_company_active_role_id ON user_company_access (company_id, is_active, role, id)"))
-        db.session.execute(text("COMMIT"))
-    except Exception:
-        db.session.execute(text("ROLLBACK"))
-        raise
-    finally:
-        db.session.execute(text("PRAGMA foreign_keys=ON"))
-        db.session.commit()
 
 
 def _ensure_postgres_performance_indexes() -> None:
@@ -558,8 +363,19 @@ def create_app(config_name: str | None = None) -> Flask:
     if app.config.get("ANDON_PAGER_API_ONLY"):
         app.config["SOCKETIO_ENABLED"] = False
     _maybe_apply_proxy_fix(app)
-    if not app.config.get("SQLALCHEMY_DATABASE_URI"):
+    database_uri = app.config.get("SQLALCHEMY_DATABASE_URI")
+    if not database_uri:
         raise RuntimeError("DATABASE_URL must be configured for PostgreSQL.")
+    if not app.config.get("TESTING"):
+        try:
+            dialect_name = make_url(database_uri).get_backend_name()
+        except Exception as exc:  # pragma: no cover - defensive config validation.
+            raise RuntimeError("DATABASE_URL is invalid; a PostgreSQL URL is required.") from exc
+        if dialect_name != "postgresql":
+            raise RuntimeError(
+                "PostgreSQL is required for runtime environments. "
+                "Set DATABASE_URL to a PostgreSQL connection string."
+            )
     if config_key == "production":
         validate_production_security_config(app.config)
     _validate_socketio_runtime_config(app.config)
@@ -741,17 +557,11 @@ def create_app(config_name: str | None = None) -> Flask:
         return error
 
     with app.app_context():
-        if app.config.get("ANDON_AUTO_SCHEMA_MAINTENANCE"):
-            db.create_all()
-        if app.config.get("ANDON_RUNTIME_SCHEMA_REPAIR"):
-            _ensure_auth_schema()
-        else:
-            # Keep critical read-path indexes present when runtime repair is off.
-            if db.engine.dialect.name == "postgresql":
-                _ensure_postgres_performance_indexes()
-            # Pager token fingerprint support is required by the current model.
-            _ensure_pager_device_token_fingerprint_schema(allow_alter=True)
-            db.session.commit()
+        # PostgreSQL-only runtime: schema creation/repair must be migration-driven.
+        if db.engine.dialect.name == "postgresql":
+            _ensure_postgres_performance_indexes()
+        _ensure_pager_device_token_fingerprint_schema(allow_alter=False)
+        db.session.commit()
         app.logger.debug(
             "Andon app initialized config=%s db_driver=%s secure_cookie=%s proxy_fix=%s/%s/%s/%s/%s pager_api_only=%s socketio_enabled=%s",
             config_key,

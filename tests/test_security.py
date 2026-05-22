@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash
 
 from andon_system import create_app
-from andon_system.config import ProductionConfig, TestingConfig
+from andon_system.config import DevelopmentConfig, ProductionConfig, TestingConfig
 from andon_system.extensions import db, socketio
 from andon_system.models.alert import ALERT_STATUS_OPEN, AndonAlert
 from andon_system.models.company import Company
@@ -284,6 +284,7 @@ def test_json_api_rejects_missing_csrf_token(client, app):
         json={
             "machine_id": fixtures["machine_id"],
             "department_id": fixtures["department_id"],
+            "issue_category_id": fixtures["category_id"],
             "issue_problem_id": fixtures["problem_id"],
         },
     )
@@ -303,6 +304,7 @@ def test_json_api_accepts_valid_csrf_token(client, app):
         json={
             "machine_id": fixtures["machine_id"],
             "department_id": fixtures["department_id"],
+            "issue_category_id": fixtures["category_id"],
             "issue_problem_id": fixtures["problem_id"],
         },
         headers={"X-CSRF-Token": csrf_token},
@@ -332,6 +334,7 @@ def test_create_alert_does_not_fetch_full_active_alert_list(client, app, monkeyp
         json={
             "machine_id": fixtures["machine_id"],
             "department_id": fixtures["department_id"],
+            "issue_category_id": fixtures["category_id"],
             "issue_problem_id": fixtures["problem_id"],
         },
         headers={"X-CSRF-Token": csrf_token},
@@ -366,6 +369,7 @@ def test_create_alert_duplicate_check_is_machine_company_scoped(client, app, mon
         json={
             "machine_id": fixtures["machine_id"],
             "department_id": fixtures["department_id"],
+            "issue_category_id": fixtures["category_id"],
             "issue_problem_id": fixtures["problem_id"],
         },
         headers={"X-CSRF-Token": csrf_token},
@@ -398,6 +402,7 @@ def test_create_alert_uses_live_alert_cache_invalidation_only(client, app, monke
         json={
             "machine_id": fixtures["machine_id"],
             "department_id": fixtures["department_id"],
+            "issue_category_id": fixtures["category_id"],
             "issue_problem_id": fixtures["problem_id"],
         },
         headers={"X-CSRF-Token": csrf_token},
@@ -405,6 +410,27 @@ def test_create_alert_uses_live_alert_cache_invalidation_only(client, app, monke
 
     assert response.status_code == 201
     assert calls["live"] == 1
+
+
+def test_create_alert_requires_issue_category_id(client, app):
+    fixtures = _create_alert_api_fixtures(app)
+    csrf_token = _seed_csrf(client)
+    with client.session_transaction() as session:
+        session["andon_company_slug"] = fixtures["company_slug"]
+
+    response = client.post(
+        "/api/andon/alerts",
+        json={
+            "machine_id": fixtures["machine_id"],
+            "department_id": fixtures["department_id"],
+            "issue_problem_id": fixtures["problem_id"],
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert "issue_category_id is required" in payload["error"]["message"]
 
 
 def test_database_unique_index_rejects_duplicate_active_alerts(app):
@@ -480,6 +506,15 @@ def test_production_config_fails_fast_for_weak_security(monkeypatch, secret_key,
 
     with pytest.raises(RuntimeError, match=expected_message):
         create_app("production")
+
+
+def test_runtime_requires_postgresql_outside_testing(monkeypatch):
+    monkeypatch.setattr(DevelopmentConfig, "SQLALCHEMY_DATABASE_URI", "sqlite:///:memory:")
+    monkeypatch.setattr(DevelopmentConfig, "SECRET_KEY", "production-secret-key")
+    monkeypatch.setattr(DevelopmentConfig, "ADMIN_PASSWORD", "very-strong-admin-password")
+
+    with pytest.raises(RuntimeError, match="PostgreSQL is required for runtime environments"):
+        create_app("development")
 
 
 def test_run_socketio_rejects_unsafe_werkzeug_outside_debug():

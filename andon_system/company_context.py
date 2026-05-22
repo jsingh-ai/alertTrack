@@ -312,4 +312,6 @@ def _companies_table_exists() -> bool:
         _COMPANIES_TABLE_EXISTS = "companies" in inspect(db.engine).get_table_names()
     except Exception:
         _COMPANIES_TABLE_EXISTS = False
+    if not current_app.config.get("TESTING") and not _COMPANIES_TABLE_EXISTS:
+        raise RuntimeError("Required table 'companies' is missing in PostgreSQL runtime.")
     return _COMPANIES_TABLE_EXISTS
