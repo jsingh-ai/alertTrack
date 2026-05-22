@@ -700,26 +700,30 @@ def acknowledge_alert_scoped(
     )
     perf["event_insert_ms"] = (time.perf_counter() - event_started_at) * 1000
     previous_step_at = _perf_alert_step("ack", "after_event_note_insert", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
-    previous_step_at = _perf_alert_step("ack", "before_commit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    captured_alert_id = alert.id
+    captured_company_id = alert.company_id
+    captured_machine_id = alert.machine_id
+    captured_status = alert.status
+    previous_step_at = _perf_alert_step("ack", "before_commit", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
     commit_started_at = time.perf_counter()
     db.session.commit()
     perf["db_commit_ms"] = (time.perf_counter() - commit_started_at) * 1000
-    previous_step_at = _perf_alert_step("ack", "after_commit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
-    previous_step_at = _perf_alert_step("ack", "before_cache_invalidate", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("ack", "after_commit", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
+    previous_step_at = _perf_alert_step("ack", "before_cache_invalidate", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
     cache_started_at = time.perf_counter()
-    _invalidate_live_caches(alert.company_id)
+    _invalidate_live_caches(captured_company_id)
     perf["cache_invalidate_ms"] = (time.perf_counter() - cache_started_at) * 1000
-    previous_step_at = _perf_alert_step("ack", "after_cache_invalidate", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
-    previous_step_at = _perf_alert_step("ack", "before_socket_emit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("ack", "after_cache_invalidate", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
+    previous_step_at = _perf_alert_step("ack", "before_socket_emit", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
     emit_started_at = time.perf_counter()
-    emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="acknowledged")
+    emit_alert_updated(captured_company_id, captured_alert_id, machine_id=captured_machine_id, status=captured_status, action="acknowledged")
     perf["socket_emit_ms"] = (time.perf_counter() - emit_started_at) * 1000
-    previous_step_at = _perf_alert_step("ack", "after_socket_emit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("ack", "after_socket_emit", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
     perf["total_ms"] = (time.perf_counter() - started_at) * 1000
     _perf_alert_reconcile("ack", started_at, perf)
     _perf_log_alert_mutation("acknowledge", perf)
-    _perf_alert_step("ack", "final_return", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
-    return alert
+    _perf_alert_step("ack", "final_return", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
+    return SimpleNamespace(id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id, status=captured_status)
 
 
 def mark_arrived(alert_id: int, payload: dict):
@@ -823,26 +827,30 @@ def resolve_alert_scoped(
     )
     perf["event_insert_ms"] = (time.perf_counter() - event_started_at) * 1000
     previous_step_at = _perf_alert_step("resolve", "after_event_note_insert", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
-    previous_step_at = _perf_alert_step("resolve", "before_commit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    captured_alert_id = alert.id
+    captured_company_id = alert.company_id
+    captured_machine_id = alert.machine_id
+    captured_status = alert.status
+    previous_step_at = _perf_alert_step("resolve", "before_commit", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
     commit_started_at = time.perf_counter()
     db.session.commit()
     perf["db_commit_ms"] = (time.perf_counter() - commit_started_at) * 1000
-    previous_step_at = _perf_alert_step("resolve", "after_commit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
-    previous_step_at = _perf_alert_step("resolve", "before_cache_invalidate", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("resolve", "after_commit", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
+    previous_step_at = _perf_alert_step("resolve", "before_cache_invalidate", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
     cache_started_at = time.perf_counter()
-    _invalidate_live_caches(alert.company_id)
+    _invalidate_live_caches(captured_company_id)
     perf["cache_invalidate_ms"] = (time.perf_counter() - cache_started_at) * 1000
-    previous_step_at = _perf_alert_step("resolve", "after_cache_invalidate", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
-    previous_step_at = _perf_alert_step("resolve", "before_socket_emit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("resolve", "after_cache_invalidate", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
+    previous_step_at = _perf_alert_step("resolve", "before_socket_emit", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
     emit_started_at = time.perf_counter()
-    emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="resolved")
+    emit_alert_updated(captured_company_id, captured_alert_id, machine_id=captured_machine_id, status=captured_status, action="resolved")
     perf["socket_emit_ms"] = (time.perf_counter() - emit_started_at) * 1000
-    previous_step_at = _perf_alert_step("resolve", "after_socket_emit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("resolve", "after_socket_emit", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
     perf["total_ms"] = (time.perf_counter() - started_at) * 1000
     _perf_alert_reconcile("resolve", started_at, perf)
     _perf_log_alert_mutation("resolve", perf)
-    _perf_alert_step("resolve", "final_return", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
-    return alert
+    _perf_alert_step("resolve", "final_return", started_at, previous_step_at, alert_id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id)
+    return SimpleNamespace(id=captured_alert_id, company_id=captured_company_id, machine_id=captured_machine_id, status=captured_status)
 
 
 def cancel_alert(alert_id: int, payload: dict, metrics: dict | None = None):
