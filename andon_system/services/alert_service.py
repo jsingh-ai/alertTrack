@@ -164,6 +164,73 @@ def _perf_log_alert_mutation(action: str, metrics: dict) -> None:
     )
 
 
+def _perf_alert_step(action: str, step: str, started_at: float, previous_at: float, *, alert_id=None, company_id=None, machine_id=None):
+    now = time.perf_counter()
+    if current_app.config.get("ANDON_PERF_LOGS"):
+        current_app.logger.debug(
+            "PERF alert_%s_step step=%s elapsed_ms_from_start=%.1f delta_ms_from_previous_step=%.1f alert_id=%s company_id=%s machine_id=%s",
+            action,
+            step,
+            (now - started_at) * 1000,
+            (now - previous_at) * 1000,
+            alert_id,
+            company_id,
+            machine_id,
+        )
+    return now
+
+
+def _perf_alert_reconcile(action: str, started_at: float, metrics: dict):
+    if not current_app.config.get("ANDON_PERF_LOGS"):
+        return
+    known_keys = (
+        "alert_lookup_ms",
+        "user_lookup_ms",
+        "update_fields_ms",
+        "event_insert_ms",
+        "db_commit_ms",
+        "cache_invalidate_ms",
+        "socket_emit_ms",
+        "payload_fetch_ms",
+    )
+    summed = sum(float(metrics.get(key, 0.0) or 0.0) for key in known_keys)
+    total = (time.perf_counter() - started_at) * 1000
+    current_app.logger.debug(
+        "PERF alert_%s_reconcile wall_clock_total_ms=%.1f summed_known_segments_ms=%.1f unexplained_gap_ms=%.1f",
+        action,
+        total,
+        summed,
+        max(0.0, total - summed),
+    )
+
+
+def _get_alert_for_mutation_scoped(alert_id: int, *, company_id: int, department_id: int | None = None):
+    query = AndonAlert.query.options(
+        load_only(
+            AndonAlert.id,
+            AndonAlert.company_id,
+            AndonAlert.machine_id,
+            AndonAlert.department_id,
+            AndonAlert.status,
+            AndonAlert.created_at,
+            AndonAlert.acknowledged_at,
+            AndonAlert.note,
+            AndonAlert.responder_user_id,
+            AndonAlert.responder_name_text,
+            AndonAlert.resolution_note,
+            AndonAlert.root_cause,
+            AndonAlert.corrective_action,
+        ),
+        noload("*"),
+    ).filter(AndonAlert.id == alert_id, AndonAlert.company_id == company_id)
+    if department_id is not None:
+        query = query.filter(AndonAlert.department_id == department_id)
+    alert = query.one_or_none()
+    if not alert:
+        raise AlertServiceError("Alert not found", status_code=404)
+    return alert
+
+
 def _perf_log_create_alert(metrics: dict) -> None:
     if not current_app.config.get("ANDON_PERF_LOGS"):
         return
@@ -574,53 +641,84 @@ def create_alert(payload: dict, metrics: dict | None = None):
 
 
 def acknowledge_alert(alert_id: int, payload: dict, metrics: dict | None = None):
+    return acknowledge_alert_scoped(alert_id, payload, metrics=metrics, company_id=None, department_id=None)
+
+
+def acknowledge_alert_scoped(
+    alert_id: int,
+    payload: dict,
+    metrics: dict | None = None,
+    *,
+    company_id: int | None,
+    department_id: int | None = None,
+    responder_name_fallback: str | None = None,
+    event_message: str | None = None,
+    event_metadata: dict | None = None,
+):
     perf = metrics if isinstance(metrics, dict) else {}
     started_at = time.perf_counter()
+    previous_step_at = started_at
+    previous_step_at = _perf_alert_step("ack", "start", started_at, previous_step_at, alert_id=alert_id, company_id=company_id)
+    previous_step_at = _perf_alert_step("ack", "before_alert_lookup", started_at, previous_step_at, alert_id=alert_id, company_id=company_id)
     lookup_started_at = time.perf_counter()
-    alert = _get_alert_for_mutation(alert_id)
+    alert = _get_alert_for_mutation(alert_id) if company_id is None else _get_alert_for_mutation_scoped(alert_id, company_id=company_id, department_id=department_id)
     perf["alert_lookup_ms"] = (time.perf_counter() - lookup_started_at) * 1000
+    previous_step_at = _perf_alert_step("ack", "after_alert_lookup", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("ack", "before_company_scope_validation", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("ack", "after_validation", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     if alert.status != ALERT_STATUS_OPEN:
         raise AlertServiceError("Alert can only be acknowledged from OPEN state")
 
     responder_started_at = time.perf_counter()
     responder = _resolve_user(payload.get("responder_user_id"))
     perf["user_lookup_ms"] = (time.perf_counter() - responder_started_at) * 1000
+    previous_step_at = _perf_alert_step("ack", "before_status_mutation", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     update_started_at = time.perf_counter()
     now = utc_now()
-    if alert.status == ALERT_STATUS_OPEN:
-        alert.acknowledged_at = now
-        alert.acknowledged_seconds = _duration_seconds(alert.created_at, now)
-        alert.status = ALERT_STATUS_ACKNOWLEDGED
+    alert.acknowledged_at = now
+    alert.acknowledged_seconds = _duration_seconds(alert.created_at, now)
+    alert.status = ALERT_STATUS_ACKNOWLEDGED
     if payload.get("responder_name_text"):
         alert.responder_name_text = payload.get("responder_name_text")
     if responder:
         alert.responder_user_id = responder.id
         alert.responder_name_text = responder.display_name
-    alert.responder_name_text = alert.responder_name_text or payload.get("responder_name_text")
+    alert.responder_name_text = alert.responder_name_text or payload.get("responder_name_text") or responder_name_fallback
     _replace_alert_note(alert, payload.get("note"))
     perf["update_fields_ms"] = (time.perf_counter() - update_started_at) * 1000
+    previous_step_at = _perf_alert_step("ack", "after_status_mutation", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
 
+    previous_step_at = _perf_alert_step("ack", "before_event_note_insert", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     event_started_at = time.perf_counter()
     _add_event(
         alert,
         EVENT_ACKNOWLEDGED,
         user=responder,
         user_name_text=alert.responder_name_text,
-        message=payload.get("message") or "Alert acknowledged",
-        metadata={"responder_name_text": alert.responder_name_text},
+        message=payload.get("message") or event_message or "Alert acknowledged",
+        metadata=event_metadata or {"responder_name_text": alert.responder_name_text},
     )
     perf["event_insert_ms"] = (time.perf_counter() - event_started_at) * 1000
+    previous_step_at = _perf_alert_step("ack", "after_event_note_insert", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("ack", "before_commit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     commit_started_at = time.perf_counter()
     db.session.commit()
     perf["db_commit_ms"] = (time.perf_counter() - commit_started_at) * 1000
+    previous_step_at = _perf_alert_step("ack", "after_commit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("ack", "before_cache_invalidate", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     cache_started_at = time.perf_counter()
     _invalidate_live_caches(alert.company_id)
     perf["cache_invalidate_ms"] = (time.perf_counter() - cache_started_at) * 1000
+    previous_step_at = _perf_alert_step("ack", "after_cache_invalidate", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("ack", "before_socket_emit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     emit_started_at = time.perf_counter()
     emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="acknowledged")
     perf["socket_emit_ms"] = (time.perf_counter() - emit_started_at) * 1000
+    previous_step_at = _perf_alert_step("ack", "after_socket_emit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     perf["total_ms"] = (time.perf_counter() - started_at) * 1000
+    _perf_alert_reconcile("ack", started_at, perf)
     _perf_log_alert_mutation("acknowledge", perf)
+    _perf_alert_step("ack", "final_return", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     return alert
 
 
@@ -656,11 +754,31 @@ def mark_arrived(alert_id: int, payload: dict):
 
 
 def resolve_alert(alert_id: int, payload: dict, metrics: dict | None = None):
+    return resolve_alert_scoped(alert_id, payload, metrics=metrics, company_id=None, department_id=None)
+
+
+def resolve_alert_scoped(
+    alert_id: int,
+    payload: dict,
+    metrics: dict | None = None,
+    *,
+    company_id: int | None,
+    department_id: int | None = None,
+    responder_name_fallback: str | None = None,
+    event_message: str | None = None,
+    event_metadata: dict | None = None,
+):
     perf = metrics if isinstance(metrics, dict) else {}
     started_at = time.perf_counter()
+    previous_step_at = started_at
+    previous_step_at = _perf_alert_step("resolve", "start", started_at, previous_step_at, alert_id=alert_id, company_id=company_id)
+    previous_step_at = _perf_alert_step("resolve", "before_alert_lookup", started_at, previous_step_at, alert_id=alert_id, company_id=company_id)
     lookup_started_at = time.perf_counter()
-    alert = _get_alert_for_mutation(alert_id)
+    alert = _get_alert_for_mutation(alert_id) if company_id is None else _get_alert_for_mutation_scoped(alert_id, company_id=company_id, department_id=department_id)
     perf["alert_lookup_ms"] = (time.perf_counter() - lookup_started_at) * 1000
+    previous_step_at = _perf_alert_step("resolve", "after_alert_lookup", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("resolve", "before_company_scope_validation", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("resolve", "after_validation", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     if alert.status in [ALERT_STATUS_RESOLVED, ALERT_STATUS_CANCELLED]:
         raise AlertServiceError("Alert is already closed")
     if alert.status not in [ALERT_STATUS_ARRIVED, ALERT_STATUS_ACKNOWLEDGED]:
@@ -669,6 +787,7 @@ def resolve_alert(alert_id: int, payload: dict, metrics: dict | None = None):
     responder_started_at = time.perf_counter()
     responder = _resolve_user(payload.get("responder_user_id"))
     perf["user_lookup_ms"] = (time.perf_counter() - responder_started_at) * 1000
+    previous_step_at = _perf_alert_step("resolve", "before_status_mutation", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     update_started_at = time.perf_counter()
     now = utc_now()
     alert.resolved_at = now
@@ -680,37 +799,49 @@ def resolve_alert(alert_id: int, payload: dict, metrics: dict | None = None):
         alert.responder_name_text = responder.display_name
     if payload.get("responder_name_text"):
         alert.responder_name_text = payload.get("responder_name_text")
+    alert.responder_name_text = alert.responder_name_text or responder_name_fallback
     alert.resolution_note = payload.get("resolution_note")
     alert.root_cause = payload.get("root_cause")
     alert.corrective_action = payload.get("corrective_action")
     _append_alert_note(alert, payload.get("note"))
     perf["update_fields_ms"] = (time.perf_counter() - update_started_at) * 1000
+    previous_step_at = _perf_alert_step("resolve", "after_status_mutation", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
 
+    previous_step_at = _perf_alert_step("resolve", "before_event_note_insert", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     event_started_at = time.perf_counter()
     _add_event(
         alert,
         EVENT_RESOLVED,
         user=responder,
         user_name_text=alert.responder_name_text,
-        message=payload.get("message") or "Alert resolved",
-        metadata={
+        message=payload.get("message") or event_message or "Alert resolved",
+        metadata=event_metadata or {
             "resolution_note": alert.resolution_note,
             "root_cause": alert.root_cause,
             "corrective_action": alert.corrective_action,
         },
     )
     perf["event_insert_ms"] = (time.perf_counter() - event_started_at) * 1000
+    previous_step_at = _perf_alert_step("resolve", "after_event_note_insert", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("resolve", "before_commit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     commit_started_at = time.perf_counter()
     db.session.commit()
     perf["db_commit_ms"] = (time.perf_counter() - commit_started_at) * 1000
+    previous_step_at = _perf_alert_step("resolve", "after_commit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("resolve", "before_cache_invalidate", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     cache_started_at = time.perf_counter()
     _invalidate_live_caches(alert.company_id)
     perf["cache_invalidate_ms"] = (time.perf_counter() - cache_started_at) * 1000
+    previous_step_at = _perf_alert_step("resolve", "after_cache_invalidate", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
+    previous_step_at = _perf_alert_step("resolve", "before_socket_emit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     emit_started_at = time.perf_counter()
     emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="resolved")
     perf["socket_emit_ms"] = (time.perf_counter() - emit_started_at) * 1000
+    previous_step_at = _perf_alert_step("resolve", "after_socket_emit", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     perf["total_ms"] = (time.perf_counter() - started_at) * 1000
+    _perf_alert_reconcile("resolve", started_at, perf)
     _perf_log_alert_mutation("resolve", perf)
+    _perf_alert_step("resolve", "final_return", started_at, previous_step_at, alert_id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id)
     return alert
 
 

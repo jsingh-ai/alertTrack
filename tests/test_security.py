@@ -433,6 +433,95 @@ def test_create_alert_requires_issue_category_id(client, app):
     assert "issue_category_id is required" in payload["error"]["message"]
 
 
+def _create_alert_for_mutation(client, fixtures, csrf_token):
+    response = client.post(
+        "/api/andon/alerts",
+        json={
+            "machine_id": fixtures["machine_id"],
+            "department_id": fixtures["department_id"],
+            "issue_category_id": fixtures["category_id"],
+            "issue_problem_id": fixtures["problem_id"],
+            "note": "initial note",
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert response.status_code == 201
+    return response.get_json()["data"]["id"]
+
+
+def test_acknowledge_uses_lightweight_response_and_live_cache_invalidation_only(client, app, monkeypatch):
+    fixtures = _create_alert_api_fixtures(app)
+    csrf_token = _seed_csrf(client)
+    with client.session_transaction() as session:
+        session["andon_company_slug"] = fixtures["company_slug"]
+
+    alert_id = _create_alert_for_mutation(client, fixtures, csrf_token)
+
+    from andon_system.models import alert as alert_model_module
+    from andon_system.services import alert_service as alert_service_module
+
+    monkeypatch.setattr(alert_model_module.AndonAlert, "to_dict", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("to_dict should not be used")))
+    calls = {"live": 0}
+
+    def fake_invalidate_live_alert_caches(company_id):
+        calls["live"] += 1
+        assert company_id == fixtures["company_id"]
+        return {"mode": "local", "total_ms": 0.1}
+
+    monkeypatch.setattr(alert_service_module, "invalidate_live_alert_caches", fake_invalidate_live_alert_caches)
+
+    response = client.post(
+        f"/api/andon/alerts/{alert_id}/acknowledge",
+        json={"note": "ack note"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["data"]["id"] == alert_id
+    assert calls["live"] == 1
+
+
+def test_resolve_uses_lightweight_response_and_live_cache_invalidation_only(client, app, monkeypatch):
+    fixtures = _create_alert_api_fixtures(app)
+    csrf_token = _seed_csrf(client)
+    with client.session_transaction() as session:
+        session["andon_company_slug"] = fixtures["company_slug"]
+
+    alert_id = _create_alert_for_mutation(client, fixtures, csrf_token)
+
+    acknowledge_response = client.post(
+        f"/api/andon/alerts/{alert_id}/acknowledge",
+        json={"note": "ack note"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert acknowledge_response.status_code == 200
+
+    from andon_system.models import alert as alert_model_module
+    from andon_system.services import alert_service as alert_service_module
+
+    monkeypatch.setattr(alert_model_module.AndonAlert, "to_dict", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("to_dict should not be used")))
+    calls = {"live": 0}
+
+    def fake_invalidate_live_alert_caches(company_id):
+        calls["live"] += 1
+        assert company_id == fixtures["company_id"]
+        return {"mode": "local", "total_ms": 0.1}
+
+    monkeypatch.setattr(alert_service_module, "invalidate_live_alert_caches", fake_invalidate_live_alert_caches)
+
+    response = client.post(
+        f"/api/andon/alerts/{alert_id}/resolve",
+        json={"note": "resolved"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["data"]["id"] == alert_id
+    assert calls["live"] == 1
+
+
 def test_database_unique_index_rejects_duplicate_active_alerts(app):
     fixtures = _create_alert_api_fixtures(app)
     with app.app_context():
