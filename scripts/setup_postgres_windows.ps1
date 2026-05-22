@@ -5,7 +5,9 @@ param(
     [string]$DatabaseName = "andon_db",
     [string]$AppUser = "andon_user",
     [string]$AppPassword = "andon_password",
-    [switch]$SkipSeed
+    [switch]$SkipSeed,
+    [switch]$SkipAuthSeed,
+    [switch]$UseProductionConfig
 )
 
 $ErrorActionPreference = "Stop"
@@ -107,8 +109,9 @@ $encodedPassword = [uri]::EscapeDataString($AppPassword)
 $env:DATABASE_URL = "postgresql+psycopg://${AppUser}:${encodedPassword}@${PostgresHost}:${PostgresPort}/${DatabaseName}"
 $env:HOST = "0.0.0.0"
 $env:PORT = "5001"
-$env:FLASK_CONFIG = "production"
+$env:FLASK_CONFIG = if ($UseProductionConfig) { "production" } else { "development" }
 $env:SOCKETIO_ENABLED = "true"
+$env:SESSION_COOKIE_SECURE = if ($UseProductionConfig) { "true" } else { "false" }
 
 $envPath = Join-Path (Get-Location) ".env"
 $existingSecret = Get-DotEnvValue -Path $envPath -Key "SECRET_KEY"
@@ -121,6 +124,7 @@ Set-DotEnvValue -Path $envPath -Key "DATABASE_URL" -Value $env:DATABASE_URL
 Set-DotEnvValue -Path $envPath -Key "SECRET_KEY" -Value $env:SECRET_KEY
 Set-DotEnvValue -Path $envPath -Key "FLASK_CONFIG" -Value $env:FLASK_CONFIG
 Set-DotEnvValue -Path $envPath -Key "SOCKETIO_ENABLED" -Value $env:SOCKETIO_ENABLED
+Set-DotEnvValue -Path $envPath -Key "SESSION_COOKIE_SECURE" -Value $env:SESSION_COOKIE_SECURE
 Set-DotEnvValue -Path $envPath -Key "HOST" -Value $env:HOST
 Set-DotEnvValue -Path $envPath -Key "PORT" -Value $env:PORT
 
@@ -132,8 +136,18 @@ if (-not $SkipSeed) {
     python scripts/seed_andon_data.py
 }
 
+if (-not $SkipAuthSeed) {
+    python scripts/seed_auth_users.py
+}
+
 Write-Host ""
 Write-Host "PostgreSQL setup complete."
+if ($UseProductionConfig) {
+    Write-Host "Configured for production settings."
+    Write-Host "Use a production server command (for example Gunicorn) instead of run_socketio.py."
+} else {
+    Write-Host "Configured for local development settings."
+    Write-Host "Start the app with:"
+    Write-Host "python run_socketio.py"
+}
 Write-Host "Future app runs will read .env automatically."
-Write-Host "Start the app with:"
-Write-Host "python run_socketio.py"

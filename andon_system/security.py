@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from flask import abort, current_app, g, has_request_context, request, session
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import joinedload, load_only, noload
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -56,6 +56,7 @@ _PAGER_LAST_SEEN_THROTTLE_SECONDS = 30
 _PAGER_TOKEN_DEVICE_CACHE = {}
 _PAGER_LAST_SEEN_TRACKER = {}
 _PAGER_CACHE_LOCK = threading.RLock()
+_PAGER_FINGERPRINT_COLUMN_SUPPORTED: bool | None = None
 
 
 def _perf_enabled() -> bool:
@@ -113,6 +114,13 @@ def hash_pager_token(raw_token: str) -> str:
     return generate_password_hash(token)
 
 
+def fingerprint_pager_token(raw_token: str) -> str:
+    token = str(raw_token or "").strip()
+    if not token:
+        raise ValueError("Pager token cannot be blank")
+    return sha256(token.encode("utf-8")).hexdigest()
+
+
 def verify_pager_token(token_hash: str | None, raw_token: str | None) -> bool:
     if not token_hash or not raw_token:
         return False
@@ -141,6 +149,21 @@ def get_authenticated_pager_device(update_last_seen: bool = True) -> PagerDevice
         _maybe_update_pager_last_seen(cache_hit, update_last_seen)
         return cache_hit
 
+    if _pager_token_fingerprint_supported():
+        device = _find_pager_device_by_fingerprint(token)
+        if (
+            device is not None
+            and verify_pager_token(device.token_hash, token)
+            and device.department
+            and device.department.is_active
+            and device.department.company_id == device.company_id
+        ):
+            g.authenticated_pager_device = device
+            g.authenticated_pager_device_last_seen_updated = False
+            _cache_pager_device_for_token(token, device)
+            _maybe_update_pager_last_seen(device, update_last_seen)
+            return device
+
     devices = PagerDevice.query.options(
         joinedload(PagerDevice.department).load_only(Department.id, Department.company_id, Department.is_active, Department.name),
         noload(PagerDevice.company),
@@ -162,13 +185,9 @@ def get_authenticated_pager_device(update_last_seen: bool = True) -> PagerDevice
     return None
 
 
-def _pager_token_fingerprint(token: str) -> str:
-    return sha256(str(token).encode("utf-8")).hexdigest()
-
-
 def _get_cached_pager_device_for_token(token: str) -> PagerDevice | None:
     now = time.monotonic()
-    fingerprint = _pager_token_fingerprint(token)
+    fingerprint = fingerprint_pager_token(token)
     with _PAGER_CACHE_LOCK:
         cached = _PAGER_TOKEN_DEVICE_CACHE.get(fingerprint)
         if not cached:
@@ -204,13 +223,51 @@ def _get_cached_pager_device_for_token(token: str) -> PagerDevice | None:
 def _cache_pager_device_for_token(token: str, device: PagerDevice) -> None:
     if not token or not device or not device.id or not device.token_hash:
         return
-    fingerprint = _pager_token_fingerprint(token)
+    fingerprint = fingerprint_pager_token(token)
     with _PAGER_CACHE_LOCK:
         _PAGER_TOKEN_DEVICE_CACHE[fingerprint] = {
             "device_id": int(device.id),
             "token_hash": str(device.token_hash),
             "expires_at": time.monotonic() + _PAGER_TOKEN_CACHE_TTL_SECONDS,
         }
+
+
+def _pager_token_fingerprint_supported() -> bool:
+    global _PAGER_FINGERPRINT_COLUMN_SUPPORTED
+    with _PAGER_CACHE_LOCK:
+        if _PAGER_FINGERPRINT_COLUMN_SUPPORTED is not None:
+            return _PAGER_FINGERPRINT_COLUMN_SUPPORTED
+    try:
+        columns = {column["name"] for column in inspect(db.engine).get_columns("pager_devices")}
+        supported = "token_fingerprint" in columns
+    except Exception:
+        supported = False
+    with _PAGER_CACHE_LOCK:
+        _PAGER_FINGERPRINT_COLUMN_SUPPORTED = supported
+    return supported
+
+
+def _find_pager_device_by_fingerprint(token: str) -> PagerDevice | None:
+    fingerprint = fingerprint_pager_token(token)
+    if not fingerprint:
+        return None
+    return (
+        PagerDevice.query.options(
+            joinedload(PagerDevice.department).load_only(
+                Department.id,
+                Department.company_id,
+                Department.is_active,
+                Department.name,
+            ),
+            noload(PagerDevice.company),
+        )
+        .filter(
+            PagerDevice.token_fingerprint == fingerprint,
+            PagerDevice.active.is_(True),
+        )
+        .order_by(PagerDevice.id.asc())
+        .first()
+    )
 
 
 def _maybe_update_pager_last_seen(device: PagerDevice, update_last_seen: bool) -> None:
@@ -309,17 +366,15 @@ def _find_user_by_identity(identity: str) -> User | None:
             User.display_name,
             User.username,
             User.role,
-            User.email,
             User.password_hash,
             User.is_active,
             User.last_login_at,
         ),
         noload("*"),
     )
-    user = User.query.options(*options).filter(User.username == identity).one_or_none()
-    if user is not None:
-        return user
-    return User.query.options(*options).filter(User.email == identity).first()
+    # Email login is intentionally disabled until end-to-end email identity
+    # workflows are implemented (verification, uniqueness, and recovery).
+    return User.query.options(*options).filter(User.username == identity).one_or_none()
 
 
 def get_user_memberships(user: User | None = None, active_only: bool = True) -> list[UserCompanyAccess]:

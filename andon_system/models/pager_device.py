@@ -11,6 +11,7 @@ class PagerDevice(db.Model):
         db.Index("ix_pager_devices_company_id", "company_id"),
         db.Index("ix_pager_devices_department_id", "department_id"),
         db.Index("ix_pager_devices_active", "active"),
+        db.Index("ix_pager_devices_token_fingerprint", "token_fingerprint"),
         db.UniqueConstraint("company_id", "department_id", "name", name="uq_pager_devices_company_department_name"),
     )
 
@@ -19,6 +20,7 @@ class PagerDevice(db.Model):
     department_id = db.Column(db.Integer, db.ForeignKey("departments.id"), nullable=False)
     name = db.Column(db.String(160), nullable=False)
     token_hash = db.Column(db.String(255), nullable=False)
+    token_fingerprint = db.Column(db.String(64), nullable=True)
     active = db.Column(db.Boolean, nullable=False, default=True)
     last_seen_at = db.Column(db.DateTime(timezone=True), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -43,7 +43,7 @@
           <div class="andon-home__login-head">
             <p class="andon-home__eyebrow">ProcessGuard AI</p>
             <h2 class="andon-home__login-title">Sign in</h2>
-            <p class="andon-home__login-copy">Use your username or email to access your assigned company views.</p>
+            <p class="andon-home__login-copy">Use your username to access your assigned company views.</p>
           </div>
           {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -57,7 +57,7 @@
           <form method="post" action="{{ url_for('pages.login_page') }}" class="andon-home__form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="andon-home__field">
-              <label class="form-label" for="identity">Username or email</label>
+              <label class="form-label" for="identity">Username</label>
               <input class="form-control" id="identity" name="identity" autocomplete="username" required>
             </div>
             <div class="andon-home__field">

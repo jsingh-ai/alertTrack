@@ -168,6 +168,7 @@ def _ensure_auth_schema() -> None:
             )
         )
         _ensure_postgres_performance_indexes()
+    _ensure_pager_device_token_fingerprint_schema(allow_alter=True)
     db.session.commit()
     _ensure_sqlite_user_role_constraints()
     _ensure_sqlite_active_alert_unique_index()
@@ -412,6 +413,25 @@ def _ensure_postgres_performance_indexes() -> None:
     )
 
 
+def _ensure_pager_device_token_fingerprint_schema(allow_alter: bool) -> None:
+    inspector = inspect(db.engine)
+    if "pager_devices" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("pager_devices")}
+    has_fingerprint = "token_fingerprint" in columns
+    if not has_fingerprint and allow_alter:
+        db.session.execute(text("ALTER TABLE pager_devices ADD COLUMN token_fingerprint VARCHAR(64)"))
+        has_fingerprint = True
+    if not has_fingerprint:
+        return
+    db.session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_pager_devices_token_fingerprint "
+            "ON pager_devices (token_fingerprint)"
+        )
+    )
+
+
 def create_app(config_name: str | None = None) -> Flask:
     app = Flask(
         __name__,
@@ -560,9 +580,12 @@ def create_app(config_name: str | None = None) -> Flask:
             db.create_all()
         if app.config.get("ANDON_RUNTIME_SCHEMA_REPAIR"):
             _ensure_auth_schema()
-        elif db.engine.dialect.name == "postgresql":
-            # Ensure read-path indexes exist even when runtime schema repair is disabled.
-            _ensure_postgres_performance_indexes()
+        else:
+            # Keep critical read-path indexes present when runtime repair is off.
+            if db.engine.dialect.name == "postgresql":
+                _ensure_postgres_performance_indexes()
+            # Pager token fingerprint support is required by the current model.
+            _ensure_pager_device_token_fingerprint_schema(allow_alter=True)
             db.session.commit()
         app.logger.debug("Andon app initialized")
 

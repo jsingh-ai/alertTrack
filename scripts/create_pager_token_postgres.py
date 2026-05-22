@@ -5,6 +5,7 @@ import secrets
 
 from sqlalchemy import create_engine, text
 from werkzeug.security import generate_password_hash
+from hashlib import sha256
 
 
 def main() -> None:
@@ -20,9 +21,17 @@ def main() -> None:
 
     raw_token = secrets.token_urlsafe(32)
     token_hash = generate_password_hash(raw_token)
+    token_fingerprint = sha256(raw_token.encode("utf-8")).hexdigest()
 
     engine = create_engine(args.database_url, future=True)
     with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE pager_devices ADD COLUMN IF NOT EXISTS token_fingerprint VARCHAR(64)"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_pager_devices_token_fingerprint "
+                "ON pager_devices (token_fingerprint)"
+            )
+        )
         department_row = conn.execute(
             text(
                 """
@@ -41,11 +50,12 @@ def main() -> None:
         conn.execute(
             text(
                 """
-                INSERT INTO pager_devices (company_id, department_id, name, token_hash, active)
-                VALUES (:company_id, :department_id, :name, :token_hash, TRUE)
+                INSERT INTO pager_devices (company_id, department_id, name, token_hash, token_fingerprint, active)
+                VALUES (:company_id, :department_id, :name, :token_hash, :token_fingerprint, TRUE)
                 ON CONFLICT (company_id, department_id, name)
                 DO UPDATE SET
                     token_hash = EXCLUDED.token_hash,
+                    token_fingerprint = EXCLUDED.token_fingerprint,
                     active = TRUE,
                     updated_at = NOW()
                 """
@@ -55,6 +65,7 @@ def main() -> None:
                 "department_id": department_row["id"],
                 "name": device_name,
                 "token_hash": token_hash,
+                "token_fingerprint": token_fingerprint,
             },
         )
 

@@ -14,7 +14,7 @@ from andon_system import create_app
 from andon_system.extensions import db
 from andon_system.models.department import Department
 from andon_system.models.pager_device import PagerDevice
-from andon_system.security import hash_pager_token
+from andon_system.security import fingerprint_pager_token, hash_pager_token
 
 
 def main() -> None:
@@ -32,6 +32,7 @@ def main() -> None:
 
         raw_token = secrets.token_urlsafe(32)
         token_hash = hash_pager_token(raw_token)
+        token_fingerprint = fingerprint_pager_token(raw_token)
         name = args.name.strip()
         if not name:
             raise SystemExit("Device name cannot be empty")
@@ -47,11 +48,13 @@ def main() -> None:
                 department_id=department.id,
                 name=name,
                 token_hash=token_hash,
+                token_fingerprint=token_fingerprint,
                 active=True,
             )
             db.session.add(device)
         else:
             device.token_hash = token_hash
+            device.token_fingerprint = token_fingerprint
             device.active = True
         db.session.commit()
 

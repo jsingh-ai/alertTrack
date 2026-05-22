@@ -35,38 +35,34 @@ def build_report_summary(filters: dict):
     cached = get_cached(cache_key)
     if cached is not None:
         return cached
-    alerts = _filtered_alerts(filters)
+    rows = _summary_alert_rows(filters)
     result = {
-        "kpis": _build_kpis(alerts),
-        "by_machine_group": _group_count_field(alerts, lambda alert: alert.machine.machine_type if alert.machine and alert.machine.machine_type else "Unassigned"),
-        "by_department": _group_count(alerts, "department"),
-        "by_machine": _group_count(alerts, "machine"),
-        "top_machines": _top_machines(alerts),
-        "top_problems": _top_problems(alerts),
-        "calls_per_hour": _calls_per_hour(alerts),
+        "kpis": _build_kpis_from_rows(rows),
+        "by_machine_group": _group_count_from_rows(rows, "machine_group", "machine_group"),
+        "by_department": _group_count_from_rows(rows, "department_id", "department_name"),
+        "by_machine": _group_count_from_rows(rows, "machine_id", "machine_name"),
+        "top_machines": _top_machines_from_rows(rows),
+        "top_problems": _top_problems_from_rows(rows),
+        "calls_per_hour": _calls_per_hour_from_rows(rows),
     }
     set_cached(cache_key, result, REPORT_SUMMARY_CACHE_TTL_SECONDS)
     return result
 
 
 def build_by_machine(filters: dict):
-    alerts = _filtered_alerts(filters)
-    return _group_count(alerts, "machine")
+    return _group_count_from_rows(_summary_alert_rows(filters), "machine_id", "machine_name")
 
 
 def build_by_department(filters: dict):
-    alerts = _filtered_alerts(filters)
-    return _group_count(alerts, "department")
+    return _group_count_from_rows(_summary_alert_rows(filters), "department_id", "department_name")
 
 
 def build_by_problem(filters: dict):
-    alerts = _filtered_alerts(filters)
-    return _group_count(alerts, "issue_problem")
+    return _group_count_from_rows(_summary_alert_rows(filters), "issue_problem_id", "issue_problem_name")
 
 
 def build_calls_per_hour(filters: dict):
-    alerts = _filtered_alerts(filters)
-    return _calls_per_hour(alerts)
+    return _calls_per_hour_from_rows(_summary_alert_rows(filters))
 
 
 def build_machine_details(filters: dict):
@@ -243,6 +239,38 @@ def _filtered_alerts(filters):
     return query.order_by(AndonAlert.created_at.asc()).all()
 
 
+def _summary_alert_rows(filters):
+    query = (
+        _base_alert_query(filters)
+        .with_entities(
+            AndonAlert.id.label("id"),
+            AndonAlert.status.label("status"),
+            AndonAlert.machine_id.label("machine_id"),
+            Machine.name.label("machine_name"),
+            Machine.machine_type.label("machine_group"),
+            AndonAlert.department_id.label("department_id"),
+            Department.name.label("department_name"),
+            AndonAlert.issue_category_id.label("issue_category_id"),
+            IssueCategory.name.label("issue_category_name"),
+            AndonAlert.issue_problem_id.label("issue_problem_id"),
+            IssueProblem.name.label("issue_problem_name"),
+            AndonAlert.created_at.label("created_at"),
+            AndonAlert.acknowledged_at.label("acknowledged_at"),
+            AndonAlert.acknowledged_seconds.label("acknowledged_seconds"),
+            AndonAlert.arrived_at.label("arrived_at"),
+            AndonAlert.resolved_at.label("resolved_at"),
+            AndonAlert.cancelled_at.label("cancelled_at"),
+            AndonAlert.ack_to_clear_seconds.label("ack_to_clear_seconds"),
+            AndonAlert.current_escalation_level.label("current_escalation_level"),
+        )
+        .outerjoin(Machine, Machine.id == AndonAlert.machine_id)
+        .outerjoin(Department, Department.id == AndonAlert.department_id)
+        .outerjoin(IssueCategory, IssueCategory.id == AndonAlert.issue_category_id)
+        .outerjoin(IssueProblem, IssueProblem.id == AndonAlert.issue_problem_id)
+    )
+    return query.order_by(AndonAlert.created_at.asc()).all()
+
+
 def _base_alert_query(filters):
     company_id = get_current_company_id()
     scope = get_scope_filters()
@@ -320,102 +348,98 @@ def _cache_filters(filters):
     return tuple((key, str(filters.get(key)) if filters.get(key) is not None else None) for key in relevant_keys)
 
 
-def _build_kpis(alerts):
-    open_count = sum(1 for alert in alerts if alert.status in [ALERT_STATUS_OPEN, ALERT_STATUS_ACKNOWLEDGED])
-    closed_count = sum(1 for alert in alerts if alert.status in [ALERT_STATUS_RESOLVED, ALERT_STATUS_CANCELLED])
-    escalated_count = sum(1 for alert in alerts if alert.current_escalation_level > 0)
+def _build_kpis_from_rows(rows):
+    open_count = sum(1 for row in rows if row.status in [ALERT_STATUS_OPEN, ALERT_STATUS_ACKNOWLEDGED])
+    closed_count = sum(1 for row in rows if row.status in [ALERT_STATUS_RESOLVED, ALERT_STATUS_CANCELLED])
+    escalated_count = sum(1 for row in rows if int(row.current_escalation_level or 0) > 0)
     return {
-        "total_alerts": len(alerts),
+        "total_alerts": len(rows),
         "open_alerts": open_count,
         "closed_alerts": closed_count,
         "resolved_alerts": closed_count,
-        "average_acknowledge_time": _avg([alert.wait_to_ack_seconds for alert in alerts]),
-        "average_ack_to_clear_time": _avg([alert.ack_to_clear_seconds for alert in alerts]),
-        "average_arrival_time": _avg([alert.wait_to_arrive_seconds for alert in alerts]),
-        "average_resolution_time": _avg([_closed_seconds(alert) for alert in alerts]),
+        "average_acknowledge_time": _avg([_wait_to_ack_seconds_from_row(row) for row in rows]),
+        "average_ack_to_clear_time": _avg([row.ack_to_clear_seconds for row in rows]),
+        "average_arrival_time": _avg([_wait_to_arrive_seconds_from_row(row) for row in rows]),
+        "average_resolution_time": _avg([_closed_seconds_from_row(row) for row in rows]),
         "escalated_alerts": escalated_count,
     }
 
 
-def _group_count(alerts, relation_name):
+def _group_count_from_rows(rows, id_key: str, name_key: str):
     counter = Counter()
-    for alert in alerts:
-        relation = getattr(alert, relation_name)
-        if relation is None:
-            key = {"id": None, "name": "Unassigned"}
+    for row in rows:
+        row_id = getattr(row, id_key, None)
+        row_name = getattr(row, name_key, None)
+        normalized_name = row_name or "Unassigned"
+        if id_key == "machine_group":
+            # Machine-group rows are name-only buckets.
+            counter[(normalized_name, normalized_name)] += 1
         else:
-            key = {"id": relation.id, "name": getattr(relation, "name", None) or getattr(relation, "display_name", None)}
-        counter[(key["id"], key["name"])] += 1
+            counter[(row_id, normalized_name)] += 1
+    if id_key == "machine_group":
+        return [{"name": item[0][0], "count": item[1]} for item in counter.most_common()]
     return [{"id": item[0][0], "name": item[0][1], "count": item[1]} for item in counter.most_common()]
 
 
-def _group_count_field(alerts, value_getter):
-    counter = Counter()
-    for alert in alerts:
-        name = value_getter(alert)
-        counter[name] += 1
-    return [{"name": name, "count": count} for name, count in counter.most_common()]
-
-
-def _top_machines(alerts):
+def _top_machines_from_rows(rows):
     buckets = defaultdict(list)
-    for alert in alerts:
-        label = alert.machine.name if alert.machine else "Unassigned"
-        buckets[(alert.machine_id, label)].append(alert)
+    for row in rows:
+        label = row.machine_name or "Unassigned"
+        buckets[(row.machine_id, label)].append(row)
 
-    rows = []
+    result_rows = []
     for (machine_id, machine_name), values in buckets.items():
-        top_problem = _top_problem_for_alerts(values)
-        rows.append(
+        top_problem = _top_problem_for_rows(values)
+        result_rows.append(
             {
                 "id": machine_id,
                 "name": machine_name,
-                "machine_group": values[0].machine.machine_type if values and values[0].machine and values[0].machine.machine_type else "Unassigned",
-                "department_name": values[0].department.name if values and values[0].department else "Unassigned",
+                "machine_group": values[0].machine_group or "Unassigned",
+                "department_name": values[0].department_name or "Unassigned",
                 "count": len(values),
-                "average_acknowledge_seconds": _avg([alert.wait_to_ack_seconds for alert in values]),
-                "average_ack_to_clear_seconds": _avg([alert.ack_to_clear_seconds for alert in values]),
-                "average_total_seconds": _avg([_closed_seconds(alert) for alert in values]),
+                "average_acknowledge_seconds": _avg([_wait_to_ack_seconds_from_row(row) for row in values]),
+                "average_ack_to_clear_seconds": _avg([row.ack_to_clear_seconds for row in values]),
+                "average_total_seconds": _avg([_closed_seconds_from_row(row) for row in values]),
                 "top_problem": top_problem["name"] if top_problem else None,
                 "top_problem_count": top_problem["count"] if top_problem else None,
             }
         )
-    return sorted(rows, key=lambda row: row["count"], reverse=True)
+    return sorted(result_rows, key=lambda item: item["count"], reverse=True)
 
 
-def _top_problems(alerts):
+def _top_problems_from_rows(rows):
     buckets = defaultdict(list)
-    for alert in alerts:
-        label = alert.issue_problem.name if alert.issue_problem else "Unassigned"
-        buckets[(alert.issue_problem_id, label)].append(alert)
+    for row in rows:
+        label = row.issue_problem_name or "Unassigned"
+        buckets[(row.issue_problem_id, label)].append(row)
 
-    rows = []
+    result_rows = []
     for (problem_id, problem_name), values in buckets.items():
-        top_machine = _top_machine_for_alerts(values)
-        top_group = _top_group_for_alerts(values)
-        rows.append(
+        top_machine = _top_machine_for_rows(values)
+        top_group = _top_group_for_rows(values)
+        result_rows.append(
             {
                 "id": problem_id,
                 "name": problem_name,
-                "category_name": values[0].issue_category.name if values and values[0].issue_category else "Unassigned",
+                "category_name": values[0].issue_category_name or "Unassigned",
                 "count": len(values),
                 "top_machine": top_machine["name"] if top_machine else None,
                 "top_machine_count": top_machine["count"] if top_machine else None,
                 "top_machine_group": top_group["name"] if top_group else None,
-                "average_acknowledge_seconds": _avg([alert.wait_to_ack_seconds for alert in values]),
-                "average_ack_to_clear_seconds": _avg([alert.ack_to_clear_seconds for alert in values]),
-                "average_total_seconds": _avg([_closed_seconds(alert) for alert in values]),
+                "average_acknowledge_seconds": _avg([_wait_to_ack_seconds_from_row(row) for row in values]),
+                "average_ack_to_clear_seconds": _avg([row.ack_to_clear_seconds for row in values]),
+                "average_total_seconds": _avg([_closed_seconds_from_row(row) for row in values]),
             }
         )
-    return sorted(rows, key=lambda row: row["count"], reverse=True)
+    return sorted(result_rows, key=lambda item: item["count"], reverse=True)
 
 
-def _top_problem_for_alerts(alerts):
+def _top_problem_for_rows(rows):
     counter = Counter()
     names = {}
-    for alert in alerts:
-        key = alert.issue_problem_id
-        name = alert.issue_problem.name if alert.issue_problem else "Unassigned"
+    for row in rows:
+        key = row.issue_problem_id
+        name = row.issue_problem_name or "Unassigned"
         counter[key] += 1
         names[key] = name
     if not counter:
@@ -424,12 +448,12 @@ def _top_problem_for_alerts(alerts):
     return {"id": problem_id, "name": names.get(problem_id, "Unassigned"), "count": count}
 
 
-def _top_machine_for_alerts(alerts):
+def _top_machine_for_rows(rows):
     counter = Counter()
     names = {}
-    for alert in alerts:
-        key = alert.machine_id
-        name = alert.machine.name if alert.machine else "Unassigned"
+    for row in rows:
+        key = row.machine_id
+        name = row.machine_name or "Unassigned"
         counter[key] += 1
         names[key] = name
     if not counter:
@@ -438,11 +462,11 @@ def _top_machine_for_alerts(alerts):
     return {"id": machine_id, "name": names.get(machine_id, "Unassigned"), "count": count}
 
 
-def _top_group_for_alerts(alerts):
+def _top_group_for_rows(rows):
     counter = Counter()
     names = {}
-    for alert in alerts:
-        key = alert.machine.machine_type if alert.machine and alert.machine.machine_type else "Unassigned"
+    for row in rows:
+        key = row.machine_group or "Unassigned"
         counter[key] += 1
         names[key] = key
     if not counter:
@@ -477,12 +501,12 @@ def _machine_detail(alert):
     }
 
 
-def _calls_per_hour(alerts):
+def _calls_per_hour_from_rows(rows):
     counter = Counter()
-    for alert in alerts:
-        if not alert.created_at:
+    for row in rows:
+        if not row.created_at:
             continue
-        hour = alert.created_at.astimezone(timezone.utc).hour if alert.created_at.tzinfo else alert.created_at.hour
+        hour = row.created_at.astimezone(timezone.utc).hour if row.created_at.tzinfo else row.created_at.hour
         counter[hour] += 1
     return [{"hour": hour, "count": counter.get(hour, 0)} for hour in range(24)]
 
@@ -571,6 +595,45 @@ def _avg(values):
     if not clean:
         return None
     return round(sum(clean) / len(clean), 2)
+
+
+def _wait_to_ack_seconds_from_row(row):
+    if row.acknowledged_seconds is not None:
+        return row.acknowledged_seconds
+    if not row.created_at or not row.acknowledged_at:
+        return None
+    return _duration_seconds_between(row.created_at, row.acknowledged_at)
+
+
+def _wait_to_arrive_seconds_from_row(row):
+    if not row.created_at or not row.arrived_at:
+        return None
+    return _duration_seconds_between(row.created_at, row.arrived_at)
+
+
+def _closed_seconds_from_row(row):
+    if not row.created_at:
+        return None
+    closed_at = row.resolved_at or row.cancelled_at
+    if not closed_at:
+        return None
+    return _duration_seconds_between(row.created_at, closed_at)
+
+
+def _duration_seconds_between(start_value, end_value):
+    if not start_value or not end_value:
+        return None
+    start = start_value
+    end = end_value
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    else:
+        start = start.astimezone(timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    else:
+        end = end.astimezone(timezone.utc)
+    return round((end - start).total_seconds(), 2)
 
 
 def _closed_seconds(alert):

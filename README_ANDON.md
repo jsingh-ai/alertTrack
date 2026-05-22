@@ -66,13 +66,21 @@ After installing PostgreSQL on Windows and installing `requirements.txt`, run th
 .\scripts\setup_postgres_windows.ps1 -DatabaseName andon_db -AppUser andon_user -AppPassword "change_this_password"
 ```
 
-The script creates the PostgreSQL role/database if needed, sets `DATABASE_URL` for that PowerShell session, creates the tables, and seeds the default data.
+The script creates the PostgreSQL role/database if needed, sets `DATABASE_URL` for that PowerShell session, creates the tables, seeds default Andon data, and seeds demo auth users.
 
-It also writes a local `.env` file with `DATABASE_URL`, `SECRET_KEY`, `HOST`, `PORT`, and `SOCKETIO_ENABLED`, so future runs only need:
+By default it writes local-development-safe settings (`FLASK_CONFIG=development`, `SESSION_COOKIE_SECURE=false`) so login/logout work over local HTTP.
+
+It also writes a local `.env` file with `DATABASE_URL`, `SECRET_KEY`, `HOST`, `PORT`, `SOCKETIO_ENABLED`, `FLASK_CONFIG`, and `SESSION_COOKIE_SECURE`, so future runs only need:
 
 ```powershell
 python run_socketio.py
 ```
+
+Optional switches:
+
+- `-SkipSeed` skips `seed_andon_data.py`
+- `-SkipAuthSeed` skips `seed_auth_users.py`
+- `-UseProductionConfig` writes production app settings (`FLASK_CONFIG=production`, `SESSION_COOKIE_SECURE=true`)
 
 ## Run the App
 

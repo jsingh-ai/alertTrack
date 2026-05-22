@@ -18,7 +18,7 @@ from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
 from ..models.pager_device import PagerDevice
 from ..models.user import USER_ROLES, USER_SCOPE_MODES, User, UserCompanyAccess
-from ..security import hash_pager_token, require_admin_authentication
+from ..security import fingerprint_pager_token, hash_pager_token, require_admin_authentication
 from ..services.cache_service import invalidate_cache
 from ..services.radius_service import resolve_radius_machine_id
 from ..services.realtime_service import emit_admin_metadata_updated
@@ -273,12 +273,14 @@ def _ensure_department_pager_device(department: Department) -> PagerDevice:
     ).order_by(PagerDevice.id.asc()).first()
     if device is not None:
         return device
-    placeholder_token_hash = hash_pager_token(secrets.token_urlsafe(32))
+    placeholder_token = secrets.token_urlsafe(32)
+    placeholder_token_hash = hash_pager_token(placeholder_token)
     device = PagerDevice(
         company_id=department.company_id,
         department_id=department.id,
         name=f"{department.name} Pager",
         token_hash=placeholder_token_hash,
+        token_fingerprint=fingerprint_pager_token(placeholder_token),
         active=False,
     )
     db.session.add(device)
@@ -443,6 +445,7 @@ def rotate_department_pager_token(department_id: int):
     pager_device = _ensure_department_pager_device(department)
     raw_token = secrets.token_urlsafe(32)
     pager_device.token_hash = hash_pager_token(raw_token)
+    pager_device.token_fingerprint = fingerprint_pager_token(raw_token)
     pager_device.active = True
     pager_device.updated_at = datetime.now(timezone.utc)
     db.session.commit()

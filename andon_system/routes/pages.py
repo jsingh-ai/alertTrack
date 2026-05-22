@@ -18,7 +18,7 @@ from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
 from ..models.pager_device import PagerDevice
 from ..models.user import USER_ROLES, USER_SCOPE_MODES, User, UserCompanyAccess
-from ..security import hash_pager_token
+from ..security import fingerprint_pager_token, hash_pager_token
 from ..security import (
     PAGE_ADMIN,
     PAGE_BOARD,
@@ -230,7 +230,7 @@ def login_page():
             request.remote_addr,
         )
         _record_login_failure(identity, request.remote_addr)
-        flash("Invalid username/email or password.", "warning")
+        flash("Invalid username or password.", "warning")
         return redirect(url_for("pages.home_page"))
     current_app.logger.info(
         "LOGIN success identity=%s user_id=%s remote=%s",
@@ -532,11 +532,13 @@ def admin_page():
     for department in departments:
         if department.id in pager_by_department_id:
             continue
+        placeholder_token = f"init-{department.id}-{datetime.now(timezone.utc).timestamp()}"
         placeholder = PagerDevice(
             company_id=department.company_id,
             department_id=department.id,
             name=f"{department.name} Pager",
-            token_hash=hash_pager_token(f"init-{department.id}-{datetime.now(timezone.utc).timestamp()}"),
+            token_hash=hash_pager_token(placeholder_token),
+            token_fingerprint=fingerprint_pager_token(placeholder_token),
             active=False,
         )
         db.session.add(placeholder)
