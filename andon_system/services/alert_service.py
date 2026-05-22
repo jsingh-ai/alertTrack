@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 import time
+from types import SimpleNamespace
 from uuid import uuid4
 
 from flask import current_app
@@ -111,7 +112,8 @@ def _perf_log_create_alert(metrics: dict) -> None:
         "PERF alert_create_service machine_lookup_ms=%.1f permission_scope_ms=%.1f issue_category_lookup_ms=%.1f "
         "issue_problem_lookup_ms=%.1f duplicate_active_check_ms=%.1f alert_object_build_ms=%.1f db_add_ms=%.1f "
         "db_flush_ms=%.1f note_insert_ms=%.1f event_insert_ms=%.1f db_commit_ms=%.1f cache_invalidate_ms=%.1f "
-        "payload_fetch_ms=%.1f socket_emit_ms=%.1f escalation_check_ms=%.1f email_send_ms=%.1f notification_ms=%.1f total_ms=%.1f",
+        "before_cache_call_ms=%.1f actual_invalidate_call_ms=%.1f after_cache_call_ms=%.1f payload_fetch_ms=%.1f "
+        "socket_emit_ms=%.1f escalation_check_ms=%.1f email_send_ms=%.1f notification_ms=%.1f total_ms=%.1f",
         metrics.get("machine_lookup_ms", 0.0),
         metrics.get("permission_scope_ms", 0.0),
         metrics.get("issue_category_lookup_ms", 0.0),
@@ -124,6 +126,9 @@ def _perf_log_create_alert(metrics: dict) -> None:
         metrics.get("event_insert_ms", 0.0),
         metrics.get("db_commit_ms", 0.0),
         metrics.get("cache_invalidate_ms", 0.0),
+        metrics.get("before_cache_call_ms", 0.0),
+        metrics.get("actual_invalidate_call_ms", 0.0),
+        metrics.get("after_cache_call_ms", 0.0),
         metrics.get("payload_fetch_ms", 0.0),
         metrics.get("socket_emit_ms", 0.0),
         metrics.get("escalation_check_ms", 0.0),
@@ -312,9 +317,15 @@ def create_alert(payload: dict, metrics: dict | None = None):
         )
         perf["event_insert_ms"] = (time.perf_counter() - event_started_at) * 1000
         perf["note_insert_ms"] = 0.0
+        created_alert_id = alert.id
+        created_company_id = alert.company_id
+        created_machine_id = alert.machine_id
+        created_status = alert.status
+        created_at_iso = alert.created_at.isoformat() if alert.created_at else None
         commit_started_at = time.perf_counter()
         db.session.commit()
-        perf["db_commit_ms"] = (time.perf_counter() - commit_started_at) * 1000
+        commit_done_at = time.perf_counter()
+        perf["db_commit_ms"] = (commit_done_at - commit_started_at) * 1000
     except IntegrityError as exc:
         db.session.rollback()
         existing_alert_id = _find_active_alert_id_for_machine(machine.id, resolved_company_id)
@@ -334,10 +345,32 @@ def create_alert(payload: dict, metrics: dict | None = None):
             ) from exc
         raise AlertServiceError("Unable to create alert due to a database constraint", status_code=409) from exc
     cache_started_at = time.perf_counter()
-    _invalidate_live_caches(alert.company_id)
-    perf["cache_invalidate_ms"] = (time.perf_counter() - cache_started_at) * 1000
+    perf["before_cache_call_ms"] = (cache_started_at - commit_done_at) * 1000
+    if current_app.config.get("ANDON_PERF_LOGS"):
+        current_app.logger.debug(
+            "PERF alert_create_checkpoint phase=before_cache after_commit_to_cache_start_ms=%.1f alert_id=%s company_id=%s machine_id=%s status=%s created_at=%s",
+            perf["before_cache_call_ms"],
+            created_alert_id,
+            created_company_id,
+            created_machine_id,
+            created_status,
+            created_at_iso,
+        )
+    _invalidate_live_caches(created_company_id)
+    cache_call_done_at = time.perf_counter()
+    perf["actual_invalidate_call_ms"] = (cache_call_done_at - cache_started_at) * 1000
+    perf["after_cache_call_ms"] = (time.perf_counter() - cache_call_done_at) * 1000
+    perf["cache_invalidate_ms"] = perf["before_cache_call_ms"] + perf["actual_invalidate_call_ms"] + perf["after_cache_call_ms"]
+    if current_app.config.get("ANDON_PERF_LOGS"):
+        current_app.logger.debug(
+            "PERF alert_create_checkpoint phase=after_cache after_commit_to_cache_start_ms=%.1f actual_cache_call_ms=%.1f after_cache_call_ms=%.1f alert_id=%s",
+            perf["before_cache_call_ms"],
+            perf["actual_invalidate_call_ms"],
+            perf["after_cache_call_ms"],
+            created_alert_id,
+        )
     emit_started_at = time.perf_counter()
-    emit_alert_created(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status)
+    emit_alert_created(created_company_id, created_alert_id, machine_id=created_machine_id, status=created_status)
     perf["socket_emit_ms"] = (time.perf_counter() - emit_started_at) * 1000
     perf.setdefault("payload_fetch_ms", 0.0)
     perf.setdefault("escalation_check_ms", 0.0)
@@ -345,7 +378,7 @@ def create_alert(payload: dict, metrics: dict | None = None):
     perf.setdefault("notification_ms", 0.0)
     perf["total_ms"] = (time.perf_counter() - started_at) * 1000
     _perf_log_create_alert(perf)
-    return alert
+    return SimpleNamespace(id=created_alert_id, company_id=created_company_id, machine_id=created_machine_id, status=created_status)
 
 
 def acknowledge_alert(alert_id: int, payload: dict):
