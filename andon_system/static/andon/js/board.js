@@ -26,6 +26,7 @@ let operatorMetadataLoadPromise = null;
 let boardRefreshInFlight = false;
 let boardRefreshQueued = false;
 let boardRefreshTimeoutId = null;
+let localMutationRefreshLockUntil = 0;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -454,11 +455,13 @@ async function onListClick(event) {
     if (action === "acknowledge") {
       const updated = await acknowledgeAlert(alert);
       applyAlertUpdate(updated, alert);
+      localMutationRefreshLockUntil = Date.now() + 700;
       render();
       scheduleRefresh(60);
     } else if (action === "resolve") {
       const updated = await resolveAlert(alert);
       applyAlertUpdate(updated, alert);
+      localMutationRefreshLockUntil = Date.now() + 700;
       render();
       scheduleRefresh(60);
     }
@@ -538,6 +541,7 @@ async function boot() {
   });
   window.AndonRealtime?.onEvent((event) => {
     if (["alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
+      if (Date.now() < localMutationRefreshLockUntil) return;
       scheduleRefresh(100);
       if (event.type === "admin_metadata_updated") {
         void ensureOperatorMetadataLoaded({ force: true }).then(render).catch(() => {});

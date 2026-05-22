@@ -778,6 +778,81 @@ def test_pager_active_alerts_reuses_blueprint_authenticated_device(login_client,
     assert calls["count"] == 1
 
 
+def test_pager_active_alerts_uses_shared_lightweight_fetcher(login_client, monkeypatch):
+    from andon_system.routes import api as api_module
+
+    calls = {"fetch": 0}
+
+    def fake_fetch_active_alert_payloads(**_kwargs):
+        calls["fetch"] += 1
+        return []
+
+    monkeypatch.setattr(api_module, "fetch_active_alert_payloads", fake_fetch_active_alert_payloads)
+    monkeypatch.setattr(api_module, "get_authenticated_pager_device", lambda update_last_seen=True: SimpleNamespace(company_id=1, department_id=2))
+    monkeypatch.setattr(api_module, "get_cached", lambda key: None)
+    monkeypatch.setattr(api_module, "set_cached", lambda *args, **kwargs: None)
+
+    response = login_client.get(
+        "/api/andon/pager/alerts/active",
+        headers={"Authorization": "Bearer fake-token"},
+    )
+
+    assert response.status_code == 200
+    assert calls["fetch"] == 1
+
+
+def test_active_alert_fetcher_respects_company_and_visible_machine_ids(app):
+    from andon_system.services.active_alerts_service import fetch_active_alert_payloads
+
+    fixtures = _create_alert_api_fixtures(app)
+    with app.app_context():
+        machine_outside = Machine(
+            company_id=fixtures["company_id"],
+            machine_code=f"M-OUT-{uuid4().hex[:6]}",
+            name="Outside Machine",
+            machine_type="Outside",
+            department_id=fixtures["department_id"],
+            is_active=True,
+        )
+        db.session.add(machine_outside)
+        db.session.flush()
+        db.session.add_all(
+            [
+                AndonAlert(
+                    company_id=fixtures["company_id"],
+                    alert_number=f"AL-{uuid4().hex[:10].upper()}",
+                    machine_id=fixtures["machine_id"],
+                    department_id=fixtures["department_id"],
+                    issue_category_id=fixtures["category_id"],
+                    issue_problem_id=fixtures["problem_id"],
+                    status=ALERT_STATUS_OPEN,
+                    priority=3,
+                ),
+                AndonAlert(
+                    company_id=fixtures["company_id"],
+                    alert_number=f"AL-{uuid4().hex[:10].upper()}",
+                    machine_id=machine_outside.id,
+                    department_id=fixtures["department_id"],
+                    issue_category_id=fixtures["category_id"],
+                    issue_problem_id=fixtures["problem_id"],
+                    status=ALERT_STATUS_OPEN,
+                    priority=3,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        rows = fetch_active_alert_payloads(
+            company_id=fixtures["company_id"],
+            status="active",
+            machine_ids=[fixtures["machine_id"]],
+            use_cache=False,
+        )
+
+    assert len(rows) == 1
+    assert rows[0]["machine"]["id"] == fixtures["machine_id"]
+
+
 def test_operator_metadata_issue_groups_are_company_and_scope_filtered(tmp_path, monkeypatch):
     database_path = tmp_path / "operator-metadata.sqlite3"
     monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")

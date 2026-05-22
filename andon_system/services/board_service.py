@@ -16,6 +16,7 @@ from ..models.machine_group import MachineGroup
 from ..models.user import User, UserCompanyAccess
 from ..security import get_authenticated_user, get_current_membership, get_scope_filters
 from .cache_service import get_cached, set_cached
+from .active_alerts_service import fetch_active_alert_payloads
 from .radius_service import build_radius_status_map
 
 BOARD_STATE_CACHE_TTL_SECONDS = 10
@@ -761,37 +762,14 @@ def _load_board_context(
             active_alerts = []
         else:
             alert_query_started_at = time.perf_counter()
-            active_alerts = (
-                alert_query.filter(AndonAlert.machine_id.in_(visible_machine_ids))
-                .options(
-                    load_only(
-                        AndonAlert.id,
-                        AndonAlert.company_id,
-                        AndonAlert.machine_id,
-                        AndonAlert.department_id,
-                        AndonAlert.issue_category_id,
-                        AndonAlert.issue_problem_id,
-                        AndonAlert.status,
-                        AndonAlert.priority,
-                        AndonAlert.responder_user_id,
-                        AndonAlert.responder_name_text,
-                        AndonAlert.note,
-                        AndonAlert.created_at,
-                        AndonAlert.acknowledged_at,
-                        AndonAlert.acknowledged_seconds,
-                        AndonAlert.ack_to_clear_seconds,
-                    ),
-                    joinedload(AndonAlert.department).load_only(Department.id, Department.name),
-                    joinedload(AndonAlert.issue_category).load_only(IssueCategory.id, IssueCategory.name, IssueCategory.color),
-                    joinedload(AndonAlert.issue_problem).load_only(IssueProblem.id, IssueProblem.name),
-                    noload(AndonAlert.machine),
-                    noload(AndonAlert.operator_user),
-                    noload(AndonAlert.responder_user),
-                    noload(AndonAlert.events),
-                    noload(AndonAlert.escalations),
-                )
-                .order_by(AndonAlert.created_at.desc())
-                .all()
+            active_alerts = fetch_active_alert_payloads(
+                company_id=company_id,
+                status="active",
+                machine_ids=list(visible_machine_ids),
+                department_ids=department_ids,
+                role=role,
+                use_cache=True,
+                cache_ttl_seconds=3,
             )
             alert_query_ms = (time.perf_counter() - alert_query_started_at) * 1000
         active_alert_count = len(active_alerts)
@@ -801,21 +779,18 @@ def _load_board_context(
         active_alerts = [
             alert
             for alert in active_alerts
-            if alert.machine_id in visible_machine_ids
+            if alert.get("machine_id") in visible_machine_ids
             and (
                 not include_metadata
                 or (
-                    (alert.department_id is None or alert.department_id in visible_department_ids)
-                    and (alert.issue_category_id is None or alert.issue_category_id in visible_category_ids)
+                    (alert.get("department_id") is None or alert.get("department_id") in visible_department_ids)
+                    and (alert.get("issue_category_id") is None or alert.get("issue_category_id") in visible_category_ids)
                 )
             )
         ]
         filtered_alert_count = len(active_alerts)
-        created_notes_started_at = time.perf_counter()
-        created_notes_by_alert_id = _created_notes_by_alert_id(active_alerts, company_id)
-        created_notes_query_ms = (time.perf_counter() - created_notes_started_at) * 1000
         for alert in active_alerts:
-            alert_by_machine.setdefault(alert.machine_id, alert)
+            alert_by_machine.setdefault(alert["machine_id"], alert)
 
     if metrics is not None:
         metrics["machine_query_ms"] = round(machine_query_ms, 1)
@@ -841,37 +816,29 @@ def _load_board_context(
 def _serialize_active_alert(alert, created_note=None):
     if not alert:
         return None
-    now = _ensure_aware(utc_now())
-    created_at = _ensure_aware(alert.created_at)
-    acknowledged_at = _ensure_aware(alert.acknowledged_at)
-    if alert.status == "OPEN" or not acknowledged_at:
-        elapsed_start = created_at
-    else:
-        elapsed_start = acknowledged_at
-    elapsed_seconds = int((now - elapsed_start).total_seconds()) if elapsed_start else None
     return {
-        "id": alert.id,
-        "department_id": alert.department_id,
-        "department_name": alert.department.name if alert.department else None,
-        "responder_user_id": alert.responder_user_id,
-        "responder_name_text": alert.responder_name_text,
-        "note": alert.note,
+        "id": alert.get("id"),
+        "department_id": alert.get("department_id"),
+        "department_name": alert.get("department_name"),
+        "responder_user_id": alert.get("responder_user_id"),
+        "responder_name_text": alert.get("responder_name_text"),
+        "note": alert.get("note"),
         "created_note": created_note,
-        "category_name": alert.issue_category.name if alert.issue_category else None,
-        "problem_name": alert.issue_problem.name if alert.issue_problem else None,
-        "status": alert.status,
-        "priority": alert.priority,
-        "created_at": alert.created_at.isoformat() if alert.created_at else None,
-        "elapsed_seconds": elapsed_seconds,
-        "acknowledged_seconds": alert.acknowledged_seconds,
-        "ack_to_clear_seconds": alert.ack_to_clear_seconds,
-        "color": alert.issue_category.color if alert.issue_category and alert.issue_category.color else "#ef476f",
+        "category_name": alert.get("category_name"),
+        "problem_name": alert.get("problem_name"),
+        "status": alert.get("status"),
+        "priority": alert.get("priority"),
+        "created_at": alert.get("created_at"),
+        "elapsed_seconds": alert.get("elapsed_seconds"),
+        "acknowledged_seconds": alert.get("acknowledged_seconds"),
+        "ack_to_clear_seconds": alert.get("ack_to_clear_seconds"),
+        "color": alert.get("color") or "#ef476f",
     }
 
 
 def _serialize_machine(machine, alert_by_machine, created_notes_by_alert_id, radius_status_by_machine):
     active_alert = alert_by_machine.get(machine.id)
-    created_note = created_notes_by_alert_id.get(active_alert.id) if active_alert else None
+    created_note = created_notes_by_alert_id.get(active_alert.get("id")) if active_alert else None
     return {
         "id": machine.id,
         "name": machine.name,

@@ -46,10 +46,10 @@ from ..services.alert_service import (
     cancel_alert,
     create_alert,
     get_alert,
-    list_active_alerts,
     mark_arrived,
     resolve_alert,
 )
+from ..services.active_alerts_service import fetch_active_alert_payloads, fetch_alert_payload_by_id
 from ..services.reporting_service import (
     build_by_department,
     build_by_machine,
@@ -415,10 +415,31 @@ def operator_metadata():
 
 @api_bp.post("/alerts")
 def api_create_alert():
+    started_at = time.perf_counter()
+    auth_started_at = time.perf_counter()
     _require_any_page_access(PAGE_OPERATOR)
+    auth_ms = (time.perf_counter() - auth_started_at) * 1000
+    payload_started_at = time.perf_counter()
+    body = _payload()
+    payload_ms = (time.perf_counter() - payload_started_at) * 1000
     try:
-        alert = create_alert(_payload())
-        return jsonify({"success": True, "data": alert.to_dict()}), 201
+        write_started_at = time.perf_counter()
+        alert = create_alert(body)
+        insert_or_update_ms = (time.perf_counter() - write_started_at) * 1000
+        serialize_started_at = time.perf_counter()
+        alert_payload = fetch_alert_payload_by_id(alert.id, company_id=alert.company_id) or {"id": alert.id, "status": alert.status}
+        serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+        if current_app.config.get("ANDON_PERF_LOGS"):
+            current_app.logger.debug(
+                "PERF alert_create auth_ms=%.1f payload_ms=%.1f insert_or_update_ms=%.1f serialize_ms=%.1f total_ms=%.1f alert_id=%s",
+                auth_ms,
+                payload_ms,
+                insert_or_update_ms,
+                serialize_ms,
+                (time.perf_counter() - started_at) * 1000,
+                alert.id,
+            )
+        return jsonify({"success": True, "data": alert_payload}), 201
     except AlertServiceError as exc:
         return _error(str(exc), getattr(exc, "status_code", 400), getattr(exc, "data", None))
 
@@ -440,10 +461,44 @@ def api_toggle_machine_from_alert(alert_id):
 
 @api_bp.get("/alerts")
 def api_list_alerts():
+    started_at = time.perf_counter()
+    auth_started_at = time.perf_counter()
     _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
+    auth_ms = (time.perf_counter() - auth_started_at) * 1000
     status = request.args.get("status")
-    alerts = list_active_alerts(status=status)
-    return jsonify({"success": True, "data": [alert.to_dict() for alert in alerts]})
+    scope_started_at = time.perf_counter()
+    company_id = get_current_company_id()
+    membership = get_current_membership()
+    scope = get_scope_filters(membership=membership)
+    machine_ids = scope.get("machine_ids") or []
+    department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    scope_ms = (time.perf_counter() - scope_started_at) * 1000
+    fetch_metrics = {}
+    alerts = fetch_active_alert_payloads(
+        company_id=company_id,
+        status=status,
+        machine_ids=machine_ids,
+        department_ids=department_ids,
+        role=getattr(membership, "role", None),
+        metrics=fetch_metrics,
+    )
+    if current_app.config.get("ANDON_PERF_LOGS"):
+        current_app.logger.debug(
+            "PERF alerts_list auth_ms=%.1f scope_ms=%.1f cache_lookup_ms=%s alert_base_query_ms=%s machine_lookup_ms=0.0 "
+            "department_lookup_ms=0.0 issue_lookup_ms=0.0 user_lookup_ms=0.0 notes_lookup_ms=0.0 serialize_ms=%s cache_store_ms=%s "
+            "total_ms=%.1f alert_count=%s visible_machine_count=%s cache=%s",
+            auth_ms,
+            scope_ms,
+            fetch_metrics.get("cache_lookup_ms"),
+            fetch_metrics.get("alert_base_query_ms", 0.0),
+            fetch_metrics.get("serialize_ms", 0.0),
+            fetch_metrics.get("cache_store_ms", 0.0),
+            (time.perf_counter() - started_at) * 1000,
+            len(alerts),
+            len(machine_ids),
+            fetch_metrics.get("cache", "unknown"),
+        )
+    return jsonify({"success": True, "data": alerts})
 
 
 @api_bp.get("/alerts/<int:alert_id>")
@@ -458,10 +513,31 @@ def api_get_alert(alert_id):
 
 @api_bp.post("/alerts/<int:alert_id>/acknowledge")
 def api_acknowledge_alert(alert_id):
+    started_at = time.perf_counter()
+    auth_started_at = time.perf_counter()
     _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
+    auth_ms = (time.perf_counter() - auth_started_at) * 1000
+    payload_started_at = time.perf_counter()
+    body = _payload()
+    payload_ms = (time.perf_counter() - payload_started_at) * 1000
     try:
-        alert = acknowledge_alert(alert_id, _payload())
-        return jsonify({"success": True, "data": alert.to_dict()})
+        update_started_at = time.perf_counter()
+        alert = acknowledge_alert(alert_id, body)
+        insert_or_update_ms = (time.perf_counter() - update_started_at) * 1000
+        serialize_started_at = time.perf_counter()
+        alert_payload = fetch_alert_payload_by_id(alert.id, company_id=alert.company_id) or {"id": alert.id, "status": alert.status}
+        serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+        if current_app.config.get("ANDON_PERF_LOGS"):
+            current_app.logger.debug(
+                "PERF alert_acknowledge auth_ms=%.1f payload_ms=%.1f insert_or_update_ms=%.1f serialize_ms=%.1f total_ms=%.1f alert_id=%s",
+                auth_ms,
+                payload_ms,
+                insert_or_update_ms,
+                serialize_ms,
+                (time.perf_counter() - started_at) * 1000,
+                alert.id,
+            )
+        return jsonify({"success": True, "data": alert_payload})
     except AlertServiceError as exc:
         return _error(str(exc), 400)
 
@@ -491,123 +567,35 @@ def api_pager_active_alerts():
         return jsonify({"success": True, "data": cached})
 
     stale_cached = get_cached(stale_cache_key)
-    query_started_at = time.perf_counter()
+    fetch_metrics = {}
     try:
-        if db.engine.dialect.name == "postgresql":
-            raw_timeout_ms = current_app.config.get("PAGER_ACTIVE_ALERTS_QUERY_TIMEOUT_MS", 2000)
-            try:
-                timeout_ms = int(raw_timeout_ms)
-            except (TypeError, ValueError):
-                timeout_ms = 0
-            if timeout_ms > 0:
-                timeout_ms = max(1, min(timeout_ms, 60000))
-                db.session.execute(
-                    text("SELECT set_config('statement_timeout', :timeout_value, true)"),
-                    {"timeout_value": f"{timeout_ms}ms"},
-                )
-        alerts = (
-            AndonAlert.query.options(
-                load_only(
-                    AndonAlert.id,
-                    AndonAlert.company_id,
-                    AndonAlert.alert_number,
-                    AndonAlert.machine_id,
-                    AndonAlert.department_id,
-                    AndonAlert.issue_category_id,
-                    AndonAlert.issue_problem_id,
-                    AndonAlert.status,
-                    AndonAlert.priority,
-                    AndonAlert.created_at,
-                    AndonAlert.acknowledged_at,
-                    AndonAlert.acknowledged_seconds,
-                    AndonAlert.note,
-                ),
-                joinedload(AndonAlert.machine).load_only(Machine.id, Machine.name, Machine.machine_code),
-                joinedload(AndonAlert.department).load_only(Department.id, Department.name),
-                joinedload(AndonAlert.issue_category).load_only(IssueCategory.id, IssueCategory.name),
-                joinedload(AndonAlert.issue_problem).load_only(IssueProblem.id, IssueProblem.name),
-                noload(AndonAlert.company),
-                noload(AndonAlert.events),
-                noload(AndonAlert.escalations),
-            )
-            .filter(
-                AndonAlert.company_id == pager.company_id,
-                AndonAlert.department_id == pager.department_id,
-                AndonAlert.status.in_([ALERT_STATUS_OPEN, ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED]),
-            )
-            .order_by(AndonAlert.priority.desc(), AndonAlert.created_at.asc())
-            .all()
+        payload = fetch_active_alert_payloads(
+            company_id=pager.company_id,
+            status="active",
+            department_ids=[pager.department_id],
+            pager_minimal=True,
+            use_cache=False,
+            metrics=fetch_metrics,
         )
     except OperationalError:
         db.session.rollback()
         if stale_cached is not None:
             if current_app.config.get("ANDON_PERF_LOGS"):
                 current_app.logger.debug(
-                    "PERF pager_active_alerts auth_ms=%.1f cache=stale_fallback query_ms=%.1f serialize_ms=0.0 count=%s",
+                    "PERF pager_active_alerts auth_ms=%.1f cache=stale_fallback query_ms=0.0 serialize_ms=0.0 count=%s",
                     auth_ms,
-                    (time.perf_counter() - query_started_at) * 1000,
                     len(stale_cached) if isinstance(stale_cached, list) else -1,
                 )
             return jsonify({"success": True, "data": stale_cached})
-        alerts = []
-    query_ms = (time.perf_counter() - query_started_at) * 1000
-    status_labels = {
-        ALERT_STATUS_OPEN: "Open",
-        ALERT_STATUS_ACKNOWLEDGED: "Acknowledged",
-        ALERT_STATUS_ARRIVED: "Working",
-        ALERT_STATUS_RESOLVED: "Resolved",
-        ALERT_STATUS_CANCELLED: "Cancelled",
-    }
-
-    serialize_started_at = time.perf_counter()
-    payload = [
-        {
-            "id": alert.id,
-            "alert_number": alert.alert_number,
-            "department": {
-                "id": alert.department.id if alert.department else alert.department_id,
-                "name": alert.department.name if alert.department else None,
-            },
-            "machine": {
-                "id": alert.machine.id if alert.machine else alert.machine_id,
-                "name": alert.machine.name if alert.machine else None,
-                "machine_code": alert.machine.machine_code if alert.machine else None,
-            },
-            "issue_category": {
-                "id": alert.issue_category.id if alert.issue_category else alert.issue_category_id,
-                "name": alert.issue_category.name if alert.issue_category else None,
-            },
-            "issue_problem": {
-                "id": alert.issue_problem.id if alert.issue_problem else alert.issue_problem_id,
-                "name": alert.issue_problem.name if alert.issue_problem else None,
-            },
-            "status": alert.status,
-            "status_label": status_labels.get(alert.status, alert.status.title() if alert.status else None),
-            "action_available": (
-                "acknowledge"
-                if alert.status == ALERT_STATUS_OPEN
-                else "resolve"
-                if alert.status in {ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED}
-                else None
-            ),
-            "priority": alert.priority,
-            "created_at": alert.created_at.isoformat() if alert.created_at else None,
-            "acknowledged_at": alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
-            "elapsed_seconds": alert.elapsed_seconds,
-            "acknowledged_seconds": alert.acknowledged_seconds,
-            "note": alert.note,
-        }
-        for alert in alerts
-    ]
-    serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+        payload = []
     set_cached(cache_key, payload, ttl_seconds=PAGER_ACTIVE_ALERTS_CACHE_TTL_SECONDS)
     set_cached(stale_cache_key, payload, ttl_seconds=PAGER_ACTIVE_ALERTS_STALE_TTL_SECONDS)
     if current_app.config.get("ANDON_PERF_LOGS"):
         current_app.logger.debug(
             "PERF pager_active_alerts auth_ms=%.1f cache=miss query_ms=%.1f serialize_ms=%.1f count=%s",
             auth_ms,
-            query_ms,
-            serialize_ms,
+            fetch_metrics.get("alert_base_query_ms", 0.0),
+            fetch_metrics.get("serialize_ms", 0.0),
             len(payload),
         )
     return jsonify({"success": True, "data": payload})
@@ -801,10 +789,31 @@ def api_arrive_alert(alert_id):
 
 @api_bp.post("/alerts/<int:alert_id>/resolve")
 def api_resolve_alert(alert_id):
+    started_at = time.perf_counter()
+    auth_started_at = time.perf_counter()
     _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
+    auth_ms = (time.perf_counter() - auth_started_at) * 1000
+    payload_started_at = time.perf_counter()
+    body = _payload()
+    payload_ms = (time.perf_counter() - payload_started_at) * 1000
     try:
-        alert = resolve_alert(alert_id, _payload())
-        return jsonify({"success": True, "data": alert.to_dict()})
+        update_started_at = time.perf_counter()
+        alert = resolve_alert(alert_id, body)
+        insert_or_update_ms = (time.perf_counter() - update_started_at) * 1000
+        serialize_started_at = time.perf_counter()
+        alert_payload = fetch_alert_payload_by_id(alert.id, company_id=alert.company_id) or {"id": alert.id, "status": alert.status}
+        serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+        if current_app.config.get("ANDON_PERF_LOGS"):
+            current_app.logger.debug(
+                "PERF alert_resolve auth_ms=%.1f payload_ms=%.1f insert_or_update_ms=%.1f serialize_ms=%.1f total_ms=%.1f alert_id=%s",
+                auth_ms,
+                payload_ms,
+                insert_or_update_ms,
+                serialize_ms,
+                (time.perf_counter() - started_at) * 1000,
+                alert.id,
+            )
+        return jsonify({"success": True, "data": alert_payload})
     except AlertServiceError as exc:
         return _error(str(exc), 400)
 

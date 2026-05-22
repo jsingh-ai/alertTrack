@@ -21,7 +21,6 @@ def room_name(company_id, room_type: str) -> str:
 def emit_alert_created(company_id, alert_id, machine_id=None, status=None):
     payload = _payload(company_id, alert_id=alert_id, machine_id=machine_id, action="created", status=status)
     _emit_to_rooms("alert_created", payload, BOARD_ROOMS)
-    _emit_to_rooms("board_refresh", payload, BOARD_ROOMS)
     emit_reports_invalidated(company_id, source="alert_created")
 
 
@@ -32,21 +31,18 @@ def emit_alert_updated(company_id, alert_id, machine_id=None, status=None, actio
     }.get(action, "alert_updated")
     payload = _payload(company_id, alert_id=alert_id, machine_id=machine_id, action=action, status=status)
     _emit_to_rooms(event_name, payload, BOARD_ROOMS)
-    _emit_to_rooms("board_refresh", payload, BOARD_ROOMS)
     emit_reports_invalidated(company_id, source=event_name)
 
 
 def emit_machine_updated(company_id, machine_id=None, action="updated"):
     payload = _payload(company_id, machine_id=machine_id, action=action)
     _emit_to_rooms("machine_updated", payload, BOARD_ROOMS)
-    _emit_to_rooms("board_refresh", payload, BOARD_ROOMS)
     emit_reports_invalidated(company_id, source="machine_updated")
 
 
 def emit_admin_metadata_updated(company_id, action="metadata_updated"):
     payload = _payload(company_id, action=action)
     _emit_to_rooms("admin_metadata_updated", payload, (BOARD_ROOM, OPERATOR_ROOM, REPORTS_ROOM))
-    _emit_to_rooms("board_refresh", payload, BOARD_ROOMS)
     emit_reports_invalidated(company_id, source="admin_metadata_updated")
 
 

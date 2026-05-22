@@ -6,6 +6,7 @@ from .alert_service import (
     list_active_alerts,
     resolve_alert,
 )
+from .active_alerts_service import fetch_active_alert_payloads
 from .reporting_service import build_report_summary
 from .seed_service import seed_default_data
 
@@ -16,6 +17,7 @@ __all__ = [
     "cancel_alert",
     "get_alert",
     "list_active_alerts",
+    "fetch_active_alert_payloads",
     "build_report_summary",
     "seed_default_data",
 ]

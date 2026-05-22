@@ -73,6 +73,7 @@ let departmentButtonsMarkupCacheKey = "";
 let departmentButtonsMarkupCacheValue = "";
 let problemOptionsMarkupCacheKey = "";
 let problemOptionsMarkupCacheValue = "";
+let localMutationRefreshLockUntil = 0;
 
 function markOperatorInteractionActive(durationMs = 1800) {
   operatorInteractionLockUntil = Date.now() + durationMs;
@@ -150,6 +151,7 @@ async function boot() {
   window.AndonRefreshBus?.onRefresh(scheduleOperatorRefresh);
   window.AndonRealtime?.onEvent((event) => {
     if (["alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
+      if (Date.now() < localMutationRefreshLockUntil) return;
       if (event.type === "admin_metadata_updated") {
         state.metadataLoaded = false;
         operatorMetadataLoadPromise = null;
@@ -579,6 +581,7 @@ async function createAlertFromModal() {
         targetMachine.active_alert = activeAlert;
       }
       await openActiveAlertModal(activeAlert, targetMachine);
+      localMutationRefreshLockUntil = Date.now() + 700;
       window.AndonRefreshBus?.notify();
       return;
     }
@@ -592,6 +595,7 @@ async function createAlertFromModal() {
       machine.active_alert = createdAlert;
     }
     closeMachinePanel();
+    localMutationRefreshLockUntil = Date.now() + 700;
     window.AndonRefreshBus?.notify();
   } catch (_error) {
     alert("Unable to create alert. Please try again.");
@@ -634,6 +638,7 @@ async function actOnActiveAlert() {
     return;
   }
   closeMachinePanel();
+  localMutationRefreshLockUntil = Date.now() + 700;
   window.AndonRefreshBus?.notify();
 }
 
