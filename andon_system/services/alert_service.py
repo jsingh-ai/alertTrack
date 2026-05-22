@@ -105,6 +105,65 @@ def get_alert(alert_id: int):
     return alert
 
 
+def _get_alert_for_mutation(alert_id: int):
+    company_id = get_current_company_id()
+    scope = get_scope_filters()
+    membership = get_current_membership()
+    role = membership.role if membership else None
+    machine_ids = scope.get("machine_ids") or []
+    department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+
+    query = AndonAlert.query.options(
+        load_only(
+            AndonAlert.id,
+            AndonAlert.company_id,
+            AndonAlert.machine_id,
+            AndonAlert.department_id,
+            AndonAlert.status,
+            AndonAlert.created_at,
+            AndonAlert.acknowledged_at,
+            AndonAlert.note,
+            AndonAlert.responder_user_id,
+            AndonAlert.responder_name_text,
+            AndonAlert.resolution_note,
+            AndonAlert.root_cause,
+            AndonAlert.corrective_action,
+        ),
+        noload("*"),
+    ).filter(AndonAlert.id == alert_id)
+    if company_id:
+        query = query.filter(AndonAlert.company_id == company_id)
+    if machine_ids:
+        query = query.filter(AndonAlert.machine_id.in_(machine_ids))
+    if department_ids and role != "Operator":
+        query = query.filter(AndonAlert.department_id.in_(department_ids))
+    if machine_group_names:
+        query = query.filter(AndonAlert.machine.has(Machine.machine_type.in_(machine_group_names)))
+    alert = query.one_or_none()
+    if not alert:
+        raise AlertServiceError("Alert not found")
+    return alert
+
+
+def _perf_log_alert_mutation(action: str, metrics: dict) -> None:
+    if not current_app.config.get("ANDON_PERF_LOGS"):
+        return
+    current_app.logger.debug(
+        "PERF alert_mutation action=%s alert_lookup_ms=%.1f user_lookup_ms=%.1f update_fields_ms=%.1f "
+        "event_insert_ms=%.1f db_commit_ms=%.1f cache_invalidate_ms=%.1f socket_emit_ms=%.1f total_ms=%.1f",
+        action,
+        metrics.get("alert_lookup_ms", 0.0),
+        metrics.get("user_lookup_ms", 0.0),
+        metrics.get("update_fields_ms", 0.0),
+        metrics.get("event_insert_ms", 0.0),
+        metrics.get("db_commit_ms", 0.0),
+        metrics.get("cache_invalidate_ms", 0.0),
+        metrics.get("socket_emit_ms", 0.0),
+        metrics.get("total_ms", 0.0),
+    )
+
+
 def _perf_log_create_alert(metrics: dict) -> None:
     if not current_app.config.get("ANDON_PERF_LOGS"):
         return
@@ -514,12 +573,19 @@ def create_alert(payload: dict, metrics: dict | None = None):
     return SimpleNamespace(id=created_alert_id, company_id=created_company_id, machine_id=created_machine_id, status=created_status)
 
 
-def acknowledge_alert(alert_id: int, payload: dict):
-    alert = get_alert(alert_id)
+def acknowledge_alert(alert_id: int, payload: dict, metrics: dict | None = None):
+    perf = metrics if isinstance(metrics, dict) else {}
+    started_at = time.perf_counter()
+    lookup_started_at = time.perf_counter()
+    alert = _get_alert_for_mutation(alert_id)
+    perf["alert_lookup_ms"] = (time.perf_counter() - lookup_started_at) * 1000
     if alert.status != ALERT_STATUS_OPEN:
         raise AlertServiceError("Alert can only be acknowledged from OPEN state")
 
+    responder_started_at = time.perf_counter()
     responder = _resolve_user(payload.get("responder_user_id"))
+    perf["user_lookup_ms"] = (time.perf_counter() - responder_started_at) * 1000
+    update_started_at = time.perf_counter()
     now = utc_now()
     if alert.status == ALERT_STATUS_OPEN:
         alert.acknowledged_at = now
@@ -532,7 +598,9 @@ def acknowledge_alert(alert_id: int, payload: dict):
         alert.responder_name_text = responder.display_name
     alert.responder_name_text = alert.responder_name_text or payload.get("responder_name_text")
     _replace_alert_note(alert, payload.get("note"))
+    perf["update_fields_ms"] = (time.perf_counter() - update_started_at) * 1000
 
+    event_started_at = time.perf_counter()
     _add_event(
         alert,
         EVENT_ACKNOWLEDGED,
@@ -541,9 +609,18 @@ def acknowledge_alert(alert_id: int, payload: dict):
         message=payload.get("message") or "Alert acknowledged",
         metadata={"responder_name_text": alert.responder_name_text},
     )
+    perf["event_insert_ms"] = (time.perf_counter() - event_started_at) * 1000
+    commit_started_at = time.perf_counter()
     db.session.commit()
+    perf["db_commit_ms"] = (time.perf_counter() - commit_started_at) * 1000
+    cache_started_at = time.perf_counter()
     _invalidate_live_caches(alert.company_id)
+    perf["cache_invalidate_ms"] = (time.perf_counter() - cache_started_at) * 1000
+    emit_started_at = time.perf_counter()
     emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="acknowledged")
+    perf["socket_emit_ms"] = (time.perf_counter() - emit_started_at) * 1000
+    perf["total_ms"] = (time.perf_counter() - started_at) * 1000
+    _perf_log_alert_mutation("acknowledge", perf)
     return alert
 
 
@@ -578,14 +655,21 @@ def mark_arrived(alert_id: int, payload: dict):
     return alert
 
 
-def resolve_alert(alert_id: int, payload: dict):
-    alert = get_alert(alert_id)
+def resolve_alert(alert_id: int, payload: dict, metrics: dict | None = None):
+    perf = metrics if isinstance(metrics, dict) else {}
+    started_at = time.perf_counter()
+    lookup_started_at = time.perf_counter()
+    alert = _get_alert_for_mutation(alert_id)
+    perf["alert_lookup_ms"] = (time.perf_counter() - lookup_started_at) * 1000
     if alert.status in [ALERT_STATUS_RESOLVED, ALERT_STATUS_CANCELLED]:
         raise AlertServiceError("Alert is already closed")
     if alert.status not in [ALERT_STATUS_ARRIVED, ALERT_STATUS_ACKNOWLEDGED]:
         raise AlertServiceError("Alert must be acknowledged before resolving")
 
+    responder_started_at = time.perf_counter()
     responder = _resolve_user(payload.get("responder_user_id"))
+    perf["user_lookup_ms"] = (time.perf_counter() - responder_started_at) * 1000
+    update_started_at = time.perf_counter()
     now = utc_now()
     alert.resolved_at = now
     if alert.acknowledged_at:
@@ -600,7 +684,9 @@ def resolve_alert(alert_id: int, payload: dict):
     alert.root_cause = payload.get("root_cause")
     alert.corrective_action = payload.get("corrective_action")
     _append_alert_note(alert, payload.get("note"))
+    perf["update_fields_ms"] = (time.perf_counter() - update_started_at) * 1000
 
+    event_started_at = time.perf_counter()
     _add_event(
         alert,
         EVENT_RESOLVED,
@@ -613,17 +699,33 @@ def resolve_alert(alert_id: int, payload: dict):
             "corrective_action": alert.corrective_action,
         },
     )
+    perf["event_insert_ms"] = (time.perf_counter() - event_started_at) * 1000
+    commit_started_at = time.perf_counter()
     db.session.commit()
+    perf["db_commit_ms"] = (time.perf_counter() - commit_started_at) * 1000
+    cache_started_at = time.perf_counter()
     _invalidate_live_caches(alert.company_id)
+    perf["cache_invalidate_ms"] = (time.perf_counter() - cache_started_at) * 1000
+    emit_started_at = time.perf_counter()
     emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="resolved")
+    perf["socket_emit_ms"] = (time.perf_counter() - emit_started_at) * 1000
+    perf["total_ms"] = (time.perf_counter() - started_at) * 1000
+    _perf_log_alert_mutation("resolve", perf)
     return alert
 
 
-def cancel_alert(alert_id: int, payload: dict):
-    alert = get_alert(alert_id)
+def cancel_alert(alert_id: int, payload: dict, metrics: dict | None = None):
+    perf = metrics if isinstance(metrics, dict) else {}
+    started_at = time.perf_counter()
+    lookup_started_at = time.perf_counter()
+    alert = _get_alert_for_mutation(alert_id)
+    perf["alert_lookup_ms"] = (time.perf_counter() - lookup_started_at) * 1000
     if alert.status not in [ALERT_STATUS_OPEN, ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED]:
         raise AlertServiceError("Alert can only be cancelled before arrival or resolution")
+    responder_started_at = time.perf_counter()
     responder = _resolve_user(payload.get("responder_user_id"))
+    perf["user_lookup_ms"] = (time.perf_counter() - responder_started_at) * 1000
+    update_started_at = time.perf_counter()
     now = utc_now()
     alert.cancelled_at = now
     if alert.acknowledged_at:
@@ -635,7 +737,9 @@ def cancel_alert(alert_id: int, payload: dict):
     if payload.get("responder_name_text"):
         alert.responder_name_text = payload.get("responder_name_text")
     _append_alert_note(alert, payload.get("note"))
+    perf["update_fields_ms"] = (time.perf_counter() - update_started_at) * 1000
 
+    event_started_at = time.perf_counter()
     _add_event(
         alert,
         EVENT_CANCELLED,
@@ -644,9 +748,18 @@ def cancel_alert(alert_id: int, payload: dict):
         message=payload.get("message") or "Alert cancelled",
         metadata={"reason": payload.get("reason")},
     )
+    perf["event_insert_ms"] = (time.perf_counter() - event_started_at) * 1000
+    commit_started_at = time.perf_counter()
     db.session.commit()
+    perf["db_commit_ms"] = (time.perf_counter() - commit_started_at) * 1000
+    cache_started_at = time.perf_counter()
     _invalidate_live_caches(alert.company_id)
+    perf["cache_invalidate_ms"] = (time.perf_counter() - cache_started_at) * 1000
+    emit_started_at = time.perf_counter()
     emit_alert_updated(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status, action="cancelled")
+    perf["socket_emit_ms"] = (time.perf_counter() - emit_started_at) * 1000
+    perf["total_ms"] = (time.perf_counter() - started_at) * 1000
+    _perf_log_alert_mutation("cancel", perf)
     return alert
 
 

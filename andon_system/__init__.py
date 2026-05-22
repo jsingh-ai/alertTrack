@@ -1,6 +1,7 @@
 import os
 import shlex
 import time
+import logging
 
 from flask import Flask, current_app, flash, g, has_request_context, redirect, request, session, url_for
 from flask import jsonify
@@ -30,6 +31,39 @@ from .services.cache_service import cache_runtime_status
 
 WORKSPACE_PROMPT_SESSION_KEY = "andon_workspace_prompt"
 _SA_PERF_LISTENERS_REGISTERED = False
+
+
+class _PerfFocusFilter(logging.Filter):
+    def __init__(self, patterns: list[str]):
+        super().__init__()
+        self._patterns = [str(pattern) for pattern in patterns if str(pattern).strip()]
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno != logging.DEBUG:
+            return True
+        message = record.getMessage()
+        return any(pattern in message for pattern in self._patterns)
+
+
+def _configure_perf_focus_logging(app: Flask) -> None:
+    focus_mode = str(app.config.get("ANDON_PERF_FOCUS") or "").strip().lower()
+    if focus_mode != "alert_mutations":
+        return
+    patterns = [
+        "PERF alert_acknowledge",
+        "PERF alert_resolve",
+        "PERF alert_cancel",
+        "PERF alert_mutation action=acknowledge",
+        "PERF alert_mutation action=resolve",
+        "PERF alert_mutation action=cancel",
+        "method=POST path=/api/andon/alerts/",
+    ]
+    extra_patterns = app.config.get("ANDON_PERF_FOCUS_PATTERNS") or []
+    patterns.extend([str(item) for item in extra_patterns if str(item).strip()])
+    perf_filter = _PerfFocusFilter(patterns)
+    for handler in app.logger.handlers:
+        handler.addFilter(perf_filter)
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 
 def _register_sqlalchemy_perf_listeners() -> None:
@@ -360,6 +394,7 @@ def create_app(config_name: str | None = None) -> Flask:
 
     config_key = config_name or os.getenv("FLASK_CONFIG") or os.getenv("APP_ENV") or "default"
     app.config.from_object(config_by_name.get(config_key, config_by_name["default"]))
+    _configure_perf_focus_logging(app)
     if app.config.get("ANDON_PAGER_API_ONLY"):
         app.config["SOCKETIO_ENABLED"] = False
     _maybe_apply_proxy_fix(app)

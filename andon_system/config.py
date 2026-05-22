@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import re
 from dotenv import load_dotenv
 
 
@@ -15,6 +16,13 @@ def _env_int(name: str, default: int = 0) -> int:
     raw_value = os.getenv(name)
     if raw_value is None:
         return default
+
+
+def _env_csv(name: str) -> list[str]:
+    raw_value = os.getenv(name, "")
+    if not raw_value:
+        return []
+    return [item.strip() for item in re.split(r"[,\n]", raw_value) if item.strip()]
     try:
         return max(0, int(raw_value))
     except (TypeError, ValueError):
@@ -63,6 +71,8 @@ class BaseConfig:
     SESSION_COOKIE_SECURE = _env_flag("SESSION_COOKIE_SECURE")
     SESSION_COOKIE_DOMAIN = os.getenv("SESSION_COOKIE_DOMAIN") or None
     ANDON_PERF_LOGS = _env_flag("ANDON_PERF_LOGS")
+    ANDON_PERF_FOCUS = (os.getenv("ANDON_PERF_FOCUS") or "").strip().lower()
+    ANDON_PERF_FOCUS_PATTERNS = _env_csv("ANDON_PERF_FOCUS_PATTERNS")
     ANDON_PAGER_API_ONLY = _env_flag("ANDON_PAGER_API_ONLY")
     PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME") or ("https" if SESSION_COOKIE_SECURE else "http")
     PROXY_FIX_X_FOR = _env_int("PROXY_FIX_X_FOR", 0)

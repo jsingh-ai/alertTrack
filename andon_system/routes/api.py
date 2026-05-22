@@ -524,18 +524,25 @@ def api_acknowledge_alert(alert_id):
     payload_ms = (time.perf_counter() - payload_started_at) * 1000
     try:
         update_started_at = time.perf_counter()
-        alert = acknowledge_alert(alert_id, body)
+        service_metrics = {}
+        alert = acknowledge_alert(alert_id, body, metrics=service_metrics)
         insert_or_update_ms = (time.perf_counter() - update_started_at) * 1000
         serialize_started_at = time.perf_counter()
         alert_payload = fetch_alert_payload_by_id(alert.id, company_id=alert.company_id) or {"id": alert.id, "status": alert.status}
         serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
         if current_app.config.get("ANDON_PERF_LOGS"):
             current_app.logger.debug(
-                "PERF alert_acknowledge auth_ms=%.1f payload_ms=%.1f insert_or_update_ms=%.1f serialize_ms=%.1f total_ms=%.1f alert_id=%s",
+                "PERF alert_acknowledge auth_ms=%.1f payload_ms=%.1f insert_or_update_ms=%.1f serialize_ms=%.1f "
+                "alert_lookup_ms=%.1f user_lookup_ms=%.1f db_commit_ms=%.1f cache_invalidate_ms=%.1f socket_emit_ms=%.1f total_ms=%.1f alert_id=%s",
                 auth_ms,
                 payload_ms,
                 insert_or_update_ms,
                 serialize_ms,
+                service_metrics.get("alert_lookup_ms", 0.0),
+                service_metrics.get("user_lookup_ms", 0.0),
+                service_metrics.get("db_commit_ms", 0.0),
+                service_metrics.get("cache_invalidate_ms", 0.0),
+                service_metrics.get("socket_emit_ms", 0.0),
                 (time.perf_counter() - started_at) * 1000,
                 alert.id,
             )
@@ -800,18 +807,25 @@ def api_resolve_alert(alert_id):
     payload_ms = (time.perf_counter() - payload_started_at) * 1000
     try:
         update_started_at = time.perf_counter()
-        alert = resolve_alert(alert_id, body)
+        service_metrics = {}
+        alert = resolve_alert(alert_id, body, metrics=service_metrics)
         insert_or_update_ms = (time.perf_counter() - update_started_at) * 1000
         serialize_started_at = time.perf_counter()
         alert_payload = fetch_alert_payload_by_id(alert.id, company_id=alert.company_id) or {"id": alert.id, "status": alert.status}
         serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
         if current_app.config.get("ANDON_PERF_LOGS"):
             current_app.logger.debug(
-                "PERF alert_resolve auth_ms=%.1f payload_ms=%.1f insert_or_update_ms=%.1f serialize_ms=%.1f total_ms=%.1f alert_id=%s",
+                "PERF alert_resolve auth_ms=%.1f payload_ms=%.1f insert_or_update_ms=%.1f serialize_ms=%.1f "
+                "alert_lookup_ms=%.1f user_lookup_ms=%.1f db_commit_ms=%.1f cache_invalidate_ms=%.1f socket_emit_ms=%.1f total_ms=%.1f alert_id=%s",
                 auth_ms,
                 payload_ms,
                 insert_or_update_ms,
                 serialize_ms,
+                service_metrics.get("alert_lookup_ms", 0.0),
+                service_metrics.get("user_lookup_ms", 0.0),
+                service_metrics.get("db_commit_ms", 0.0),
+                service_metrics.get("cache_invalidate_ms", 0.0),
+                service_metrics.get("socket_emit_ms", 0.0),
                 (time.perf_counter() - started_at) * 1000,
                 alert.id,
             )
@@ -822,10 +836,38 @@ def api_resolve_alert(alert_id):
 
 @api_bp.post("/alerts/<int:alert_id>/cancel")
 def api_cancel_alert(alert_id):
+    started_at = time.perf_counter()
+    auth_started_at = time.perf_counter()
     _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
+    auth_ms = (time.perf_counter() - auth_started_at) * 1000
+    payload_started_at = time.perf_counter()
+    body = _payload()
+    payload_ms = (time.perf_counter() - payload_started_at) * 1000
     try:
-        alert = cancel_alert(alert_id, _payload())
-        return jsonify({"success": True, "data": alert.to_dict()})
+        update_started_at = time.perf_counter()
+        service_metrics = {}
+        alert = cancel_alert(alert_id, body, metrics=service_metrics)
+        insert_or_update_ms = (time.perf_counter() - update_started_at) * 1000
+        serialize_started_at = time.perf_counter()
+        alert_payload = fetch_alert_payload_by_id(alert.id, company_id=alert.company_id) or {"id": alert.id, "status": alert.status}
+        serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+        if current_app.config.get("ANDON_PERF_LOGS"):
+            current_app.logger.debug(
+                "PERF alert_cancel auth_ms=%.1f payload_ms=%.1f insert_or_update_ms=%.1f serialize_ms=%.1f "
+                "alert_lookup_ms=%.1f user_lookup_ms=%.1f db_commit_ms=%.1f cache_invalidate_ms=%.1f socket_emit_ms=%.1f total_ms=%.1f alert_id=%s",
+                auth_ms,
+                payload_ms,
+                insert_or_update_ms,
+                serialize_ms,
+                service_metrics.get("alert_lookup_ms", 0.0),
+                service_metrics.get("user_lookup_ms", 0.0),
+                service_metrics.get("db_commit_ms", 0.0),
+                service_metrics.get("cache_invalidate_ms", 0.0),
+                service_metrics.get("socket_emit_ms", 0.0),
+                (time.perf_counter() - started_at) * 1000,
+                alert.id,
+            )
+        return jsonify({"success": True, "data": alert_payload})
     except AlertServiceError as exc:
         return _error(str(exc), 400)
 
