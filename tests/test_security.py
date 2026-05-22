@@ -314,6 +314,68 @@ def test_json_api_accepts_valid_csrf_token(client, app):
     assert payload["data"]["machine"]["id"] == fixtures["machine_id"]
 
 
+def test_create_alert_does_not_fetch_full_active_alert_list(client, app, monkeypatch):
+    fixtures = _create_alert_api_fixtures(app)
+    csrf_token = _seed_csrf(client)
+    with client.session_transaction() as session:
+        session["andon_company_slug"] = fixtures["company_slug"]
+
+    from andon_system.services import alert_service as alert_service_module
+
+    def fail_fetch_active_alerts(*_args, **_kwargs):
+        raise AssertionError("create_alert must not fetch full active-alert list")
+
+    monkeypatch.setattr(alert_service_module, "fetch_active_alert_payloads", fail_fetch_active_alerts)
+
+    response = client.post(
+        "/api/andon/alerts",
+        json={
+            "machine_id": fixtures["machine_id"],
+            "department_id": fixtures["department_id"],
+            "issue_problem_id": fixtures["problem_id"],
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert "events" not in payload["data"]
+
+
+def test_create_alert_duplicate_check_is_machine_company_scoped(client, app, monkeypatch):
+    fixtures = _create_alert_api_fixtures(app)
+    csrf_token = _seed_csrf(client)
+    with client.session_transaction() as session:
+        session["andon_company_slug"] = fixtures["company_slug"]
+
+    from andon_system.services import alert_service as alert_service_module
+
+    captured = {}
+    original = alert_service_module._find_active_alert_id_for_machine
+
+    def wrapped(machine_id, company_id):
+        captured["machine_id"] = machine_id
+        captured["company_id"] = company_id
+        return original(machine_id, company_id)
+
+    monkeypatch.setattr(alert_service_module, "_find_active_alert_id_for_machine", wrapped)
+
+    response = client.post(
+        "/api/andon/alerts",
+        json={
+            "machine_id": fixtures["machine_id"],
+            "department_id": fixtures["department_id"],
+            "issue_problem_id": fixtures["problem_id"],
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert response.status_code == 201
+    assert captured["machine_id"] == fixtures["machine_id"]
+    assert captured["company_id"] == fixtures["company_id"]
+
+
 def test_database_unique_index_rejects_duplicate_active_alerts(app):
     fixtures = _create_alert_api_fixtures(app)
     with app.app_context():

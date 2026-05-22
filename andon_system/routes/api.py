@@ -423,12 +423,14 @@ def api_create_alert():
     body = _payload()
     payload_ms = (time.perf_counter() - payload_started_at) * 1000
     try:
+        service_metrics = {}
         write_started_at = time.perf_counter()
-        alert = create_alert(body)
+        alert = create_alert(body, metrics=service_metrics)
         insert_or_update_ms = (time.perf_counter() - write_started_at) * 1000
         serialize_started_at = time.perf_counter()
         alert_payload = fetch_alert_payload_by_id(alert.id, company_id=alert.company_id) or {"id": alert.id, "status": alert.status}
         serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+        service_metrics["payload_fetch_ms"] = serialize_ms
         if current_app.config.get("ANDON_PERF_LOGS"):
             current_app.logger.debug(
                 "PERF alert_create auth_ms=%.1f payload_ms=%.1f insert_or_update_ms=%.1f serialize_ms=%.1f total_ms=%.1f alert_id=%s",

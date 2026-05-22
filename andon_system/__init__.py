@@ -395,6 +395,12 @@ def _ensure_postgres_performance_indexes() -> None:
     )
     db.session.execute(
         text(
+            "CREATE INDEX IF NOT EXISTS ix_andon_alerts_company_machine_status "
+            "ON andon_alerts (company_id, machine_id, status)"
+        )
+    )
+    db.session.execute(
+        text(
             "CREATE INDEX IF NOT EXISTS ix_andon_alerts_machine_status "
             "ON andon_alerts (machine_id, status)"
         )

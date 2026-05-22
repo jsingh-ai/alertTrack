@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import time
 from uuid import uuid4
 
+from flask import current_app
 from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy import select
 from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..extensions import db
@@ -32,6 +35,7 @@ from ..models.department import Department
 from ..security import get_current_membership, get_scope_filters
 from .cache_service import invalidate_cache
 from .active_alerts_service import fetch_active_alert_payloads
+from .active_alerts_service import fetch_alert_payload_by_id
 from .realtime_service import emit_alert_created, emit_alert_updated
 
 
@@ -100,12 +104,54 @@ def get_alert(alert_id: int):
     return alert
 
 
-def create_alert(payload: dict):
+def _perf_log_create_alert(metrics: dict) -> None:
+    if not current_app.config.get("ANDON_PERF_LOGS"):
+        return
+    current_app.logger.debug(
+        "PERF alert_create_service machine_lookup_ms=%.1f permission_scope_ms=%.1f issue_category_lookup_ms=%.1f "
+        "issue_problem_lookup_ms=%.1f duplicate_active_check_ms=%.1f alert_object_build_ms=%.1f db_add_ms=%.1f "
+        "db_flush_ms=%.1f note_insert_ms=%.1f event_insert_ms=%.1f db_commit_ms=%.1f cache_invalidate_ms=%.1f "
+        "payload_fetch_ms=%.1f socket_emit_ms=%.1f escalation_check_ms=%.1f email_send_ms=%.1f notification_ms=%.1f total_ms=%.1f",
+        metrics.get("machine_lookup_ms", 0.0),
+        metrics.get("permission_scope_ms", 0.0),
+        metrics.get("issue_category_lookup_ms", 0.0),
+        metrics.get("issue_problem_lookup_ms", 0.0),
+        metrics.get("duplicate_active_check_ms", 0.0),
+        metrics.get("alert_object_build_ms", 0.0),
+        metrics.get("db_add_ms", 0.0),
+        metrics.get("db_flush_ms", 0.0),
+        metrics.get("note_insert_ms", 0.0),
+        metrics.get("event_insert_ms", 0.0),
+        metrics.get("db_commit_ms", 0.0),
+        metrics.get("cache_invalidate_ms", 0.0),
+        metrics.get("payload_fetch_ms", 0.0),
+        metrics.get("socket_emit_ms", 0.0),
+        metrics.get("escalation_check_ms", 0.0),
+        metrics.get("email_send_ms", 0.0),
+        metrics.get("notification_ms", 0.0),
+        metrics.get("total_ms", 0.0),
+    )
+
+
+def _find_active_alert_id_for_machine(machine_id: int, company_id: int | None) -> int | None:
+    stmt = select(AndonAlert.id).where(
+        AndonAlert.machine_id == machine_id,
+        AndonAlert.status.in_([ALERT_STATUS_OPEN, ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED]),
+    )
+    if company_id:
+        stmt = stmt.where(AndonAlert.company_id == company_id)
+    return db.session.execute(stmt.limit(1)).scalar_one_or_none()
+
+
+def create_alert(payload: dict, metrics: dict | None = None):
+    started_at = time.perf_counter()
+    perf = metrics if isinstance(metrics, dict) else {}
     company_id = get_current_company_id()
     scope = get_scope_filters()
     machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
+    machine_lookup_started_at = time.perf_counter()
     machine_query = Machine.query.options(
         load_only(
             Machine.id,
@@ -118,7 +164,6 @@ def create_alert(payload: dict):
     ).filter(Machine.id == payload.get("machine_id"))
     if company_id:
         machine_query = machine_query.filter(Machine.company_id == company_id)
-    machine_query = machine_query.with_for_update(nowait=True)
     try:
         machine = machine_query.one_or_none()
     except OperationalError as exc:
@@ -128,23 +173,42 @@ def create_alert(payload: dict):
             "Machine is busy with another in-progress call. Please try again.",
             status_code=409,
         ) from exc
+    perf["machine_lookup_ms"] = (time.perf_counter() - machine_lookup_started_at) * 1000
     department_id = payload.get("department_id")
+    issue_category_lookup_started_at = time.perf_counter()
     issue_category = None
     if payload.get("issue_category_id"):
         category_query = IssueCategory.query.options(
-            joinedload(IssueCategory.department).load_only(Department.id, Department.name),
-            noload(IssueCategory.alerts),
+            load_only(
+                IssueCategory.id,
+                IssueCategory.company_id,
+                IssueCategory.department_id,
+                IssueCategory.name,
+                IssueCategory.priority_default,
+                IssueCategory.is_active,
+            ),
+            noload("*"),
         ).filter(IssueCategory.id == payload.get("issue_category_id"))
         if company_id:
             category_query = category_query.filter(IssueCategory.company_id == company_id)
         issue_category = category_query.one_or_none()
+    perf["issue_category_lookup_ms"] = (time.perf_counter() - issue_category_lookup_started_at) * 1000
+    issue_problem_lookup_started_at = time.perf_counter()
     problem_query = IssueProblem.query.options(
-        joinedload(IssueProblem.category).load_only(IssueCategory.id, IssueCategory.name, IssueCategory.department_id),
-        noload(IssueProblem.alerts),
+        load_only(
+            IssueProblem.id,
+            IssueProblem.company_id,
+            IssueProblem.category_id,
+            IssueProblem.name,
+            IssueProblem.severity_default,
+            IssueProblem.is_active,
+        ),
+        noload("*"),
     ).filter(IssueProblem.id == payload.get("issue_problem_id"))
     if company_id:
         problem_query = problem_query.filter(IssueProblem.company_id == company_id)
     issue_problem = problem_query.one_or_none()
+    perf["issue_problem_lookup_ms"] = (time.perf_counter() - issue_problem_lookup_started_at) * 1000
     operator_user = None
     if payload.get("operator_user_id"):
         operator_query = User.query.options(
@@ -155,6 +219,7 @@ def create_alert(payload: dict):
             operator_query = operator_query.filter(User.company_id == company_id)
         operator_user = operator_query.one_or_none()
 
+    permission_scope_started_at = time.perf_counter()
     if not machine:
         raise AlertServiceError("Valid machine_id is required")
     if machine_ids and machine.id not in set(machine_ids):
@@ -165,14 +230,18 @@ def create_alert(payload: dict):
         raise AlertServiceError("Machine is outside your assigned department scope", status_code=403)
     if machine_group_names and machine.machine_type not in set(machine_group_names):
         raise AlertServiceError("Machine is outside your assigned machine group scope", status_code=403)
+    perf["permission_scope_ms"] = (time.perf_counter() - permission_scope_started_at) * 1000
     # Keep the friendly conflict path even though the database also enforces
     # one active alert per machine now.
-    existing_alert = _get_active_alert_for_machine(machine.id, company_id)
-    if existing_alert:
+    duplicate_check_started_at = time.perf_counter()
+    existing_alert_id = _find_active_alert_id_for_machine(machine.id, company_id)
+    perf["duplicate_active_check_ms"] = (time.perf_counter() - duplicate_check_started_at) * 1000
+    if existing_alert_id:
+        existing_payload = fetch_alert_payload_by_id(existing_alert_id, company_id=company_id)
         raise AlertServiceError(
             "An active alert already exists for this machine",
             status_code=409,
-            data={"existing_alert": existing_alert.to_dict()},
+            data={"existing_alert": existing_payload or {"id": existing_alert_id}},
         )
     if not department_id and not issue_category:
         raise AlertServiceError("department_id is required")
@@ -207,6 +276,7 @@ def create_alert(payload: dict):
 
     department_id = issue_category.department_id
 
+    alert_build_started_at = time.perf_counter()
     resolved_company_id = company_id or machine.company_id
     alert_number = f"AL-{utc_now():%Y%m%d%H%M%S}-{uuid4().hex[:6].upper()}"
     alert = AndonAlert(
@@ -222,10 +292,16 @@ def create_alert(payload: dict):
         operator_name_text=payload.get("operator_name_text"),
         note=payload.get("note"),
     )
+    perf["alert_object_build_ms"] = (time.perf_counter() - alert_build_started_at) * 1000
     try:
+        add_started_at = time.perf_counter()
         db.session.add(alert)
+        perf["db_add_ms"] = (time.perf_counter() - add_started_at) * 1000
+        flush_started_at = time.perf_counter()
         db.session.flush()
+        perf["db_flush_ms"] = (time.perf_counter() - flush_started_at) * 1000
 
+        event_started_at = time.perf_counter()
         _add_event(
             alert,
             EVENT_CREATED,
@@ -234,15 +310,20 @@ def create_alert(payload: dict):
             message="Alert created",
             metadata={"note": payload.get("note")},
         )
+        perf["event_insert_ms"] = (time.perf_counter() - event_started_at) * 1000
+        perf["note_insert_ms"] = 0.0
+        commit_started_at = time.perf_counter()
         db.session.commit()
+        perf["db_commit_ms"] = (time.perf_counter() - commit_started_at) * 1000
     except IntegrityError as exc:
         db.session.rollback()
-        existing_alert = _get_active_alert_for_machine(machine.id, resolved_company_id)
-        if existing_alert:
+        existing_alert_id = _find_active_alert_id_for_machine(machine.id, resolved_company_id)
+        if existing_alert_id:
+            existing_payload = fetch_alert_payload_by_id(existing_alert_id, company_id=resolved_company_id)
             raise AlertServiceError(
                 "An active alert already exists for this machine",
                 status_code=409,
-                data={"existing_alert": existing_alert.to_dict()},
+                data={"existing_alert": existing_payload or {"id": existing_alert_id}},
             ) from exc
         existing_any = _get_latest_alert_for_machine(machine.id, resolved_company_id)
         if existing_any:
@@ -252,8 +333,18 @@ def create_alert(payload: dict):
                 data={"existing_alert": existing_any.to_dict()},
             ) from exc
         raise AlertServiceError("Unable to create alert due to a database constraint", status_code=409) from exc
+    cache_started_at = time.perf_counter()
     _invalidate_live_caches(alert.company_id)
+    perf["cache_invalidate_ms"] = (time.perf_counter() - cache_started_at) * 1000
+    emit_started_at = time.perf_counter()
     emit_alert_created(alert.company_id, alert.id, machine_id=alert.machine_id, status=alert.status)
+    perf["socket_emit_ms"] = (time.perf_counter() - emit_started_at) * 1000
+    perf.setdefault("payload_fetch_ms", 0.0)
+    perf.setdefault("escalation_check_ms", 0.0)
+    perf.setdefault("email_send_ms", 0.0)
+    perf.setdefault("notification_ms", 0.0)
+    perf["total_ms"] = (time.perf_counter() - started_at) * 1000
+    _perf_log_create_alert(perf)
     return alert
 
 
@@ -472,14 +563,7 @@ def _invalidate_live_caches(company_id):
     # Alert lifecycle updates do not change operator metadata. Keep cache
     # invalidation scoped to live board/report/pager views to avoid expensive
     # metadata recompute on every call/ack/close.
-    invalidate_cache("board_state", company_id)
-    invalidate_cache("operator_snapshot", company_id)
-    invalidate_cache("pager_active_alerts", company_id)
-    invalidate_cache("active_alerts_list", company_id)
-    invalidate_cache("report_summary", company_id)
-    invalidate_cache("report_machine_details", company_id)
-    invalidate_cache("report_machine_stats", company_id)
-    invalidate_cache("report_problem_details", company_id)
+    invalidate_cache(company_id=company_id)
 
 
 def _get_active_alert_for_machine(machine_id, company_id):
