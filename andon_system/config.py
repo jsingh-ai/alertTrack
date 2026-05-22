@@ -71,6 +71,7 @@ class BaseConfig:
     SESSION_COOKIE_SECURE = _env_flag("SESSION_COOKIE_SECURE")
     SESSION_COOKIE_DOMAIN = os.getenv("SESSION_COOKIE_DOMAIN") or None
     ANDON_PERF_LOGS = _env_flag("ANDON_PERF_LOGS")
+    ANDON_HTTP_ACCESS_LOGS = _env_flag("ANDON_HTTP_ACCESS_LOGS")
     ANDON_PERF_FOCUS = (os.getenv("ANDON_PERF_FOCUS") or "").strip().lower()
     ANDON_PERF_FOCUS_PATTERNS = _env_csv("ANDON_PERF_FOCUS_PATTERNS")
     ANDON_PAGER_API_ONLY = _env_flag("ANDON_PAGER_API_ONLY")
@@ -107,7 +108,8 @@ class DevelopmentConfig(BaseConfig):
     DEBUG = True
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
     ANDON_AUTO_SCHEMA_MAINTENANCE = False
-    ANDON_PERF_LOGS = True
+    ANDON_PERF_LOGS = _env_flag("ANDON_PERF_LOGS")
+    ANDON_HTTP_ACCESS_LOGS = _env_flag("ANDON_HTTP_ACCESS_LOGS")
     SQLALCHEMY_ENGINE_OPTIONS = {
         **BaseConfig.SQLALCHEMY_ENGINE_OPTIONS,
         "pool_pre_ping": False,

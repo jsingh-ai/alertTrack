@@ -288,8 +288,23 @@ def _load_operator_metadata_context(company_id, membership=None, scope=None, met
 
     role = membership.role if membership else None
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
+    machine_ids = scope.get("machine_ids") or []
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
     metadata_department_ids = list(department_ids)
+
+    # For broad roles (Admin/Manager/etc), prevent first-load metadata from
+    # pulling every company issue category/problem by default. Scope metadata
+    # to departments that actually have visible machines.
+    if not metadata_department_ids and company_id:
+        machine_scope_query = Machine.query.options(noload("*")).with_entities(Machine.department_id).filter(Machine.company_id == company_id)
+        if machine_ids:
+            machine_scope_query = machine_scope_query.filter(Machine.id.in_(machine_ids))
+        if machine_group_names:
+            machine_scope_query = machine_scope_query.filter(Machine.machine_type.in_(machine_group_names))
+        machine_scope_rows = machine_scope_query.distinct().all()
+        scoped_department_ids = sorted({int(row.department_id) for row in machine_scope_rows if row.department_id is not None})
+        if scoped_department_ids:
+            metadata_department_ids = scoped_department_ids
 
     department_query = Department.query.options(
         load_only(Department.id, Department.company_id, Department.name, Department.is_active),
@@ -358,6 +373,7 @@ def _load_operator_metadata_context(company_id, membership=None, scope=None, met
         metrics["issue_query_ms"] = round(issue_ms, 1)
         metrics["user_query_ms"] = round(users_ms, 1)
         metrics["scope_department_count"] = len(metadata_department_ids)
+        metrics["scope_machine_count"] = len(machine_ids)
         metrics["scope_machine_group_count"] = len(machine_group_names)
         metrics.update(issue_metrics)
 

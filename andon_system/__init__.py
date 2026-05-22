@@ -395,6 +395,8 @@ def create_app(config_name: str | None = None) -> Flask:
     config_key = config_name or os.getenv("FLASK_CONFIG") or os.getenv("APP_ENV") or "default"
     app.config.from_object(config_by_name.get(config_key, config_by_name["default"]))
     _configure_perf_focus_logging(app)
+    if not app.config.get("ANDON_HTTP_ACCESS_LOGS"):
+        logging.getLogger("werkzeug").setLevel(logging.WARNING)
     if app.config.get("ANDON_PAGER_API_ONLY"):
         app.config["SOCKETIO_ENABLED"] = False
     _maybe_apply_proxy_fix(app)
