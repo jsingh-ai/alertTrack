@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
+import ipaddress
 import json
 import threading
 import time
@@ -85,6 +86,20 @@ def _landing_redirect():
 def _is_secure_request() -> bool:
     forwarded_proto = str(request.headers.get("X-Forwarded-Proto") or "").split(",", 1)[0].strip().lower()
     return bool(request.is_secure or forwarded_proto == "https")
+
+
+def _session_cookie_domain_matches_request() -> bool:
+    configured_domain = str(current_app.config.get("SESSION_COOKIE_DOMAIN") or "").strip().lstrip(".").lower()
+    if not configured_domain:
+        return True
+    request_host = str(request.host or "").split(":", 1)[0].strip().lower()
+    if not request_host:
+        return False
+    try:
+        ipaddress.ip_address(request_host)
+        return request_host == configured_domain
+    except ValueError:
+        return request_host == configured_domain or request_host.endswith(f".{configured_domain}")
 
 
 def _render_home_with_flash(message: str, category: str = "warning", status_code: int = 200):
@@ -221,6 +236,19 @@ def login_page():
         return _render_home_with_flash(
             "Login is blocked because secure cookies are enabled on an HTTP request. "
             "Use HTTPS, or set SESSION_COOKIE_SECURE=false for local/LAN testing.",
+            "warning",
+            400,
+        )
+    if not _session_cookie_domain_matches_request():
+        current_app.logger.warning(
+            "LOGIN blocked reason=session_cookie_domain_mismatch remote=%s host=%s cookie_domain=%s",
+            request.remote_addr,
+            request.host,
+            current_app.config.get("SESSION_COOKIE_DOMAIN"),
+        )
+        return _render_home_with_flash(
+            "Login is blocked because SESSION_COOKIE_DOMAIN does not match this host. "
+            "Unset SESSION_COOKIE_DOMAIN for direct IP/LAN access, or use the configured hostname.",
             "warning",
             400,
         )

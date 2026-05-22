@@ -237,9 +237,9 @@ async function ensureOperatorMetadataLoaded() {
 }
 
 function scheduleOperatorMetadataWarmup() {
-  if (operatorMetadataLoadPromise) return;
+  if (state.metadataLoaded || operatorMetadataLoadPromise) return;
   const runWarmup = () => {
-    void loadOperatorMetadata({ force: true }).then(() => {
+    void loadOperatorMetadata().then(() => {
       renderBoard();
     }).catch((_error) => {
       console.warn("Failed to preload operator metadata.");

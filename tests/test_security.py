@@ -19,7 +19,9 @@ from andon_system.models.machine import Machine
 from andon_system.models.machine_group import MachineGroup
 from andon_system.models.pager_device import PagerDevice
 from andon_system.models.user import User, UserCompanyAccess
+from andon_system.routes.pages import _session_cookie_domain_matches_request
 from andon_system.security import ADMIN_SESSION_KEY, CSRF_SESSION_KEY, USER_SESSION_KEY
+from andon_system.services.board_service import _operator_metadata_cache_key
 
 
 ADMIN_POST_CASES = [
@@ -556,6 +558,14 @@ def test_login_accepts_forwarded_https_when_proxy_fix_enabled(proxied_login_clie
     assert response.headers["Location"].endswith("/andon/management")
 
 
+def test_session_cookie_domain_mismatch_detected(login_client):
+    app = login_client.application
+    app.config["SESSION_COOKIE_DOMAIN"] = "andon.example.com"
+
+    with app.test_request_context("/andon/login", base_url="http://10.20.1.8"):
+        assert _session_cookie_domain_matches_request() is False
+
+
 def test_health_endpoint_returns_safe_json_without_auth(login_client):
     response = login_client.get("/health")
 
@@ -665,3 +675,59 @@ def test_inline_escalation_endpoint_can_be_disabled(admin_login_client):
     assert response.status_code == 503
     payload = response.get_json()
     assert payload["success"] is False
+
+
+def test_operator_metadata_cache_key_varies_by_user_scope():
+    company_id = 7
+    admin_user = SimpleNamespace(id=101)
+    scoped_user = SimpleNamespace(id=202)
+    admin_membership = SimpleNamespace(
+        id=1,
+        role="Manager",
+        scope_mode="all",
+        department_id=None,
+        machine_group_id=None,
+    )
+    scoped_membership = SimpleNamespace(
+        id=2,
+        role="Operator",
+        scope_mode="restricted",
+        department_id=4,
+        machine_group_id=9,
+    )
+
+    admin_key = _operator_metadata_cache_key(
+        company_id,
+        admin_user,
+        admin_membership,
+        {"department_ids": [], "machine_group_names": [], "machine_ids": []},
+    )
+    scoped_key = _operator_metadata_cache_key(
+        company_id,
+        scoped_user,
+        scoped_membership,
+        {"department_ids": [4], "machine_group_names": ["Press"], "machine_ids": [12, 13]},
+    )
+
+    assert admin_key != scoped_key
+
+
+def test_pager_active_alerts_reuses_blueprint_authenticated_device(login_client, monkeypatch):
+    from andon_system.routes import api as api_module
+
+    calls = {"count": 0}
+
+    def fake_get_authenticated_pager_device(update_last_seen=True):
+        calls["count"] += 1
+        return SimpleNamespace(company_id=1, department_id=2)
+
+    monkeypatch.setattr(api_module, "get_authenticated_pager_device", fake_get_authenticated_pager_device)
+    monkeypatch.setattr(api_module, "get_cached", lambda key: [])
+
+    response = login_client.get(
+        "/api/andon/pager/alerts/active",
+        headers={"Authorization": "Bearer fake-token"},
+    )
+
+    assert response.status_code == 200
+    assert calls["count"] == 1

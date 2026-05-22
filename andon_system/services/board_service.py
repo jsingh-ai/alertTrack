@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import time
 
+from flask import current_app, has_request_context
 from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..company_context import get_current_company_id
@@ -11,16 +13,28 @@ from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
 from ..models.user import User, UserCompanyAccess
-from ..security import get_current_membership, get_scope_filters
+from ..security import get_authenticated_user, get_current_membership, get_scope_filters
 from .cache_service import get_cached, set_cached
 from .radius_service import build_radius_status_map
 
 BOARD_STATE_CACHE_TTL_SECONDS = 10
-OPERATOR_METADATA_CACHE_TTL_SECONDS = 300
+DEFAULT_OPERATOR_METADATA_CACHE_TTL_SECONDS = 60
 
 
 def utc_now():
     return datetime.now(timezone.utc)
+
+
+def _perf_enabled() -> bool:
+    return has_request_context() and bool(current_app.config.get("ANDON_PERF_LOGS"))
+
+
+def _perf_log(event: str, started_at: float, **extra) -> None:
+    if not _perf_enabled():
+        return
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    suffix = " ".join(f"{key}={value}" for key, value in extra.items())
+    current_app.logger.debug("PERF %s duration_ms=%.1f %s", event, duration_ms, suffix)
 
 
 def build_board_state(include_metadata: bool = True):
@@ -122,14 +136,45 @@ def build_operator_snapshot():
     return result
 
 
-def build_operator_metadata():
-    company_id = get_current_company_id()
-    cache_key = ("operator_metadata", company_id)
+def build_operator_metadata(company_id=None, current_user=None, membership=None, scope=None, metrics: dict | None = None):
+    started_at = time.perf_counter()
+    company_id = company_id if company_id is not None else get_current_company_id()
+    current_user = current_user or get_authenticated_user()
+    membership = membership or get_current_membership(user=current_user)
+    scope = scope or get_scope_filters(membership=membership)
+    cache_key = _operator_metadata_cache_key(company_id, current_user, membership, scope)
+
+    cache_started_at = time.perf_counter()
     cached = get_cached(cache_key)
+    cache_lookup_ms = (time.perf_counter() - cache_started_at) * 1000
+    if metrics is not None:
+        metrics["cache_lookup_ms"] = round(cache_lookup_ms, 1)
     if cached is not None:
+        if metrics is not None:
+            metrics["cache"] = "hit"
+            metrics["counts"] = {
+                "departments": len(cached.get("departments") or []),
+                "issue_groups": len(cached.get("issue_groups") or []),
+                "users": len(cached.get("users") or []),
+            }
+        _perf_log(
+            "operator_metadata(service)",
+            started_at,
+            cache="hit",
+            company_id=company_id,
+            user_id=getattr(current_user, "id", None),
+            role=getattr(membership, "role", None),
+        )
         return cached
 
-    context = _load_operator_metadata_context(company_id)
+    context_metrics = {}
+    context = _load_operator_metadata_context(
+        company_id,
+        membership=membership,
+        scope=scope,
+        metrics=context_metrics,
+    )
+    serialize_started_at = time.perf_counter()
     result = {
         "departments": [
             {
@@ -168,19 +213,54 @@ def build_operator_metadata():
             for user in context["visible_users"]
         ],
     }
-    set_cached(cache_key, result, OPERATOR_METADATA_CACHE_TTL_SECONDS)
+    serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+    ttl_seconds = _operator_metadata_cache_ttl_seconds()
+    cache_store_started_at = time.perf_counter()
+    set_cached(cache_key, result, ttl_seconds)
+    cache_store_ms = (time.perf_counter() - cache_store_started_at) * 1000
+    if metrics is not None:
+        metrics.update(context_metrics)
+        metrics["cache"] = "miss"
+        metrics["serialize_ms"] = round(serialize_ms, 1)
+        metrics["cache_store_ms"] = round(cache_store_ms, 1)
+        metrics["cache_ttl_seconds"] = ttl_seconds
+        metrics["counts"] = {
+            "departments": len(result["departments"]),
+            "issue_groups": len(result["issue_groups"]),
+            "users": len(result["users"]),
+        }
+    _perf_log(
+        "operator_metadata(service)",
+        started_at,
+        cache="miss",
+        company_id=company_id,
+        user_id=getattr(current_user, "id", None),
+        role=getattr(membership, "role", None),
+        departments=len(result["departments"]),
+        issue_groups=len(result["issue_groups"]),
+        users=len(result["users"]),
+    )
     return result
 
 
-def _load_operator_metadata_context(company_id):
-    scope = get_scope_filters()
-    membership = get_current_membership()
+def _load_operator_metadata_context(company_id, membership=None, scope=None, metrics: dict | None = None):
+    scope_started_at = time.perf_counter()
+    scope = scope or get_scope_filters()
+    if metrics is not None and "scope_ms" not in metrics:
+        metrics["scope_ms"] = round((time.perf_counter() - scope_started_at) * 1000, 1)
+
+    membership_started_at = time.perf_counter()
+    membership = membership or get_current_membership()
+    if metrics is not None and "membership_ms" not in metrics:
+        metrics["membership_ms"] = round((time.perf_counter() - membership_started_at) * 1000, 1)
+
     role = membership.role if membership else None
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
     metadata_department_ids = list(department_ids)
 
     if role == "Operator" and company_id:
+        all_departments_started_at = time.perf_counter()
         all_department_rows = (
             Department.query.options(noload("*"))
             .with_entities(Department.id)
@@ -190,6 +270,8 @@ def _load_operator_metadata_context(company_id):
         all_department_ids = sorted({row.id for row in all_department_rows if row.id is not None})
         if all_department_ids:
             metadata_department_ids = all_department_ids
+        if metrics is not None:
+            metrics["operator_department_scope_ms"] = round((time.perf_counter() - all_departments_started_at) * 1000, 1)
 
     department_query = Department.query.options(
         load_only(Department.id, Department.company_id, Department.name, Department.is_active),
@@ -247,17 +329,25 @@ def _load_operator_metadata_context(company_id):
     if machine_group_names:
         user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
 
+    departments_started_at = time.perf_counter()
     if role == "Operator":
         departments = department_query.order_by(Department.name.asc()).all()
     else:
         departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all()
+    departments_ms = (time.perf_counter() - departments_started_at) * 1000
+
+    issue_started_at = time.perf_counter()
     issue_categories = issue_query.filter_by(is_active=True).order_by(IssueCategory.name.asc()).all()
+    issue_ms = (time.perf_counter() - issue_started_at) * 1000
+
     visible_departments = [department for department in departments if role == "Operator" or department.is_active]
     visible_issue_categories = [
         category
         for category in issue_categories
         if category.department and category.department.is_active
     ]
+
+    users_started_at = time.perf_counter()
     visible_users = [
         access.user
         for access in user_query.filter_by(is_active=True).order_by(UserCompanyAccess.id.asc()).all()
@@ -266,12 +356,44 @@ def _load_operator_metadata_context(company_id):
         and (access.department is None or access.department.is_active)
         and (access.machine_group is None or access.machine_group.is_active)
     ]
+    users_ms = (time.perf_counter() - users_started_at) * 1000
+
+    if metrics is not None:
+        metrics["department_query_ms"] = round(departments_ms, 1)
+        metrics["issue_query_ms"] = round(issue_ms, 1)
+        metrics["user_query_ms"] = round(users_ms, 1)
+        metrics["scope_department_count"] = len(metadata_department_ids)
+        metrics["scope_machine_group_count"] = len(machine_group_names)
 
     return {
         "visible_departments": visible_departments,
         "visible_issue_categories": visible_issue_categories,
         "visible_users": visible_users,
     }
+
+
+def _operator_metadata_cache_key(company_id, current_user, membership, scope):
+    return (
+        "operator_metadata",
+        company_id,
+        getattr(current_user, "id", None),
+        getattr(membership, "id", None),
+        getattr(membership, "role", None),
+        getattr(membership, "scope_mode", None),
+        getattr(membership, "department_id", None),
+        getattr(membership, "machine_group_id", None),
+        tuple(sorted(scope.get("department_ids") or [])),
+        tuple(sorted(scope.get("machine_group_names") or [])),
+        tuple(sorted(scope.get("machine_ids") or [])),
+    )
+
+
+def _operator_metadata_cache_ttl_seconds() -> int:
+    try:
+        raw_value = int(current_app.config.get("OPERATOR_METADATA_CACHE_TTL_SECONDS", DEFAULT_OPERATOR_METADATA_CACHE_TTL_SECONDS))
+    except (TypeError, ValueError):
+        raw_value = DEFAULT_OPERATOR_METADATA_CACHE_TTL_SECONDS
+    return max(1, min(raw_value, 300))
 
 
 def _load_board_context(company_id, include_alerts: bool, include_metadata: bool = True, include_radius: bool = True):
