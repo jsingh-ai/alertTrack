@@ -18,7 +18,6 @@ from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
 from ..models.pager_device import PagerDevice
 from ..models.user import USER_ROLES, USER_SCOPE_MODES, User, UserCompanyAccess
-from ..security import fingerprint_pager_token, hash_pager_token
 from ..security import (
     PAGE_ADMIN,
     PAGE_BOARD,
@@ -81,6 +80,17 @@ def _management_shift_window(now: datetime | None = None):
 
 def _landing_redirect():
     return redirect(url_for(get_default_landing_endpoint()))
+
+
+def _is_secure_request() -> bool:
+    forwarded_proto = str(request.headers.get("X-Forwarded-Proto") or "").split(",", 1)[0].strip().lower()
+    return bool(request.is_secure or forwarded_proto == "https")
+
+
+def _render_home_with_flash(message: str, category: str = "warning", status_code: int = 200):
+    flash(message, category)
+    return render_template("andon/home.html"), status_code
+
 
 def _scope_summary_text(company_id: int | None) -> str:
     scope = get_scope_filters()
@@ -202,6 +212,18 @@ def home_page():
 
 @pages_bp.post("/andon/login")
 def login_page():
+    if bool(current_app.config.get("SESSION_COOKIE_SECURE")) and not _is_secure_request():
+        current_app.logger.warning(
+            "LOGIN blocked reason=insecure_cookie_transport remote=%s forwarded_proto=%s",
+            request.remote_addr,
+            request.headers.get("X-Forwarded-Proto"),
+        )
+        return _render_home_with_flash(
+            "Login is blocked because secure cookies are enabled on an HTTP request. "
+            "Use HTTPS, or set SESSION_COOKIE_SECURE=false for local/LAN testing.",
+            "warning",
+            400,
+        )
     # If a user is already signed in, treat an explicit login submit as a user switch
     # and clear old session context up front.
     if is_authenticated():
@@ -219,8 +241,11 @@ def login_page():
             request.remote_addr,
             retry_after,
         )
-        flash(f"Too many login attempts. Please try again in {retry_after} seconds.", "warning")
-        return redirect(url_for("pages.home_page"))
+        return _render_home_with_flash(
+            f"Too many login attempts. Please try again in {retry_after} seconds.",
+            "warning",
+            429,
+        )
     user, auth_reason = authenticate_user_with_reason(identity, password)
     if user is None:
         current_app.logger.info(
@@ -231,10 +256,8 @@ def login_page():
         )
         _record_login_failure(identity, request.remote_addr)
         if "@" in str(identity or ""):
-            flash("Email sign-in is disabled. Use your username.", "warning")
-            return redirect(url_for("pages.home_page"))
-        flash("Invalid username or password.", "warning")
-        return redirect(url_for("pages.home_page"))
+            return _render_home_with_flash("Email sign-in is disabled. Use your username.", "warning", 401)
+        return _render_home_with_flash("Invalid username or password.", "warning", 401)
     current_app.logger.info(
         "LOGIN success identity=%s user_id=%s remote=%s",
         identity_fingerprint,
@@ -245,9 +268,14 @@ def login_page():
     login_user(user)
     memberships = get_user_memberships(user=user, active_only=True)
     if not memberships:
+        current_app.logger.warning(
+            "LOGIN denied reason=no_active_memberships user_id=%s username=%s remote=%s",
+            user.id,
+            user.username,
+            request.remote_addr,
+        )
         logout_user()
-        flash("This account does not have any active company access.", "warning")
-        return redirect(url_for("pages.home_page"))
+        return _render_home_with_flash("This account does not have any active company access.", "warning", 403)
     user.last_login_at = datetime.now(timezone.utc)
     db.session.commit()
     membership = memberships[0]
@@ -531,25 +559,6 @@ def admin_page():
         else []
     )
     pager_by_department_id = {device.department_id: device for device in pager_devices}
-    pager_rows_added = False
-    for department in departments:
-        if department.id in pager_by_department_id:
-            continue
-        placeholder_token = f"init-{department.id}-{datetime.now(timezone.utc).timestamp()}"
-        placeholder = PagerDevice(
-            company_id=department.company_id,
-            department_id=department.id,
-            name=f"{department.name} Pager",
-            token_hash=hash_pager_token(placeholder_token),
-            token_fingerprint=fingerprint_pager_token(placeholder_token),
-            active=False,
-        )
-        db.session.add(placeholder)
-        db.session.flush()
-        pager_by_department_id[department.id] = placeholder
-        pager_rows_added = True
-    if pager_rows_added:
-        db.session.commit()
     department_name_by_id = {department.id: department.name for department in departments}
     machine_count_by_group_name = defaultdict(int)
     for machine in machines:

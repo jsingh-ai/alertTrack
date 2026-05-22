@@ -3,7 +3,9 @@ import shlex
 import time
 
 from flask import Flask, flash, g, has_request_context, redirect, request, session, url_for
+from flask import jsonify
 from sqlalchemy import inspect, text
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .company_context import get_companies, get_current_company
 from .config import config_by_name
@@ -21,6 +23,7 @@ from .security import (
     logout_user,
     validate_production_security_config,
 )
+from .services.cache_service import cache_runtime_status
 
 WORKSPACE_PROMPT_SESSION_KEY = "andon_workspace_prompt"
 
@@ -432,6 +435,19 @@ def _ensure_pager_device_token_fingerprint_schema(allow_alter: bool) -> None:
     )
 
 
+def _maybe_apply_proxy_fix(app: Flask) -> None:
+    proxy_kwargs = {
+        "x_for": int(app.config.get("PROXY_FIX_X_FOR") or 0),
+        "x_proto": int(app.config.get("PROXY_FIX_X_PROTO") or 0),
+        "x_host": int(app.config.get("PROXY_FIX_X_HOST") or 0),
+        "x_port": int(app.config.get("PROXY_FIX_X_PORT") or 0),
+        "x_prefix": int(app.config.get("PROXY_FIX_X_PREFIX") or 0),
+    }
+    if not any(proxy_kwargs.values()):
+        return
+    app.wsgi_app = ProxyFix(app.wsgi_app, **proxy_kwargs)
+
+
 def create_app(config_name: str | None = None) -> Flask:
     app = Flask(
         __name__,
@@ -444,6 +460,7 @@ def create_app(config_name: str | None = None) -> Flask:
     app.config.from_object(config_by_name.get(config_key, config_by_name["default"]))
     if app.config.get("ANDON_PAGER_API_ONLY"):
         app.config["SOCKETIO_ENABLED"] = False
+    _maybe_apply_proxy_fix(app)
     if not app.config.get("SQLALCHEMY_DATABASE_URI"):
         raise RuntimeError("DATABASE_URL must be configured for PostgreSQL.")
     if config_key == "production":
@@ -471,6 +488,45 @@ def create_app(config_name: str | None = None) -> Flask:
     register_blueprints(app)
 
     from . import models  # noqa: F401,WPS433
+
+    @app.get("/health")
+    def health_check():
+        dialect_name = None
+        try:
+            dialect_name = db.engine.dialect.name
+        except Exception:
+            dialect_name = None
+        payload = {
+            "status": "ok",
+            "checks": {
+                "app": "ok",
+                "db": {"ok": False, "dialect": dialect_name},
+                "cache": cache_runtime_status(),
+                "socketio": {
+                    "enabled": bool(app.config.get("SOCKETIO_ENABLED")),
+                    "async_mode": str(app.config.get("SOCKETIO_ASYNC_MODE") or ""),
+                    "message_queue_configured": bool(app.config.get("SOCKETIO_MESSAGE_QUEUE")),
+                    "multiworker_enabled": bool(app.config.get("SOCKETIO_ALLOW_MULTIWORKER")),
+                },
+            },
+        }
+        status_code = 200
+        try:
+            db.session.execute(text("SELECT 1"))
+            payload["checks"]["db"] = {
+                "ok": True,
+                "dialect": dialect_name,
+            }
+        except Exception:
+            db.session.rollback()
+            payload["status"] = "degraded"
+            payload["checks"]["db"] = {
+                "ok": False,
+                "dialect": dialect_name,
+            }
+            status_code = 503
+            app.logger.exception("HEALTHCHECK failed component=db")
+        return jsonify(payload), status_code
 
     @app.template_filter("utc_local")
     def utc_local(value):
@@ -587,6 +643,18 @@ def create_app(config_name: str | None = None) -> Flask:
             # Pager token fingerprint support is required by the current model.
             _ensure_pager_device_token_fingerprint_schema(allow_alter=True)
             db.session.commit()
-        app.logger.debug("Andon app initialized")
+        app.logger.debug(
+            "Andon app initialized config=%s db_driver=%s secure_cookie=%s proxy_fix=%s/%s/%s/%s/%s pager_api_only=%s socketio_enabled=%s",
+            config_key,
+            db.engine.dialect.name,
+            bool(app.config.get("SESSION_COOKIE_SECURE")),
+            app.config.get("PROXY_FIX_X_FOR", 0),
+            app.config.get("PROXY_FIX_X_PROTO", 0),
+            app.config.get("PROXY_FIX_X_HOST", 0),
+            app.config.get("PROXY_FIX_X_PORT", 0),
+            app.config.get("PROXY_FIX_X_PREFIX", 0),
+            bool(app.config.get("ANDON_PAGER_API_ONLY")),
+            bool(app.config.get("SOCKETIO_ENABLED")),
+        )
 
     return app

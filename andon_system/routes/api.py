@@ -737,7 +737,17 @@ def api_report_calls_per_hour():
 @api_bp.post("/escalations/check")
 def api_check_escalations():
     _require_any_page_access(PAGE_MANAGEMENT)
+    if not current_app.config.get("ESCALATION_INLINE_CHECKS_ENABLED", True):
+        current_app.logger.warning("ESCALATION inline_checks_disabled remote=%s", request.remote_addr)
+        return _error("Inline escalation checks are disabled in this environment", 503)
+    started_at = time.perf_counter()
     escalated = check_escalations()
+    current_app.logger.info(
+        "ESCALATION inline_check completed count=%s duration_ms=%.1f remote=%s",
+        len(escalated),
+        (time.perf_counter() - started_at) * 1000,
+        request.remote_addr,
+    )
     return jsonify({"success": True, "data": escalated})
 
 

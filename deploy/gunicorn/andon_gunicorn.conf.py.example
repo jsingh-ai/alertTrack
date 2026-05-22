@@ -1,0 +1,25 @@
+bind = "127.0.0.1:8000"
+workers = 2
+worker_class = "geventwebsocket.gunicorn.workers.GeventWebSocketWorker"
+worker_connections = 1000
+timeout = 60
+graceful_timeout = 30
+keepalive = 5
+accesslog = "-"
+errorlog = "-"
+capture_output = True
+loglevel = "info"
+
+# Production expects proxy headers from Nginx and matching Flask proxy trust:
+#   X-Forwarded-For
+#   X-Forwarded-Proto
+# Without X-Forwarded-Proto=https, secure session cookies can break login flows.
+
+raw_env = [
+    "FLASK_CONFIG=production",
+    "SESSION_COOKIE_SECURE=true",
+    "PREFERRED_URL_SCHEME=https",
+    "PROXY_FIX_X_FOR=1",
+    "PROXY_FIX_X_PROTO=1",
+    "SOCKETIO_ALLOW_MULTIWORKER=true",
+]

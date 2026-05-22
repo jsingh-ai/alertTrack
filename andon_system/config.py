@@ -12,6 +12,16 @@ def _env_flag(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(name: str, default: int = 0) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return max(0, int(raw_value))
+    except (TypeError, ValueError):
+        return default
+
+
 def _local_sqlite_uri() -> str:
     sqlite_path = os.getenv("LOCAL_SQLITE_PATH") or str(BASE_DIR / "instance" / "andon_local.sqlite3")
     return f"sqlite:///{Path(sqlite_path).expanduser()}"
@@ -59,13 +69,22 @@ class BaseConfig:
     SOCKETIO_PING_TIMEOUT = int(os.getenv("SOCKETIO_PING_TIMEOUT", "20"))
     SOCKETIO_HTTP_COMPRESSION = _env_flag("SOCKETIO_HTTP_COMPRESSION", "true")
     PAGER_ACTIVE_ALERTS_QUERY_TIMEOUT_MS = int(os.getenv("PAGER_ACTIVE_ALERTS_QUERY_TIMEOUT_MS", "2000"))
+    PAGER_AUTH_LEGACY_FALLBACK_LIMIT = _env_int("PAGER_AUTH_LEGACY_FALLBACK_LIMIT", 25)
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
     SESSION_COOKIE_SECURE = _env_flag("SESSION_COOKIE_SECURE")
+    SESSION_COOKIE_DOMAIN = os.getenv("SESSION_COOKIE_DOMAIN") or None
     ANDON_PERF_LOGS = _env_flag("ANDON_PERF_LOGS")
     ANDON_PAGER_API_ONLY = _env_flag("ANDON_PAGER_API_ONLY")
+    PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME") or ("https" if SESSION_COOKIE_SECURE else "http")
+    PROXY_FIX_X_FOR = _env_int("PROXY_FIX_X_FOR", 0)
+    PROXY_FIX_X_PROTO = _env_int("PROXY_FIX_X_PROTO", 0)
+    PROXY_FIX_X_HOST = _env_int("PROXY_FIX_X_HOST", 0)
+    PROXY_FIX_X_PORT = _env_int("PROXY_FIX_X_PORT", 0)
+    PROXY_FIX_X_PREFIX = _env_int("PROXY_FIX_X_PREFIX", 0)
 
     ESCALATION_EMAIL_ENABLED = _env_flag("ESCALATION_EMAIL_ENABLED")
+    ESCALATION_INLINE_CHECKS_ENABLED = _env_flag("ESCALATION_INLINE_CHECKS_ENABLED", "true")
     ESCALATION_EMAIL_SMTP_HOST = os.getenv("ESCALATION_EMAIL_SMTP_HOST")
     ESCALATION_EMAIL_SMTP_PORT = int(os.getenv("ESCALATION_EMAIL_SMTP_PORT", "587"))
     ESCALATION_EMAIL_SMTP_USER = os.getenv("ESCALATION_EMAIL_SMTP_USER")
@@ -107,6 +126,10 @@ class ProductionConfig(BaseConfig):
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
     ANDON_RUNTIME_SCHEMA_REPAIR = _env_flag("ANDON_RUNTIME_SCHEMA_REPAIR")
     SESSION_COOKIE_SECURE = _env_flag("SESSION_COOKIE_SECURE", "true")
+    ESCALATION_INLINE_CHECKS_ENABLED = _env_flag("ESCALATION_INLINE_CHECKS_ENABLED")
+    PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME") or "https"
+    PROXY_FIX_X_FOR = _env_int("PROXY_FIX_X_FOR", 1)
+    PROXY_FIX_X_PROTO = _env_int("PROXY_FIX_X_PROTO", 1)
 
 
 config_by_name = {

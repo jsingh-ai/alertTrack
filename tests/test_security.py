@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy.exc import IntegrityError
+from werkzeug.security import generate_password_hash
 
 from andon_system import create_app
 from andon_system.config import ProductionConfig, TestingConfig
@@ -16,7 +17,9 @@ from andon_system.models.department import Department
 from andon_system.models.issue import IssueCategory, IssueProblem
 from andon_system.models.machine import Machine
 from andon_system.models.machine_group import MachineGroup
-from andon_system.security import ADMIN_SESSION_KEY, CSRF_SESSION_KEY
+from andon_system.models.pager_device import PagerDevice
+from andon_system.models.user import User, UserCompanyAccess
+from andon_system.security import ADMIN_SESSION_KEY, CSRF_SESSION_KEY, USER_SESSION_KEY
 
 
 ADMIN_POST_CASES = [
@@ -201,6 +204,31 @@ def test_admin_login_sets_session_and_allows_admin_page(client):
     assert b"Admin Setup" in admin_page.data
 
 
+def test_admin_page_get_does_not_create_pager_devices(admin_login_client):
+    client, app = admin_login_client
+    client.get("/andon/home")
+    with client.session_transaction() as session:
+        with app.app_context():
+            admin_user = User.query.filter_by(username="admin.user").one()
+            session[USER_SESSION_KEY] = admin_user.id
+            session["andon_company_slug"] = "admin-test"
+            session["andon_company_id"] = admin_user.company_id
+            session[ADMIN_SESSION_KEY] = True
+
+    with app.app_context():
+        company = Company.query.filter_by(slug="admin-test").one()
+        department = Department.query.filter_by(company_id=company.id, name="Pagerless Department").one()
+        department_id = department.id
+        assert PagerDevice.query.filter_by(company_id=company.id, department_id=department_id).count() == 0
+
+    response = client.get("/andon/admin?section=departments")
+
+    assert response.status_code == 200
+    with app.app_context():
+        company = Company.query.filter_by(slug="admin-test").one()
+        assert PagerDevice.query.filter_by(company_id=company.id, department_id=department_id).count() == 0
+
+
 def test_all_admin_mutation_routes_are_covered(app):
     actual_endpoints = {
         rule.endpoint
@@ -370,3 +398,270 @@ def test_run_socketio_allows_werkzeug_in_debug():
     from run_socketio import _ensure_safe_werkzeug
 
     _ensure_safe_werkzeug(SimpleNamespace(debug=True))
+
+
+def _build_login_client(tmp_path, monkeypatch, *, proxy_fix_x_proto: int):
+    database_path = tmp_path / "login.sqlite3"
+    monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("ANDON_ADMIN_PASSWORD", "very-strong-admin-password")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "true")
+    monkeypatch.setenv("PROXY_FIX_X_PROTO", str(proxy_fix_x_proto))
+
+    original_database_uri = TestingConfig.SQLALCHEMY_DATABASE_URI
+    TestingConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{database_path}"
+
+    app = create_app("testing")
+    app.config.update(
+        SECRET_KEY="test-secret-key",
+        ADMIN_PASSWORD="very-strong-admin-password",
+        SESSION_COOKIE_SECURE=True,
+        PROXY_FIX_X_PROTO=proxy_fix_x_proto,
+    )
+    with app.app_context():
+        db.create_all()
+        company = Company(name="Proxy Test Co", slug="proxy-test", is_active=True)
+        db.session.add(company)
+        db.session.flush()
+
+        user = User(
+            company_id=company.id,
+            display_name="Proxy Test User",
+            username="proxy.user",
+            role="Manager",
+            is_active=True,
+        )
+        user.set_password("ProxyPass!2026")
+        db.session.add(user)
+        db.session.flush()
+        db.session.add(
+            UserCompanyAccess(
+                user_id=user.id,
+                company_id=company.id,
+                role="Manager",
+                scope_mode="all",
+                is_active=True,
+            )
+        )
+        db.session.commit()
+
+    client = app.test_client()
+    yield client
+
+    with app.app_context():
+        db.session.remove()
+        db.drop_all()
+    TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
+
+
+@pytest.fixture()
+def login_client(tmp_path, monkeypatch):
+    yield from _build_login_client(tmp_path, monkeypatch, proxy_fix_x_proto=0)
+
+
+@pytest.fixture()
+def proxied_login_client(tmp_path, monkeypatch):
+    yield from _build_login_client(tmp_path, monkeypatch, proxy_fix_x_proto=1)
+
+
+@pytest.fixture()
+def admin_login_client(tmp_path, monkeypatch):
+    database_path = tmp_path / "admin.sqlite3"
+    monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("ANDON_ADMIN_PASSWORD", "very-strong-admin-password")
+
+    original_database_uri = TestingConfig.SQLALCHEMY_DATABASE_URI
+    TestingConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{database_path}"
+
+    app = create_app("testing")
+    app.config.update(
+        SECRET_KEY="test-secret-key",
+        ADMIN_PASSWORD="very-strong-admin-password",
+        SOCKETIO_ENABLED=True,
+    )
+    with app.app_context():
+        db.create_all()
+        company = Company(name="Admin Test Co", slug="admin-test", is_active=True)
+        department = Department(company=company, name="Pagerless Department", is_active=True)
+        db.session.add_all([company, department])
+        db.session.flush()
+        admin_user = User(
+            company_id=company.id,
+            display_name="Admin User",
+            username="admin.user",
+            role="Admin",
+            is_active=True,
+        )
+        admin_user.set_password("AdminPass!2026")
+        db.session.add(admin_user)
+        db.session.flush()
+        db.session.add(
+            UserCompanyAccess(
+                user_id=admin_user.id,
+                company_id=company.id,
+                role="Admin",
+                scope_mode="all",
+                is_active=True,
+            )
+        )
+        db.session.commit()
+
+    client = app.test_client()
+    yield client, app
+
+    with app.app_context():
+        db.session.remove()
+        db.drop_all()
+    TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
+
+
+def test_login_blocks_plain_http_when_secure_cookie_required(login_client):
+    login_client.get("/andon/home", base_url="http://localhost")
+    with login_client.session_transaction() as session:
+        csrf_token = session[CSRF_SESSION_KEY]
+
+    response = login_client.post(
+        "/andon/login",
+        data={
+            "identity": "proxy.user",
+            "password": "ProxyPass!2026",
+            "csrf_token": csrf_token,
+        },
+        base_url="http://localhost",
+    )
+
+    assert response.status_code == 400
+    assert b"secure cookies are enabled on an HTTP request" in response.data
+
+
+def test_login_accepts_forwarded_https_when_proxy_fix_enabled(proxied_login_client):
+    proxied_login_client.get("/andon/home", base_url="http://localhost", headers={"X-Forwarded-Proto": "https"})
+    with proxied_login_client.session_transaction() as session:
+        csrf_token = session[CSRF_SESSION_KEY]
+
+    response = proxied_login_client.post(
+        "/andon/login",
+        data={
+            "identity": "proxy.user",
+            "password": "ProxyPass!2026",
+            "csrf_token": csrf_token,
+        },
+        base_url="http://localhost",
+        headers={"X-Forwarded-Proto": "https"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/andon/management")
+
+
+def test_health_endpoint_returns_safe_json_without_auth(login_client):
+    response = login_client.get("/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "ok"
+    assert payload["checks"]["app"] == "ok"
+    assert payload["checks"]["db"]["ok"] is True
+    assert payload["checks"]["db"]["dialect"] == "sqlite"
+    assert "SECRET_KEY" not in str(payload)
+    assert "DATABASE_URL" not in str(payload)
+    assert "ProxyPass!2026" not in str(payload)
+
+
+def test_health_endpoint_returns_503_when_db_check_fails(login_client, monkeypatch):
+    original_execute = db.session.execute
+
+    def fail_execute(*args, **kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(db.session, "execute", fail_execute)
+    try:
+        response = login_client.get("/health")
+    finally:
+        monkeypatch.setattr(db.session, "execute", original_execute)
+
+    assert response.status_code == 503
+    payload = response.get_json()
+    assert payload["status"] == "degraded"
+    assert payload["checks"]["db"]["ok"] is False
+
+
+def test_invalid_pager_token_checks_only_bounded_legacy_subset(tmp_path, monkeypatch):
+    database_path = tmp_path / "pager-auth.sqlite3"
+    monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")
+
+    original_database_uri = TestingConfig.SQLALCHEMY_DATABASE_URI
+    TestingConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{database_path}"
+
+    app = create_app("testing")
+    app.config.update(PAGER_AUTH_LEGACY_FALLBACK_LIMIT=5)
+    with app.app_context():
+        db.create_all()
+        company = Company(name="Pager Test Co", slug="pager-test", is_active=True)
+        department = Department(company=company, name="Pager Department", is_active=True)
+        db.session.add_all([company, department])
+        db.session.flush()
+        for idx in range(12):
+            user_like_token = f"legacy-token-{idx}"
+            db.session.add(
+                PagerDevice(
+                    company_id=company.id,
+                    department_id=department.id,
+                    name=f"Pager {idx}",
+                    token_hash=generate_password_hash(user_like_token),
+                    token_fingerprint=None,
+                    active=True,
+                )
+            )
+        db.session.commit()
+
+    from andon_system import security as security_module
+
+    verify_calls = {"count": 0}
+    original_verify = security_module.verify_pager_token
+
+    def counting_verify(token_hash, raw_token):
+        verify_calls["count"] += 1
+        return original_verify(token_hash, raw_token)
+
+    monkeypatch.setattr(security_module, "verify_pager_token", counting_verify)
+
+    client = app.test_client()
+    response = client.get(
+        "/api/andon/pager/alerts/active",
+        headers={"Authorization": "Bearer invalid-token"},
+    )
+
+    assert response.status_code == 403
+    assert verify_calls["count"] <= 5
+
+    with app.app_context():
+        db.session.remove()
+        db.drop_all()
+    TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
+
+
+def test_inline_escalation_endpoint_can_be_disabled(admin_login_client):
+    client, app = admin_login_client
+    app.config["ESCALATION_INLINE_CHECKS_ENABLED"] = False
+
+    with app.app_context():
+        admin_user = User.query.filter_by(username="admin.user").one()
+
+    with client.session_transaction() as session:
+        session[USER_SESSION_KEY] = admin_user.id
+        session["andon_company_slug"] = "admin-test"
+        session["andon_company_id"] = admin_user.company_id
+        session[ADMIN_SESSION_KEY] = True
+        session[CSRF_SESSION_KEY] = "test-csrf-token"
+
+    response = client.post(
+        "/api/andon/escalations/check",
+        headers={"X-CSRF-Token": "test-csrf-token"},
+    )
+
+    assert response.status_code == 503
+    payload = response.get_json()
+    assert payload["success"] is False

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from flask import abort, current_app, g, has_request_context, request, session
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, or_, select
 from sqlalchemy.orm import joinedload, load_only, noload
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -53,6 +53,7 @@ ROLE_LANDING_PAGE = {
 PREFERENCE_ALLOWED_PAGE_KEYS = {PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT, PAGE_REPORTS, PAGE_ADMIN}
 _PAGER_TOKEN_CACHE_TTL_SECONDS = 60
 _PAGER_LAST_SEEN_THROTTLE_SECONDS = 30
+_PAGER_CACHE_MAX_ENTRIES = 1024
 _PAGER_TOKEN_DEVICE_CACHE = {}
 _PAGER_LAST_SEEN_TRACKER = {}
 _PAGER_CACHE_LOCK = threading.RLock()
@@ -107,6 +108,19 @@ def parse_bearer_token() -> str | None:
     return token or None
 
 
+def _log_pager_auth_failure(reason: str) -> None:
+    if not has_request_context():
+        return
+    if not request.path.startswith("/api/andon/pager/"):
+        return
+    current_app.logger.info(
+        "PAGER_AUTH failed reason=%s remote=%s user_agent=%s",
+        reason,
+        request.remote_addr,
+        request.user_agent.string[:160] if request.user_agent and request.user_agent.string else "",
+    )
+
+
 def hash_pager_token(raw_token: str) -> str:
     token = str(raw_token or "").strip()
     if not token:
@@ -140,6 +154,7 @@ def get_authenticated_pager_device(update_last_seen: bool = True) -> PagerDevice
     if not token:
         g.authenticated_pager_device = None
         g.authenticated_pager_device_last_seen_updated = False
+        _log_pager_auth_failure("missing_bearer")
         return None
 
     cache_hit = _get_cached_pager_device_for_token(token)
@@ -164,25 +179,18 @@ def get_authenticated_pager_device(update_last_seen: bool = True) -> PagerDevice
             _maybe_update_pager_last_seen(device, update_last_seen)
             return device
 
-    devices = PagerDevice.query.options(
-        joinedload(PagerDevice.department).load_only(Department.id, Department.company_id, Department.is_active, Department.name),
-        noload(PagerDevice.company),
-    ).filter(
-        PagerDevice.active.is_(True),
-    ).all()
-    for device in devices:
-        if verify_pager_token(device.token_hash, token):
-            if not device.department or not device.department.is_active or device.department.company_id != device.company_id:
-                continue
-            _maybe_persist_pager_token_fingerprint(device, token)
-            g.authenticated_pager_device = device
-            g.authenticated_pager_device_last_seen_updated = False
-            _cache_pager_device_for_token(token, device)
-            _maybe_update_pager_last_seen(device, update_last_seen)
-            return device
+    device = _find_legacy_pager_device_by_token(token)
+    if device is not None:
+        _maybe_persist_pager_token_fingerprint(device, token)
+        g.authenticated_pager_device = device
+        g.authenticated_pager_device_last_seen_updated = False
+        _cache_pager_device_for_token(token, device)
+        _maybe_update_pager_last_seen(device, update_last_seen)
+        return device
 
     g.authenticated_pager_device = None
     g.authenticated_pager_device_last_seen_updated = False
+    _log_pager_auth_failure("invalid_token")
     return None
 
 
@@ -226,6 +234,7 @@ def _cache_pager_device_for_token(token: str, device: PagerDevice) -> None:
         return
     fingerprint = fingerprint_pager_token(token)
     with _PAGER_CACHE_LOCK:
+        _prune_pager_state_locked()
         _PAGER_TOKEN_DEVICE_CACHE[fingerprint] = {
             "device_id": int(device.id),
             "token_hash": str(device.token_hash),
@@ -246,6 +255,33 @@ def _pager_token_fingerprint_supported() -> bool:
     with _PAGER_CACHE_LOCK:
         _PAGER_FINGERPRINT_COLUMN_SUPPORTED = supported
     return supported
+
+
+def _prune_pager_state_locked() -> None:
+    now = time.monotonic()
+    expired_tokens = [
+        fingerprint
+        for fingerprint, payload in _PAGER_TOKEN_DEVICE_CACHE.items()
+        if float(payload.get("expires_at") or 0) <= now
+    ]
+    for fingerprint in expired_tokens:
+        _PAGER_TOKEN_DEVICE_CACHE.pop(fingerprint, None)
+    stale_last_seen = [
+        device_id
+        for device_id, last_seen in _PAGER_LAST_SEEN_TRACKER.items()
+        if (now - float(last_seen or 0)) > (_PAGER_LAST_SEEN_THROTTLE_SECONDS * 4)
+    ]
+    for device_id in stale_last_seen:
+        _PAGER_LAST_SEEN_TRACKER.pop(device_id, None)
+    if len(_PAGER_TOKEN_DEVICE_CACHE) <= _PAGER_CACHE_MAX_ENTRIES:
+        return
+    overflow = len(_PAGER_TOKEN_DEVICE_CACHE) - _PAGER_CACHE_MAX_ENTRIES
+    oldest_fingerprints = sorted(
+        _PAGER_TOKEN_DEVICE_CACHE,
+        key=lambda item: float(_PAGER_TOKEN_DEVICE_CACHE[item].get("expires_at") or 0),
+    )[:overflow]
+    for fingerprint in oldest_fingerprints:
+        _PAGER_TOKEN_DEVICE_CACHE.pop(fingerprint, None)
 
 
 def _find_pager_device_by_fingerprint(token: str) -> PagerDevice | None:
@@ -269,6 +305,44 @@ def _find_pager_device_by_fingerprint(token: str) -> PagerDevice | None:
         .order_by(PagerDevice.id.asc())
         .first()
     )
+
+
+def _find_legacy_pager_device_by_token(token: str) -> PagerDevice | None:
+    # Compatibility path for older rows that predate token_fingerprint backfill.
+    # Keep this bounded so invalid bearer tokens cannot scan all active devices.
+    try:
+        fallback_limit = int(current_app.config.get("PAGER_AUTH_LEGACY_FALLBACK_LIMIT", 25))
+    except (TypeError, ValueError):
+        fallback_limit = 25
+    fallback_limit = max(0, min(fallback_limit, 250))
+    if fallback_limit <= 0:
+        return None
+
+    devices = (
+        PagerDevice.query.options(
+            joinedload(PagerDevice.department).load_only(Department.id, Department.company_id, Department.is_active, Department.name),
+            noload(PagerDevice.company),
+        )
+        .filter(
+            PagerDevice.active.is_(True),
+            or_(PagerDevice.token_fingerprint.is_(None), PagerDevice.token_fingerprint == ""),
+        )
+        .order_by(PagerDevice.id.asc())
+        .limit(fallback_limit)
+        .all()
+    )
+    for device in devices:
+        if verify_pager_token(device.token_hash, token):
+            if not device.department or not device.department.is_active or device.department.company_id != device.company_id:
+                continue
+            current_app.logger.warning(
+                "PAGER_AUTH legacy_fingerprint_fallback pager_device_id=%s company_id=%s department_id=%s",
+                device.id,
+                device.company_id,
+                device.department_id,
+            )
+            return device
+    return None
 
 
 def _maybe_persist_pager_token_fingerprint(device: PagerDevice, token: str) -> None:
@@ -295,8 +369,20 @@ def _maybe_update_pager_last_seen(device: PagerDevice, update_last_seen: bool) -
             return
         _PAGER_LAST_SEEN_TRACKER[device.id] = now_mono
     device.last_seen_at = now_utc
-    db.session.commit()
-    g.authenticated_pager_device_last_seen_updated = True
+    try:
+        db.session.commit()
+        g.authenticated_pager_device_last_seen_updated = True
+    except Exception:
+        db.session.rollback()
+        with _PAGER_CACHE_LOCK:
+            _PAGER_LAST_SEEN_TRACKER.pop(device.id, None)
+        current_app.logger.warning(
+            "Pager last-seen update failed pager_device_id=%s department_id=%s company_id=%s",
+            getattr(device, "id", None),
+            getattr(device, "department_id", None),
+            getattr(device, "company_id", None),
+            exc_info=True,
+        )
 
 
 def get_authenticated_user() -> User | None:

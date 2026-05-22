@@ -121,6 +121,9 @@ export SOCKETIO_ALLOW_MULTIWORKER=true
 export SOCKETIO_FORCE_POLLING=false
 export ANDON_RUNTIME_SCHEMA_REPAIR=false
 export SESSION_COOKIE_SECURE=true
+export PREFERRED_URL_SCHEME=https
+export PROXY_FIX_X_FOR=1
+export PROXY_FIX_X_PROTO=1
 export SECRET_KEY=use-a-long-random-secret
 ```
 
@@ -130,11 +133,61 @@ Recommended production command:
 gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 2 --bind 0.0.0.0:8000 wsgi:app
 ```
 
+Example deployment configs live under:
+
+- `deploy/nginx/andon.conf.example`
+- `deploy/systemd/andon.service.example`
+- `deploy/gunicorn/andon_gunicorn.conf.py.example`
+
 `REDIS_REQUIRED=true` is recommended in production. If `REDIS_REQUIRED` is left off, the app can fall back to in-memory cache behavior in development when Redis is unavailable. Redis is used for cache and the Socket.IO message queue only; it is not the source of truth for alerts, users, machines, reports, or machine status.
 
 Set `ANDON_RUNTIME_SCHEMA_REPAIR=false` in production so schema/data repair logic does not run at app startup. Run schema changes through migrations instead.
 
 For multiple app instances or workers, Redis is required for Socket.IO message fan-out. Put Nginx or your reverse proxy in front with WebSocket upgrade headers for `/socket.io/`, including `Upgrade`, `Connection`, `Host`, `X-Forwarded-For`, and `X-Forwarded-Proto`.
+
+If Nginx or another proxy terminates HTTPS before Gunicorn, keep `SESSION_COOKIE_SECURE=true` and set the proxy trust counts so Flask treats forwarded HTTPS correctly:
+
+```bash
+export PROXY_FIX_X_FOR=1
+export PROXY_FIX_X_PROTO=1
+```
+
+Use higher values only if you intentionally have multiple trusted proxy hops.
+
+## Health Check
+
+The app exposes `GET /health` without login. It returns safe JSON only:
+
+- app status
+- database connectivity
+- cache backend status
+- Socket.IO configuration presence
+
+It does not return secrets, database URLs, tokens, or cookies.
+
+## Runtime State Risks
+
+The following state is process-local today and will not be shared across Gunicorn workers:
+
+- login rate limiting in [andon_system/routes/pages.py](/home/jsingh/projects/gustavo/andon_system/routes/pages.py)
+- pager token cache and pager last-seen throttling in [andon_system/security.py](/home/jsingh/projects/gustavo/andon_system/security.py)
+- local cache fallback in [andon_system/services/cache_service.py](/home/jsingh/projects/gustavo/andon_system/services/cache_service.py)
+
+Practical impact:
+
+- login throttling is enforced per worker, not globally
+- pager token cache warmup happens independently in each worker
+- pager last-seen writes can occur from multiple workers after throttle windows
+- cache invalidation is only fully shared when Redis is configured
+- Flask session and CSRF state remain client-cookie based, so they are safe across workers as long as `SECRET_KEY` is stable
+
+Recommended production path:
+
+- keep a stable non-default `SECRET_KEY`
+- run behind Nginx with `X-Forwarded-Proto` forwarded and trusted
+- use Redis for cache and Socket.IO fan-out
+- use `SOCKETIO_ALLOW_MULTIWORKER=true` only with a Redis message queue
+- if global login throttling becomes important, move rate-limit state to Redis rather than per-process memory
 
 ## Pages
 

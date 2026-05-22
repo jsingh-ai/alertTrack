@@ -1,0 +1,25 @@
+[Unit]
+Description=Andon Flask application
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/andon
+EnvironmentFile=/opt/andon/.env
+Environment=PYTHONPATH=/opt/andon
+
+# When HTTPS terminates at Nginx, keep these proxy trust counts aligned with the
+# proxy headers in deploy/nginx/andon.conf.example so secure login cookies work.
+Environment=FLASK_CONFIG=production
+Environment=PROXY_FIX_X_FOR=1
+Environment=PROXY_FIX_X_PROTO=1
+
+ExecStart=/opt/andon/.venv/bin/gunicorn -c /opt/andon/deploy/gunicorn/andon_gunicorn.conf.py wsgi:app
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

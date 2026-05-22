@@ -23,6 +23,8 @@ _REDIS_LOCK = threading.RLock()
 
 _CACHE_PREFIX = "andon:cache"
 _VERSION_PREFIX = "andon:cachever"
+_LOCAL_CACHE_MAX_ENTRIES = 2048
+_LOCAL_VERSION_MAX_ENTRIES = 512
 
 
 def get_cached(key):
@@ -76,10 +78,26 @@ def set_cached(key, value, ttl_seconds: int):
                 raise
 
     with _LOCAL_LOCK:
+        _prune_local_cache_locked()
         _LOCAL_CACHE[cache_key] = {
             "value": value,
             "expires_at": time.monotonic() + ttl_seconds,
         }
+
+
+def cache_runtime_status() -> dict:
+    redis_url = os.getenv("REDIS_URL")
+    configured = bool(redis_url)
+    required = _redis_required()
+    client = _get_redis_client()
+    reachable = client is not None if configured else None
+    backend = "redis" if client is not None else "memory"
+    return {
+        "backend": backend,
+        "redis_configured": configured,
+        "redis_required": required,
+        "redis_reachable": reachable,
+    }
 
 
 def invalidate_cache(namespace: str | None = None, company_id=None):
@@ -154,6 +172,7 @@ def _bump_version(scope_type, company_id=None, namespace=None):
                 raise
 
     with _LOCAL_LOCK:
+        _prune_local_versions_locked()
         _LOCAL_VERSIONS[version_key] = _LOCAL_VERSIONS.get(version_key, 0) + 1
 
 
@@ -207,6 +226,35 @@ def _get_local_cached(cache_key):
             _LOCAL_CACHE.pop(cache_key, None)
             return None
         return entry["value"]
+
+
+def _prune_local_cache_locked():
+    now = time.monotonic()
+    expired_keys = [
+        cache_key
+        for cache_key, entry in _LOCAL_CACHE.items()
+        if float(entry.get("expires_at") or 0) <= now
+    ]
+    for cache_key in expired_keys:
+        _LOCAL_CACHE.pop(cache_key, None)
+    if len(_LOCAL_CACHE) <= _LOCAL_CACHE_MAX_ENTRIES:
+        return
+    overflow = len(_LOCAL_CACHE) - _LOCAL_CACHE_MAX_ENTRIES
+    oldest_keys = sorted(
+        _LOCAL_CACHE,
+        key=lambda key: float(_LOCAL_CACHE[key].get("expires_at") or 0),
+    )[:overflow]
+    for cache_key in oldest_keys:
+        _LOCAL_CACHE.pop(cache_key, None)
+
+
+def _prune_local_versions_locked():
+    if len(_LOCAL_VERSIONS) <= _LOCAL_VERSION_MAX_ENTRIES:
+        return
+    overflow = len(_LOCAL_VERSIONS) - _LOCAL_VERSION_MAX_ENTRIES
+    removable_keys = [key for key in _LOCAL_VERSIONS if ":namespace:" in key][:overflow]
+    for version_key in removable_keys:
+        _LOCAL_VERSIONS.pop(version_key, None)
 
 
 def _safe_redis_delete(client, cache_key):
