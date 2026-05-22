@@ -21,7 +21,7 @@ from andon_system.models.pager_device import PagerDevice
 from andon_system.models.user import User, UserCompanyAccess
 from andon_system.routes.pages import _session_cookie_domain_matches_request
 from andon_system.security import ADMIN_SESSION_KEY, CSRF_SESSION_KEY, USER_SESSION_KEY
-from andon_system.services.board_service import _operator_metadata_cache_key
+from andon_system.services.board_service import _operator_metadata_cache_key, build_operator_metadata
 
 
 ADMIN_POST_CASES = [
@@ -731,3 +731,101 @@ def test_pager_active_alerts_reuses_blueprint_authenticated_device(login_client,
 
     assert response.status_code == 200
     assert calls["count"] == 1
+
+
+def test_operator_metadata_issue_groups_are_company_and_scope_filtered(tmp_path, monkeypatch):
+    database_path = tmp_path / "operator-metadata.sqlite3"
+    monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")
+
+    original_database_uri = TestingConfig.SQLALCHEMY_DATABASE_URI
+    TestingConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{database_path}"
+
+    app = create_app("testing")
+    with app.app_context():
+        db.create_all()
+        company_a = Company(name="Company A", slug="company-a", is_active=True)
+        company_b = Company(name="Company B", slug="company-b", is_active=True)
+        db.session.add_all([company_a, company_b])
+        db.session.flush()
+
+        dept_a1 = Department(company_id=company_a.id, name="Dept A1", is_active=True)
+        dept_a2 = Department(company_id=company_a.id, name="Dept A2", is_active=True)
+        dept_b1 = Department(company_id=company_b.id, name="Dept B1", is_active=True)
+        db.session.add_all([dept_a1, dept_a2, dept_b1])
+        db.session.flush()
+
+        cat_a1 = IssueCategory(company_id=company_a.id, department_id=dept_a1.id, name="Scoped Cat", is_active=True)
+        cat_a2 = IssueCategory(company_id=company_a.id, department_id=dept_a2.id, name="Other Dept Cat", is_active=True)
+        cat_b1 = IssueCategory(company_id=company_b.id, department_id=dept_b1.id, name="Other Company Cat", is_active=True)
+        db.session.add_all([cat_a1, cat_a2, cat_b1])
+        db.session.flush()
+
+        db.session.add_all(
+            [
+                IssueProblem(company_id=company_a.id, category_id=cat_a1.id, name="Scoped Problem", is_active=True),
+                IssueProblem(company_id=company_a.id, category_id=cat_a2.id, name="Other Dept Problem", is_active=True),
+                IssueProblem(company_id=company_b.id, category_id=cat_b1.id, name="Other Company Problem", is_active=True),
+            ]
+        )
+        db.session.commit()
+
+        payload = build_operator_metadata(
+            company_id=company_a.id,
+            current_user=SimpleNamespace(id=99),
+            membership=SimpleNamespace(
+                id=321,
+                role="Operator",
+                scope_mode="restricted",
+                department_id=dept_a1.id,
+                machine_group_id=None,
+            ),
+            scope={
+                "company_id": company_a.id,
+                "department_id": dept_a1.id,
+                "department_ids": [dept_a1.id],
+                "machine_group_name": None,
+                "machine_group_names": [],
+                "machine_ids": [],
+                "restricted": True,
+            },
+        )
+
+        assert [group["category_name"] for group in payload["issue_groups"]] == ["Scoped Cat"]
+        assert payload["issue_groups"][0]["department_name"] == "Dept A1"
+        assert [problem["name"] for problem in payload["issue_groups"][0]["problems"]] == ["Scoped Problem"]
+
+        db.session.remove()
+        db.drop_all()
+    TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
+
+
+def test_cached_pager_device_lookup_does_not_hit_db(monkeypatch):
+    from andon_system import security as security_module
+
+    fake_device = SimpleNamespace(
+        id=7,
+        company_id=3,
+        department_id=5,
+        name="Dept Pager",
+        token_hash="hash-value",
+        department=SimpleNamespace(id=5, company_id=3, is_active=True, name="Maintenance"),
+    )
+
+    security_module._PAGER_TOKEN_DEVICE_CACHE.clear()
+    security_module._cache_pager_device_for_token("cached-token", fake_device)
+
+    class ExplodingQuery:
+        def __getattr__(self, _name):
+            raise AssertionError("PagerDevice.query should not be used on cache hit")
+
+    setattr(security_module.PagerDevice, "query", ExplodingQuery())
+    try:
+        cached = security_module._get_cached_pager_device_for_token("cached-token")
+    finally:
+        delattr(security_module.PagerDevice, "query")
+
+    assert cached is not None
+    assert cached.id == 7
+    assert cached.company_id == 3
+    assert cached.department_id == 5
+    assert cached.name == "Dept Pager"

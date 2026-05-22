@@ -183,23 +183,7 @@ def build_operator_metadata(company_id=None, current_user=None, membership=None,
             }
             for department in context["visible_departments"]
         ],
-        "issue_groups": [
-            {
-                "department_id": category.department_id,
-                "department_name": category.department.name if category.department else None,
-                "category_id": category.id,
-                "category_name": category.name,
-                "problems": [
-                    {
-                        "id": problem.id,
-                        "name": problem.name,
-                        "description": problem.description,
-                    }
-                    for problem in sorted(category.problems or [], key=lambda item: item.name.lower())
-                ],
-            }
-            for category in context["visible_issue_categories"]
-        ],
+        "issue_groups": list(context["visible_issue_groups"]),
         "users": [
             {
                 "id": user.id,
@@ -259,42 +243,9 @@ def _load_operator_metadata_context(company_id, membership=None, scope=None, met
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
     metadata_department_ids = list(department_ids)
 
-    if role == "Operator" and company_id:
-        all_departments_started_at = time.perf_counter()
-        all_department_rows = (
-            Department.query.options(noload("*"))
-            .with_entities(Department.id)
-            .filter(Department.company_id == company_id)
-            .all()
-        )
-        all_department_ids = sorted({row.id for row in all_department_rows if row.id is not None})
-        if all_department_ids:
-            metadata_department_ids = all_department_ids
-        if metrics is not None:
-            metrics["operator_department_scope_ms"] = round((time.perf_counter() - all_departments_started_at) * 1000, 1)
-
     department_query = Department.query.options(
         load_only(Department.id, Department.company_id, Department.name, Department.is_active),
         noload("*"),
-    )
-    issue_query = IssueCategory.query.options(
-        load_only(
-            IssueCategory.id,
-            IssueCategory.company_id,
-            IssueCategory.name,
-            IssueCategory.department_id,
-            IssueCategory.color,
-            IssueCategory.priority_default,
-            IssueCategory.is_active,
-        ),
-        joinedload(IssueCategory.department).load_only(Department.id, Department.name, Department.is_active),
-        joinedload(IssueCategory.problems).load_only(
-            IssueProblem.id,
-            IssueProblem.name,
-            IssueProblem.description,
-            IssueProblem.is_active,
-        ),
-        noload(IssueCategory.alerts),
     )
     user_query = UserCompanyAccess.query.options(
         load_only(
@@ -320,11 +271,9 @@ def _load_operator_metadata_context(company_id, membership=None, scope=None, met
 
     if company_id:
         department_query = department_query.filter(Department.company_id == company_id)
-        issue_query = issue_query.filter(IssueCategory.company_id == company_id)
         user_query = user_query.filter(UserCompanyAccess.company_id == company_id)
     if metadata_department_ids:
         department_query = department_query.filter(Department.id.in_(metadata_department_ids))
-        issue_query = issue_query.filter(IssueCategory.department_id.in_(metadata_department_ids))
         user_query = user_query.filter(UserCompanyAccess.department_id.in_(metadata_department_ids))
     if machine_group_names:
         user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
@@ -337,15 +286,13 @@ def _load_operator_metadata_context(company_id, membership=None, scope=None, met
     departments_ms = (time.perf_counter() - departments_started_at) * 1000
 
     issue_started_at = time.perf_counter()
-    issue_categories = issue_query.filter_by(is_active=True).order_by(IssueCategory.name.asc()).all()
+    issue_groups = _load_operator_issue_groups(
+        company_id=company_id,
+        metadata_department_ids=metadata_department_ids,
+    )
     issue_ms = (time.perf_counter() - issue_started_at) * 1000
 
     visible_departments = [department for department in departments if role == "Operator" or department.is_active]
-    visible_issue_categories = [
-        category
-        for category in issue_categories
-        if category.department and category.department.is_active
-    ]
 
     users_started_at = time.perf_counter()
     visible_users = [
@@ -367,7 +314,7 @@ def _load_operator_metadata_context(company_id, membership=None, scope=None, met
 
     return {
         "visible_departments": visible_departments,
-        "visible_issue_categories": visible_issue_categories,
+        "visible_issue_groups": issue_groups,
         "visible_users": visible_users,
     }
 
@@ -394,6 +341,101 @@ def _operator_metadata_cache_ttl_seconds() -> int:
     except (TypeError, ValueError):
         raw_value = DEFAULT_OPERATOR_METADATA_CACHE_TTL_SECONDS
     return max(1, min(raw_value, 300))
+
+
+def _load_operator_issue_groups(company_id, metadata_department_ids: list[int]):
+    cache_key = (
+        "operator_issue_groups",
+        company_id,
+        tuple(sorted(metadata_department_ids or [])),
+    )
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    category_query = IssueCategory.query.options(
+        load_only(
+            IssueCategory.id,
+            IssueCategory.company_id,
+            IssueCategory.name,
+            IssueCategory.department_id,
+            IssueCategory.color,
+            IssueCategory.priority_default,
+            IssueCategory.is_active,
+        ),
+        joinedload(IssueCategory.department).load_only(Department.id, Department.name, Department.is_active),
+        noload(IssueCategory.problems),
+        noload(IssueCategory.alerts),
+    ).filter(IssueCategory.is_active.is_(True))
+
+    if company_id:
+        category_query = category_query.filter(IssueCategory.company_id == company_id)
+    if metadata_department_ids:
+        category_query = category_query.filter(IssueCategory.department_id.in_(metadata_department_ids))
+
+    categories = category_query.order_by(IssueCategory.department_id.asc(), IssueCategory.id.asc()).all()
+    if not categories:
+        empty_result = []
+        set_cached(cache_key, empty_result, _operator_metadata_cache_ttl_seconds())
+        return empty_result
+
+    category_ids = [category.id for category in categories]
+    problem_query = IssueProblem.query.options(
+        load_only(
+            IssueProblem.id,
+            IssueProblem.company_id,
+            IssueProblem.category_id,
+            IssueProblem.name,
+            IssueProblem.description,
+            IssueProblem.is_active,
+        ),
+        noload(IssueProblem.category),
+        noload(IssueProblem.alerts),
+    ).filter(
+        IssueProblem.is_active.is_(True),
+        IssueProblem.category_id.in_(category_ids),
+    )
+    if company_id:
+        problem_query = problem_query.filter(IssueProblem.company_id == company_id)
+
+    problems_by_category_id = {}
+    for problem in problem_query.order_by(IssueProblem.category_id.asc(), IssueProblem.id.asc()).all():
+        problems_by_category_id.setdefault(problem.category_id, []).append(problem)
+
+    issue_groups = []
+    for category in categories:
+        if not category.department or not category.department.is_active:
+            continue
+        problems = sorted(
+            problems_by_category_id.get(category.id, []),
+            key=lambda item: (item.name or "").lower(),
+        )
+        issue_groups.append(
+            {
+                "department_id": category.department_id,
+                "department_name": category.department.name if category.department else None,
+                "category_id": category.id,
+                "category_name": category.name,
+                "problems": [
+                    {
+                        "id": problem.id,
+                        "name": problem.name,
+                        "description": problem.description,
+                    }
+                    for problem in problems
+                ],
+            }
+        )
+
+    issue_groups.sort(
+        key=lambda item: (
+            (item.get("department_name") or "").lower(),
+            (item.get("category_name") or "").lower(),
+            int(item.get("category_id") or 0),
+        )
+    )
+    set_cached(cache_key, issue_groups, _operator_metadata_cache_ttl_seconds())
+    return issue_groups
 
 
 def _load_board_context(company_id, include_alerts: bool, include_metadata: bool = True, include_radius: bool = True):
