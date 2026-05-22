@@ -328,38 +328,50 @@ def create_alert(payload: dict, metrics: dict | None = None):
             status_code=409,
             data={"existing_alert": existing_payload or {"id": existing_alert_id}},
         )
+    gap_started_at = time.perf_counter()
+    previous_step_at = _perf_step("gap_enter_after_duplicate", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     if not department_id and not issue_category:
         raise AlertServiceError("department_id is required")
+    previous_step_at = _perf_step("gap_after_department_required_check", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     if not issue_category:
+        category_fallback_started_at = time.perf_counter()
         category_query = IssueCategory.query.filter_by(department_id=department_id, is_active=True)
         if company_id:
             category_query = category_query.filter(IssueCategory.company_id == company_id)
+        previous_step_at = _perf_step("gap_before_category_fallback_lookup", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
         issue_category = category_query.one_or_none()
-    if not issue_category and department_id:
-        department = Department.query.get(department_id)
-        if department and department.company_id == company_id:
-            issue_category = IssueCategory(
-                name=department.name,
-                department_id=department.id,
-                company_id=department.company_id,
-                color="#0d6efd",
-                priority_default=3,
-                is_active=True,
-            )
-            db.session.add(issue_category)
-            db.session.flush()
+        perf["issue_category_fallback_lookup_ms"] = (time.perf_counter() - category_fallback_started_at) * 1000
+        previous_step_at = _perf_step("gap_after_category_fallback_lookup", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     if not issue_category:
+        previous_step_at = _perf_step("gap_missing_issue_category", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
         raise AlertServiceError("Valid issue category is required for the selected department")
+    previous_step_at = _perf_step("gap_after_issue_category_presence_check", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     if not issue_problem:
+        previous_step_at = _perf_step("gap_missing_issue_problem", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
         raise AlertServiceError("Valid issue_problem_id is required")
+    previous_step_at = _perf_step("gap_after_issue_problem_presence_check", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     if issue_problem.category_id != issue_category.id:
+        previous_step_at = _perf_step("gap_issue_problem_category_mismatch", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
         raise AlertServiceError("Issue problem must belong to the selected department")
+    previous_step_at = _perf_step("gap_after_problem_category_match_check", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     if company_id and issue_category.company_id != company_id:
+        previous_step_at = _perf_step("gap_issue_category_company_mismatch", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
         raise AlertServiceError("Issue category does not belong to the selected company")
+    previous_step_at = _perf_step("gap_after_issue_category_company_check", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     if company_id and issue_problem.company_id != company_id:
+        previous_step_at = _perf_step("gap_issue_problem_company_mismatch", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
         raise AlertServiceError("Issue problem does not belong to the selected company")
+    previous_step_at = _perf_step("gap_after_issue_problem_company_check", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
 
     department_id = issue_category.department_id
+    gap_ms = (time.perf_counter() - gap_started_at) * 1000
+    perf["after_duplicate_to_before_build_ms"] = gap_ms
+    if current_app.config.get("ANDON_PERF_LOGS"):
+        current_app.logger.debug(
+            "PERF alert_create_gap after_duplicate_to_before_build_ms=%.1f detail=category_fallback_ms:%s",
+            gap_ms,
+            round(float(perf.get("issue_category_fallback_lookup_ms") or 0.0), 1),
+        )
 
     previous_step_at = _perf_step("before_alert_build", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     alert_build_started_at = time.perf_counter()
