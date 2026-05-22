@@ -2,9 +2,11 @@ import os
 import shlex
 import time
 
-from flask import Flask, flash, g, has_request_context, redirect, request, session, url_for
+from flask import Flask, current_app, flash, g, has_request_context, redirect, request, session, url_for
 from flask import jsonify
+from sqlalchemy import event
 from sqlalchemy import inspect, text
+from sqlalchemy.orm import Session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .company_context import get_companies, get_current_company
@@ -26,6 +28,64 @@ from .security import (
 from .services.cache_service import cache_runtime_status
 
 WORKSPACE_PROMPT_SESSION_KEY = "andon_workspace_prompt"
+_SA_PERF_LISTENERS_REGISTERED = False
+
+
+def _register_sqlalchemy_perf_listeners() -> None:
+    global _SA_PERF_LISTENERS_REGISTERED
+    if _SA_PERF_LISTENERS_REGISTERED:
+        return
+    _SA_PERF_LISTENERS_REGISTERED = True
+
+    def _listener_log(name: str, started_at: float, sess: Session):
+        if has_request_context() and current_app.config.get("ANDON_PERF_LOGS"):
+            current_app.logger.debug(
+                "PERF sqlalchemy_listener listener_name=%s duration_ms=%.1f new=%s dirty=%s deleted=%s",
+                name,
+                (time.perf_counter() - started_at) * 1000,
+                len(getattr(sess, "new", []) or []),
+                len(getattr(sess, "dirty", []) or []),
+                len(getattr(sess, "deleted", []) or []),
+            )
+
+    @event.listens_for(Session, "before_flush")
+    def _before_flush(sess, flush_context, instances):  # noqa: ANN001
+        started_at = time.perf_counter()
+        sess.info["__perf_before_flush_at"] = started_at
+        _listener_log("before_flush", started_at, sess)
+
+    @event.listens_for(Session, "after_flush")
+    def _after_flush(sess, flush_context):  # noqa: ANN001
+        started_at = time.perf_counter()
+        prev = sess.info.get("__perf_before_flush_at")
+        if prev and has_request_context() and current_app.config.get("ANDON_PERF_LOGS"):
+            current_app.logger.debug(
+                "PERF sqlalchemy_listener listener_name=flush_roundtrip duration_ms=%.1f",
+                (started_at - prev) * 1000,
+            )
+        _listener_log("after_flush", started_at, sess)
+
+    @event.listens_for(Session, "after_flush_postexec")
+    def _after_flush_postexec(sess, flush_context):  # noqa: ANN001
+        started_at = time.perf_counter()
+        _listener_log("after_flush_postexec", started_at, sess)
+
+    @event.listens_for(Session, "before_commit")
+    def _before_commit(sess):  # noqa: ANN001
+        started_at = time.perf_counter()
+        sess.info["__perf_before_commit_at"] = started_at
+        _listener_log("before_commit", started_at, sess)
+
+    @event.listens_for(Session, "after_commit")
+    def _after_commit(sess):  # noqa: ANN001
+        started_at = time.perf_counter()
+        prev = sess.info.get("__perf_before_commit_at")
+        if prev and has_request_context() and current_app.config.get("ANDON_PERF_LOGS"):
+            current_app.logger.debug(
+                "PERF sqlalchemy_listener listener_name=commit_roundtrip duration_ms=%.1f",
+                (started_at - prev) * 1000,
+            )
+        _listener_log("after_commit", started_at, sess)
 
 
 def _detect_gunicorn_worker_count() -> int:
@@ -506,6 +566,7 @@ def create_app(config_name: str | None = None) -> Flask:
     os.makedirs(app.instance_path, exist_ok=True)
 
     db.init_app(app)
+    _register_sqlalchemy_perf_listeners()
     if migrate is not None:
         migrate.init_app(app, db)
     if socketio is not None and app.config.get("SOCKETIO_ENABLED"):
