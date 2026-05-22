@@ -7,6 +7,7 @@ from flask import current_app, has_request_context
 from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..company_context import get_current_company_id
+from ..extensions import db
 from ..models.alert import ALERT_STATUSES_ACTIVE, EVENT_CREATED, AndonAlert, AndonAlertEvent
 from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
@@ -286,7 +287,7 @@ def _load_operator_metadata_context(company_id, membership=None, scope=None, met
     departments_ms = (time.perf_counter() - departments_started_at) * 1000
 
     issue_started_at = time.perf_counter()
-    issue_groups = _load_operator_issue_groups(
+    issue_groups, issue_metrics = _load_operator_issue_groups(
         company_id=company_id,
         metadata_department_ids=metadata_department_ids,
     )
@@ -311,6 +312,7 @@ def _load_operator_metadata_context(company_id, membership=None, scope=None, met
         metrics["user_query_ms"] = round(users_ms, 1)
         metrics["scope_department_count"] = len(metadata_department_ids)
         metrics["scope_machine_group_count"] = len(machine_group_names)
+        metrics.update(issue_metrics)
 
     return {
         "visible_departments": visible_departments,
@@ -344,6 +346,7 @@ def _operator_metadata_cache_ttl_seconds() -> int:
 
 
 def _load_operator_issue_groups(company_id, metadata_department_ids: list[int]):
+    started_at = time.perf_counter()
     cache_key = (
         "operator_issue_groups",
         company_id,
@@ -351,91 +354,155 @@ def _load_operator_issue_groups(company_id, metadata_department_ids: list[int]):
     )
     cached = get_cached(cache_key)
     if cached is not None:
-        return cached
+        cached_problem_count = sum(len(item.get("problems") or []) for item in cached if isinstance(item, dict))
+        return cached, {
+            "issue_cache": "hit",
+            "category_query_ms": 0.0,
+            "problem_query_ms": 0.0,
+            "grouping_ms": 0.0,
+            "category_count": len(cached),
+            "problem_count": cached_problem_count,
+            "problem_cap_reached": False,
+        }
 
-    category_query = IssueCategory.query.options(
-        load_only(
-            IssueCategory.id,
-            IssueCategory.company_id,
-            IssueCategory.name,
-            IssueCategory.department_id,
-            IssueCategory.color,
-            IssueCategory.priority_default,
-            IssueCategory.is_active,
-        ),
-        joinedload(IssueCategory.department).load_only(Department.id, Department.name, Department.is_active),
-        noload(IssueCategory.problems),
-        noload(IssueCategory.alerts),
-    ).filter(IssueCategory.is_active.is_(True))
+    scoped_department_ids = sorted({int(value) for value in (metadata_department_ids or []) if value is not None})
+    include_description = bool(current_app.config.get("OPERATOR_METADATA_INCLUDE_PROBLEM_DESCRIPTION"))
+    max_problems = int(current_app.config.get("OPERATOR_METADATA_MAX_PROBLEMS", 20000) or 20000)
+    max_problems = max(100, min(max_problems, 200000))
 
-    if company_id:
-        category_query = category_query.filter(IssueCategory.company_id == company_id)
-    if metadata_department_ids:
-        category_query = category_query.filter(IssueCategory.department_id.in_(metadata_department_ids))
+    category_started_at = time.perf_counter()
+    category_query = db.session.query(
+        IssueCategory.id.label("category_id"),
+        IssueCategory.department_id.label("department_id"),
+        IssueCategory.name.label("category_name"),
+        Department.name.label("department_name"),
+    ).join(
+        Department,
+        Department.id == IssueCategory.department_id,
+    ).filter(
+        IssueCategory.is_active.is_(True),
+        Department.is_active.is_(True),
+    )
+    if company_id is not None:
+        category_query = category_query.filter(
+            IssueCategory.company_id == company_id,
+            Department.company_id == company_id,
+        )
+    if scoped_department_ids:
+        category_query = category_query.filter(IssueCategory.department_id.in_(scoped_department_ids))
+    category_rows = category_query.order_by(IssueCategory.department_id.asc(), IssueCategory.id.asc()).all()
+    category_query_ms = (time.perf_counter() - category_started_at) * 1000
 
-    categories = category_query.order_by(IssueCategory.department_id.asc(), IssueCategory.id.asc()).all()
-    if not categories:
+    if not category_rows:
         empty_result = []
         set_cached(cache_key, empty_result, _operator_metadata_cache_ttl_seconds())
-        return empty_result
+        metrics = {
+            "issue_cache": "miss",
+            "category_query_ms": round(category_query_ms, 1),
+            "problem_query_ms": 0.0,
+            "grouping_ms": 0.0,
+            "category_count": 0,
+            "problem_count": 0,
+            "problem_cap_reached": False,
+        }
+        _perf_log(
+            "operator_issue_metadata",
+            started_at,
+            cache="miss",
+            company_id=company_id,
+            scoped_departments=len(scoped_department_ids),
+            category_count=0,
+            problem_count=0,
+            category_query_ms=round(category_query_ms, 1),
+            problem_query_ms=0.0,
+            grouping_ms=0.0,
+            include_description=include_description,
+            max_problems=max_problems,
+            problem_cap_reached=False,
+        )
+        return empty_result, metrics
 
-    category_ids = [category.id for category in categories]
-    problem_query = IssueProblem.query.options(
-        load_only(
-            IssueProblem.id,
-            IssueProblem.company_id,
-            IssueProblem.category_id,
-            IssueProblem.name,
-            IssueProblem.description,
-            IssueProblem.is_active,
-        ),
-        noload(IssueProblem.category),
-        noload(IssueProblem.alerts),
-    ).filter(
+    category_ids = [int(row.category_id) for row in category_rows]
+    problem_columns = [
+        IssueProblem.id.label("problem_id"),
+        IssueProblem.category_id.label("category_id"),
+        IssueProblem.name.label("problem_name"),
+    ]
+    if include_description:
+        problem_columns.append(IssueProblem.description.label("problem_description"))
+
+    problem_started_at = time.perf_counter()
+    problem_query = db.session.query(*problem_columns).filter(
         IssueProblem.is_active.is_(True),
         IssueProblem.category_id.in_(category_ids),
     )
-    if company_id:
+    if company_id is not None:
         problem_query = problem_query.filter(IssueProblem.company_id == company_id)
+    problem_rows = problem_query.order_by(IssueProblem.category_id.asc(), IssueProblem.id.asc()).limit(max_problems + 1).all()
+    problem_query_ms = (time.perf_counter() - problem_started_at) * 1000
 
-    problems_by_category_id = {}
-    for problem in problem_query.order_by(IssueProblem.category_id.asc(), IssueProblem.id.asc()).all():
-        problems_by_category_id.setdefault(problem.category_id, []).append(problem)
-
-    issue_groups = []
-    for category in categories:
-        if not category.department or not category.department.is_active:
-            continue
-        problems = sorted(
-            problems_by_category_id.get(category.id, []),
-            key=lambda item: (item.name or "").lower(),
+    problem_cap_reached = len(problem_rows) > max_problems
+    if problem_cap_reached:
+        problem_rows = problem_rows[:max_problems]
+        current_app.logger.warning(
+            "OPERATOR_METADATA issue problem cap reached company_id=%s scoped_departments=%s max_problems=%s",
+            company_id,
+            len(scoped_department_ids),
+            max_problems,
         )
-        issue_groups.append(
+
+    grouping_started_at = time.perf_counter()
+    problems_by_category_id = {}
+    for row in problem_rows:
+        description_value = getattr(row, "problem_description", None) if include_description else None
+        problems_by_category_id.setdefault(int(row.category_id), []).append(
             {
-                "department_id": category.department_id,
-                "department_name": category.department.name if category.department else None,
-                "category_id": category.id,
-                "category_name": category.name,
-                "problems": [
-                    {
-                        "id": problem.id,
-                        "name": problem.name,
-                        "description": problem.description,
-                    }
-                    for problem in problems
-                ],
+                "id": int(row.problem_id),
+                "name": row.problem_name,
+                "description": description_value,
             }
         )
 
-    issue_groups.sort(
-        key=lambda item: (
-            (item.get("department_name") or "").lower(),
-            (item.get("category_name") or "").lower(),
-            int(item.get("category_id") or 0),
+    issue_groups = []
+    for row in category_rows:
+        issue_groups.append(
+            {
+                "department_id": int(row.department_id),
+                "department_name": row.department_name,
+                "category_id": int(row.category_id),
+                "category_name": row.category_name,
+                "problems": problems_by_category_id.get(int(row.category_id), []),
+            }
         )
-    )
+    grouping_ms = (time.perf_counter() - grouping_started_at) * 1000
+
     set_cached(cache_key, issue_groups, _operator_metadata_cache_ttl_seconds())
-    return issue_groups
+    metrics = {
+        "issue_cache": "miss",
+        "category_query_ms": round(category_query_ms, 1),
+        "problem_query_ms": round(problem_query_ms, 1),
+        "grouping_ms": round(grouping_ms, 1),
+        "category_count": len(category_rows),
+        "problem_count": len(problem_rows),
+        "problem_cap_reached": bool(problem_cap_reached),
+    }
+    _perf_log(
+        "operator_issue_metadata",
+        started_at,
+        cache="miss",
+        company_id=company_id,
+        scoped_departments=len(scoped_department_ids),
+        scoped_department_ids=scoped_department_ids[:25],
+        category_count=len(category_rows),
+        problem_count=len(problem_rows),
+        category_query_ms=round(category_query_ms, 1),
+        problem_query_ms=round(problem_query_ms, 1),
+        grouping_ms=round(grouping_ms, 1),
+        include_description=include_description,
+        max_problems=max_problems,
+        problem_cap_reached=bool(problem_cap_reached),
+    )
+    return issue_groups, metrics
 
 
 def _load_board_context(company_id, include_alerts: bool, include_metadata: bool = True, include_radius: bool = True):

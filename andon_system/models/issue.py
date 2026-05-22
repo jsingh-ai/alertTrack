@@ -10,6 +10,7 @@ class IssueCategory(db.Model):
         db.Index("ix_issue_categories_company_id", "company_id"),
         db.Index("ix_issue_categories_department_id", "department_id"),
         db.Index("ix_issue_categories_is_active", "is_active"),
+        db.Index("ix_issue_categories_company_active_department_id", "company_id", "is_active", "department_id", "id"),
     )
 
     id = db.Column(db.Integer, primary_key=True)
@@ -47,6 +48,8 @@ class IssueProblem(db.Model):
         db.Index("ix_issue_problems_company_id", "company_id"),
         db.Index("ix_issue_problems_category_id", "category_id"),
         db.Index("ix_issue_problems_is_active", "is_active"),
+        db.Index("ix_issue_problems_company_active_category_id", "company_id", "is_active", "category_id", "id"),
+        db.Index("ix_issue_problems_category_active_id", "category_id", "is_active", "id"),
     )
 
     id = db.Column(db.Integer, primary_key=True)

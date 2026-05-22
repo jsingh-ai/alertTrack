@@ -316,6 +316,7 @@ def operator_metadata():
         current_app.logger.debug(
             "PERF operator_metadata access_ms=%.1f user_ms=%.1f company_ms=%.1f membership_ms=%.1f scope_ms=%.1f "
             "service_ms=%.1f jsonify_ms=%.1f total_ms=%.1f cache=%s cache_lookup_ms=%s dept_query_ms=%s issue_query_ms=%s "
+            "category_query_ms=%s problem_query_ms=%s grouping_ms=%s category_count=%s problem_count=%s problem_cap_reached=%s "
             "user_query_ms=%s serialize_ms=%s cache_store_ms=%s company_id=%s user_id=%s role=%s departments=%s issue_groups=%s users=%s",
             access_ms,
             user_ms,
@@ -329,6 +330,12 @@ def operator_metadata():
             service_metrics.get("cache_lookup_ms"),
             service_metrics.get("department_query_ms"),
             service_metrics.get("issue_query_ms"),
+            service_metrics.get("category_query_ms"),
+            service_metrics.get("problem_query_ms"),
+            service_metrics.get("grouping_ms"),
+            service_metrics.get("category_count"),
+            service_metrics.get("problem_count"),
+            service_metrics.get("problem_cap_reached"),
             service_metrics.get("user_query_ms"),
             service_metrics.get("serialize_ms"),
             service_metrics.get("cache_store_ms"),

@@ -414,6 +414,25 @@ def _ensure_postgres_performance_indexes() -> None:
             "ON machines (company_id, machine_type, name)"
         )
     )
+    # Operator metadata issue lookups.
+    db.session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_issue_categories_company_active_department_id "
+            "ON issue_categories (company_id, is_active, department_id, id)"
+        )
+    )
+    db.session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_issue_problems_company_active_category_id "
+            "ON issue_problems (company_id, is_active, category_id, id)"
+        )
+    )
+    db.session.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_issue_problems_category_active_id "
+            "ON issue_problems (category_id, is_active, id)"
+        )
+    )
 
 
 def _ensure_pager_device_token_fingerprint_schema(allow_alter: bool) -> None:
