@@ -174,6 +174,7 @@ def get_authenticated_pager_device(update_last_seen: bool = True) -> PagerDevice
         if verify_pager_token(device.token_hash, token):
             if not device.department or not device.department.is_active or device.department.company_id != device.company_id:
                 continue
+            _maybe_persist_pager_token_fingerprint(device, token)
             g.authenticated_pager_device = device
             g.authenticated_pager_device_last_seen_updated = False
             _cache_pager_device_for_token(token, device)
@@ -268,6 +269,19 @@ def _find_pager_device_by_fingerprint(token: str) -> PagerDevice | None:
         .order_by(PagerDevice.id.asc())
         .first()
     )
+
+
+def _maybe_persist_pager_token_fingerprint(device: PagerDevice, token: str) -> None:
+    if not _pager_token_fingerprint_supported():
+        return
+    expected = fingerprint_pager_token(token)
+    if device.token_fingerprint == expected:
+        return
+    try:
+        device.token_fingerprint = expected
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _maybe_update_pager_last_seen(device: PagerDevice, update_last_seen: bool) -> None:

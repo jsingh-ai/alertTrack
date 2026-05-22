@@ -230,6 +230,9 @@ def login_page():
             request.remote_addr,
         )
         _record_login_failure(identity, request.remote_addr)
+        if "@" in str(identity or ""):
+            flash("Email sign-in is disabled. Use your username.", "warning")
+            return redirect(url_for("pages.home_page"))
         flash("Invalid username or password.", "warning")
         return redirect(url_for("pages.home_page"))
     current_app.logger.info(
