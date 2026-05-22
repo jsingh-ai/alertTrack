@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
+from flask import Blueprint, current_app, flash, g, redirect, render_template, request, session, url_for
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload, load_only, noload
 
