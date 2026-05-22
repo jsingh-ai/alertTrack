@@ -11,7 +11,12 @@ from flask import Blueprint, current_app, flash, g, redirect, render_template, r
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload, load_only, noload
 
-from ..company_context import get_current_company, set_current_company_id, set_current_company_slug
+from ..company_context import (
+    CURRENT_COMPANY_ID_SESSION_KEY,
+    CURRENT_COMPANY_SLUG_SESSION_KEY,
+    get_current_company,
+    set_current_company_slug,
+)
 from ..extensions import db
 from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
@@ -235,6 +240,10 @@ def login_page():
     membership_load_ms = 0.0
     commit_ms = 0.0
     redirect_resolution_ms = 0.0
+    next_url_ms = 0.0
+    landing_lookup_ms = 0.0
+    access_check_ms = 0.0
+    url_for_ms = 0.0
     outcome = "unknown"
     status_code = 500
     landing_endpoint = None
@@ -245,7 +254,8 @@ def login_page():
         route_total_ms = (time.perf_counter() - started_at) * 1000
         current_app.logger.debug(
             "PERF login_post form_parse_ms=%.1f rate_limit_ms=%.1f auth_ms=%.1f session_write_ms=%.1f "
-            "membership_load_ms=%.1f commit_ms=%.1f redirect_resolution_ms=%.1f route_total_ms=%.1f "
+            "membership_load_ms=%.1f commit_ms=%.1f redirect_resolution_ms=%.1f next_url_ms=%.1f "
+            "landing_lookup_ms=%.1f access_check_ms=%.1f url_for_ms=%.1f route_total_ms=%.1f "
             "status=%s outcome=%s landing=%s remote=%s",
             form_parse_ms,
             rate_limit_ms,
@@ -254,6 +264,10 @@ def login_page():
             membership_load_ms,
             commit_ms,
             redirect_resolution_ms,
+            next_url_ms,
+            landing_lookup_ms,
+            access_check_ms,
+            url_for_ms,
             route_total_ms,
             status_code,
             outcome,
@@ -373,9 +387,16 @@ def login_page():
     commit_ms = (time.perf_counter() - commit_started_at) * 1000
     membership = memberships[0]
     redirect_started_at = time.perf_counter()
+
+    # Avoid re-loading memberships or company access checks in redirect resolution.
+    session[CURRENT_COMPANY_ID_SESSION_KEY] = membership.company_id
+    membership_company = getattr(membership, "company", None)
+    if membership_company and getattr(membership_company, "slug", None):
+        session[CURRENT_COMPANY_SLUG_SESSION_KEY] = membership_company.slug
+        g.current_company = membership_company
+
     if len(memberships) == 1:
         session.pop(WORKSPACE_PROMPT_SESSION_KEY, None)
-        set_current_company_id(membership.company_id)
     else:
         session[WORKSPACE_PROMPT_SESSION_KEY] = True
         session[WORKSPACE_OPTIONS_SESSION_KEY] = [
@@ -383,27 +404,42 @@ def login_page():
             for member in memberships
             if member.company
         ]
+        next_url_started_at = time.perf_counter()
         if next_url and is_safe_redirect_target(next_url):
             session["andon_workspace_next"] = next_url
+        next_url_ms = (time.perf_counter() - next_url_started_at) * 1000
         redirect_resolution_ms = (time.perf_counter() - redirect_started_at) * 1000
         landing_endpoint = "pages.home_page"
         outcome = "success_workspace_prompt"
         status_code = 302
+        url_for_started_at = time.perf_counter()
+        target_url = url_for("pages.home_page")
+        url_for_ms = (time.perf_counter() - url_for_started_at) * 1000
         _log_login_perf()
-        return redirect(url_for("pages.home_page"))
+        return redirect(target_url)
+    next_url_started_at = time.perf_counter()
     if next_url and is_safe_redirect_target(next_url):
+        next_url_ms = (time.perf_counter() - next_url_started_at) * 1000
         redirect_resolution_ms = (time.perf_counter() - redirect_started_at) * 1000
         landing_endpoint = "next_url"
         outcome = "success_next_url"
         status_code = 302
         _log_login_perf()
         return redirect(next_url)
+    next_url_ms = (time.perf_counter() - next_url_started_at) * 1000
+    access_check_started_at = time.perf_counter()
+    access_check_ms = (time.perf_counter() - access_check_started_at) * 1000
+    landing_lookup_started_at = time.perf_counter()
     landing_endpoint = get_default_landing_endpoint(user, membership)
+    landing_lookup_ms = (time.perf_counter() - landing_lookup_started_at) * 1000
+    url_for_started_at = time.perf_counter()
+    target_url = url_for(landing_endpoint)
+    url_for_ms = (time.perf_counter() - url_for_started_at) * 1000
     redirect_resolution_ms = (time.perf_counter() - redirect_started_at) * 1000
     outcome = "success_default_landing"
     status_code = 302
     _log_login_perf()
-    return redirect(url_for(landing_endpoint))
+    return redirect(target_url)
 
 
 @pages_bp.get("/andon/workspace/select")

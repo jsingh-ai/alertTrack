@@ -445,6 +445,25 @@ def _build_login_client(tmp_path, monkeypatch, *, proxy_fix_x_proto: int):
                 is_active=True,
             )
         )
+        operator_user = User(
+            company_id=company.id,
+            display_name="Proxy Operator User",
+            username="proxy.operator",
+            role="Operator",
+            is_active=True,
+        )
+        operator_user.set_password("ProxyOp!2026")
+        db.session.add(operator_user)
+        db.session.flush()
+        db.session.add(
+            UserCompanyAccess(
+                user_id=operator_user.id,
+                company_id=company.id,
+                role="Operator",
+                scope_mode="all",
+                is_active=True,
+            )
+        )
         db.session.commit()
 
     client = app.test_client()
@@ -564,6 +583,32 @@ def test_session_cookie_domain_mismatch_detected(login_client):
 
     with app.test_request_context("/andon/login", base_url="http://10.20.1.8"):
         assert _session_cookie_domain_matches_request() is False
+
+
+def test_operator_login_redirects_to_operator_without_rendering_page(proxied_login_client, monkeypatch):
+    proxied_login_client.get("/andon/home", base_url="http://localhost", headers={"X-Forwarded-Proto": "https"})
+    with proxied_login_client.session_transaction() as session:
+        csrf_token = session[CSRF_SESSION_KEY]
+
+    def _fail_if_called(*_args, **_kwargs):
+        raise AssertionError("operator_page should not be called during /andon/login POST")
+
+    monkeypatch.setattr("andon_system.routes.pages.operator_page", _fail_if_called)
+
+    response = proxied_login_client.post(
+        "/andon/login",
+        data={
+            "identity": "proxy.operator",
+            "password": "ProxyOp!2026",
+            "csrf_token": csrf_token,
+        },
+        base_url="http://localhost",
+        headers={"X-Forwarded-Proto": "https"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/andon/operator")
 
 
 def test_health_endpoint_returns_safe_json_without_auth(login_client):
