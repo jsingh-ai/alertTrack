@@ -20,6 +20,7 @@ from .radius_service import build_radius_status_map
 
 BOARD_STATE_CACHE_TTL_SECONDS = 10
 DEFAULT_OPERATOR_METADATA_CACHE_TTL_SECONDS = 60
+DEFAULT_OPERATOR_SNAPSHOT_CACHE_TTL_SECONDS = 3
 
 
 def utc_now():
@@ -109,19 +110,44 @@ def build_board_state(include_metadata: bool = True):
     return result
 
 
-def build_operator_snapshot():
-    company_id = get_current_company_id()
-    cache_key = ("operator_snapshot", company_id)
+def build_operator_snapshot(company_id=None, current_user=None, membership=None, scope=None, metrics: dict | None = None):
+    started_at = time.perf_counter()
+    company_id = company_id if company_id is not None else get_current_company_id()
+    current_user = current_user or get_authenticated_user()
+    membership = membership or get_current_membership(user=current_user)
+    scope = scope or get_scope_filters(membership=membership)
+    cache_key = _operator_snapshot_cache_key(company_id, current_user, membership, scope)
+
+    cache_lookup_started_at = time.perf_counter()
     cached = get_cached(cache_key)
+    cache_lookup_ms = (time.perf_counter() - cache_lookup_started_at) * 1000
+    if metrics is not None:
+        metrics["cache_lookup_ms"] = round(cache_lookup_ms, 1)
     if cached is not None:
+        if metrics is not None:
+            metrics["cache"] = "hit"
+            metrics["counts"] = {"machines": len(cached.get("machines") or [])}
+        _perf_log(
+            "operator_snapshot(service)",
+            started_at,
+            cache="hit",
+            company_id=company_id,
+            user_id=getattr(current_user, "id", None),
+            role=getattr(membership, "role", None),
+        )
         return cached
 
+    context_metrics = {}
     context = _load_board_context(
         company_id,
         include_alerts=True,
         include_metadata=False,
         include_radius=False,
+        membership=membership,
+        scope=scope,
+        metrics=context_metrics,
     )
+    serialize_started_at = time.perf_counter()
     result = {
         "machines": [
             _serialize_machine(
@@ -133,7 +159,27 @@ def build_operator_snapshot():
             for machine in context["visible_machines"]
         ],
     }
-    set_cached(cache_key, result, BOARD_STATE_CACHE_TTL_SECONDS)
+    serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+    cache_store_started_at = time.perf_counter()
+    ttl_seconds = _operator_snapshot_cache_ttl_seconds()
+    set_cached(cache_key, result, ttl_seconds)
+    cache_store_ms = (time.perf_counter() - cache_store_started_at) * 1000
+    if metrics is not None:
+        metrics.update(context_metrics)
+        metrics["cache"] = "miss"
+        metrics["serialize_ms"] = round(serialize_ms, 1)
+        metrics["cache_store_ms"] = round(cache_store_ms, 1)
+        metrics["cache_ttl_seconds"] = ttl_seconds
+        metrics["counts"] = {"machines": len(result["machines"])}
+    _perf_log(
+        "operator_snapshot(service)",
+        started_at,
+        cache="miss",
+        company_id=company_id,
+        user_id=getattr(current_user, "id", None),
+        role=getattr(membership, "role", None),
+        machines=len(result["machines"]),
+    )
     return result
 
 
@@ -345,6 +391,30 @@ def _operator_metadata_cache_ttl_seconds() -> int:
     return max(1, min(raw_value, 300))
 
 
+def _operator_snapshot_cache_key(company_id, current_user, membership, scope):
+    return (
+        "operator_snapshot",
+        company_id,
+        getattr(current_user, "id", None),
+        getattr(membership, "id", None),
+        getattr(membership, "role", None),
+        getattr(membership, "scope_mode", None),
+        getattr(membership, "department_id", None),
+        getattr(membership, "machine_group_id", None),
+        tuple(sorted(scope.get("department_ids") or [])),
+        tuple(sorted(scope.get("machine_group_names") or [])),
+        tuple(sorted(scope.get("machine_ids") or [])),
+    )
+
+
+def _operator_snapshot_cache_ttl_seconds() -> int:
+    try:
+        raw_value = int(current_app.config.get("OPERATOR_SNAPSHOT_CACHE_TTL_SECONDS", DEFAULT_OPERATOR_SNAPSHOT_CACHE_TTL_SECONDS))
+    except (TypeError, ValueError):
+        raw_value = DEFAULT_OPERATOR_SNAPSHOT_CACHE_TTL_SECONDS
+    return max(1, min(raw_value, 30))
+
+
 def _load_operator_issue_groups(company_id, metadata_department_ids: list[int]):
     started_at = time.perf_counter()
     cache_key = (
@@ -505,9 +575,25 @@ def _load_operator_issue_groups(company_id, metadata_department_ids: list[int]):
     return issue_groups, metrics
 
 
-def _load_board_context(company_id, include_alerts: bool, include_metadata: bool = True, include_radius: bool = True):
-    scope = get_scope_filters()
-    membership = get_current_membership()
+def _load_board_context(
+    company_id,
+    include_alerts: bool,
+    include_metadata: bool = True,
+    include_radius: bool = True,
+    membership=None,
+    scope=None,
+    metrics: dict | None = None,
+):
+    scope_started_at = time.perf_counter()
+    scope = scope or get_scope_filters()
+    if metrics is not None:
+        metrics["scope_ms"] = round((time.perf_counter() - scope_started_at) * 1000, 1)
+
+    membership_started_at = time.perf_counter()
+    membership = membership or get_current_membership()
+    if metrics is not None:
+        metrics["membership_ms"] = round((time.perf_counter() - membership_started_at) * 1000, 1)
+
     role = membership.role if membership else None
     machine_ids = scope.get("machine_ids") or []
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
@@ -628,7 +714,9 @@ def _load_board_context(company_id, include_alerts: bool, include_metadata: bool
             user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
         alert_query = alert_query.filter(AndonAlert.machine.has(Machine.machine_type.in_(machine_group_names)))
 
+    machine_query_started_at = time.perf_counter()
     machines = machine_query.order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all()
+    machine_query_ms = (time.perf_counter() - machine_query_started_at) * 1000
     if include_metadata and role == "Operator":
         departments = department_query.order_by(Department.name.asc()).all()
     else:
@@ -657,43 +745,57 @@ def _load_board_context(company_id, include_alerts: bool, include_metadata: bool
         if include_metadata
         else []
     )
+    board_status_started_at = time.perf_counter()
     radius_status_by_machine = build_radius_status_map(visible_machines) if include_radius else {}
+    board_status_ms = (time.perf_counter() - board_status_started_at) * 1000
 
     alert_by_machine = {}
     created_notes_by_alert_id = {}
+    alert_query_ms = 0.0
+    created_notes_query_ms = 0.0
+    active_alert_count = 0
+    filtered_alert_count = 0
     if include_alerts:
-        active_alerts = (
-            alert_query.options(
-                load_only(
-                    AndonAlert.id,
-                    AndonAlert.company_id,
-                    AndonAlert.machine_id,
-                    AndonAlert.department_id,
-                    AndonAlert.issue_category_id,
-                    AndonAlert.issue_problem_id,
-                    AndonAlert.status,
-                    AndonAlert.priority,
-                    AndonAlert.responder_user_id,
-                    AndonAlert.responder_name_text,
-                    AndonAlert.note,
-                    AndonAlert.created_at,
-                    AndonAlert.acknowledged_at,
-                    AndonAlert.acknowledged_seconds,
-                    AndonAlert.ack_to_clear_seconds,
-                ),
-                joinedload(AndonAlert.department).load_only(Department.id, Department.name),
-                joinedload(AndonAlert.issue_category).load_only(IssueCategory.id, IssueCategory.name, IssueCategory.color),
-                joinedload(AndonAlert.issue_problem).load_only(IssueProblem.id, IssueProblem.name),
-                noload(AndonAlert.machine),
-                noload(AndonAlert.operator_user),
-                noload(AndonAlert.responder_user),
-                noload(AndonAlert.events),
-                noload(AndonAlert.escalations),
-            )
-            .order_by(AndonAlert.created_at.desc())
-            .all()
-        )
         visible_machine_ids = {machine.id for machine in visible_machines}
+        if not visible_machine_ids:
+            active_alerts = []
+        else:
+            alert_query_started_at = time.perf_counter()
+            active_alerts = (
+                alert_query.filter(AndonAlert.machine_id.in_(visible_machine_ids))
+                .options(
+                    load_only(
+                        AndonAlert.id,
+                        AndonAlert.company_id,
+                        AndonAlert.machine_id,
+                        AndonAlert.department_id,
+                        AndonAlert.issue_category_id,
+                        AndonAlert.issue_problem_id,
+                        AndonAlert.status,
+                        AndonAlert.priority,
+                        AndonAlert.responder_user_id,
+                        AndonAlert.responder_name_text,
+                        AndonAlert.note,
+                        AndonAlert.created_at,
+                        AndonAlert.acknowledged_at,
+                        AndonAlert.acknowledged_seconds,
+                        AndonAlert.ack_to_clear_seconds,
+                    ),
+                    joinedload(AndonAlert.department).load_only(Department.id, Department.name),
+                    joinedload(AndonAlert.issue_category).load_only(IssueCategory.id, IssueCategory.name, IssueCategory.color),
+                    joinedload(AndonAlert.issue_problem).load_only(IssueProblem.id, IssueProblem.name),
+                    noload(AndonAlert.machine),
+                    noload(AndonAlert.operator_user),
+                    noload(AndonAlert.responder_user),
+                    noload(AndonAlert.events),
+                    noload(AndonAlert.escalations),
+                )
+                .order_by(AndonAlert.created_at.desc())
+                .all()
+            )
+            alert_query_ms = (time.perf_counter() - alert_query_started_at) * 1000
+        active_alert_count = len(active_alerts)
+
         visible_category_ids = {category.id for category in visible_issue_categories}
         visible_department_ids = {department.id for department in visible_departments}
         active_alerts = [
@@ -708,9 +810,22 @@ def _load_board_context(company_id, include_alerts: bool, include_metadata: bool
                 )
             )
         ]
+        filtered_alert_count = len(active_alerts)
+        created_notes_started_at = time.perf_counter()
         created_notes_by_alert_id = _created_notes_by_alert_id(active_alerts, company_id)
+        created_notes_query_ms = (time.perf_counter() - created_notes_started_at) * 1000
         for alert in active_alerts:
             alert_by_machine.setdefault(alert.machine_id, alert)
+
+    if metrics is not None:
+        metrics["machine_query_ms"] = round(machine_query_ms, 1)
+        metrics["board_query_ms"] = round(board_status_ms, 1)
+        metrics["alert_query_ms"] = round(alert_query_ms, 1)
+        metrics["created_notes_query_ms"] = round(created_notes_query_ms, 1)
+        metrics["active_alert_count"] = active_alert_count
+        metrics["filtered_alert_count"] = filtered_alert_count
+        metrics["visible_machine_count"] = len(visible_machines)
+        metrics["visible_department_count"] = len(visible_departments)
 
     return {
         "visible_machines": visible_machines,

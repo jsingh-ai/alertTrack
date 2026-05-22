@@ -269,8 +269,72 @@ def board_state():
 
 @api_bp.get("/operator-snapshot")
 def operator_snapshot():
+    started_at = time.perf_counter()
+    access_started_at = time.perf_counter()
     _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
-    return jsonify({"success": True, "data": build_operator_snapshot()})
+    access_ms = (time.perf_counter() - access_started_at) * 1000
+
+    user_started_at = time.perf_counter()
+    current_user = get_authenticated_user()
+    user_ms = (time.perf_counter() - user_started_at) * 1000
+
+    company_started_at = time.perf_counter()
+    company_id = get_current_company_id()
+    company_ms = (time.perf_counter() - company_started_at) * 1000
+
+    membership_started_at = time.perf_counter()
+    membership = get_current_membership(user=current_user)
+    membership_ms = (time.perf_counter() - membership_started_at) * 1000
+
+    scope_started_at = time.perf_counter()
+    scope = get_scope_filters(membership=membership)
+    scope_ms = (time.perf_counter() - scope_started_at) * 1000
+
+    service_metrics = {}
+    service_started_at = time.perf_counter()
+    payload = build_operator_snapshot(
+        company_id=company_id,
+        current_user=current_user,
+        membership=membership,
+        scope=scope,
+        metrics=service_metrics,
+    )
+    service_ms = (time.perf_counter() - service_started_at) * 1000
+
+    jsonify_started_at = time.perf_counter()
+    response = jsonify({"success": True, "data": payload})
+    jsonify_ms = (time.perf_counter() - jsonify_started_at) * 1000
+
+    if current_app.config.get("ANDON_PERF_LOGS"):
+        counts = service_metrics.get("counts") or {}
+        current_app.logger.debug(
+            "PERF operator_snapshot access_ms=%.1f user_ms=%.1f company_ms=%.1f membership_ms=%.1f scope_ms=%.1f "
+            "service_ms=%.1f alert_query_ms=%s machine_query_ms=%s board_query_ms=%s created_notes_query_ms=%s "
+            "serialize_ms=%s jsonify_ms=%.1f cache_lookup_ms=%s cache_store_ms=%s total_ms=%.1f cache=%s "
+            "active_alert_count=%s filtered_alert_count=%s visible_machine_count=%s company_id=%s user_id=%s",
+            access_ms,
+            user_ms,
+            company_ms,
+            membership_ms,
+            scope_ms,
+            service_ms,
+            service_metrics.get("alert_query_ms"),
+            service_metrics.get("machine_query_ms"),
+            service_metrics.get("board_query_ms"),
+            service_metrics.get("created_notes_query_ms"),
+            service_metrics.get("serialize_ms"),
+            jsonify_ms,
+            service_metrics.get("cache_lookup_ms"),
+            service_metrics.get("cache_store_ms"),
+            (time.perf_counter() - started_at) * 1000,
+            service_metrics.get("cache", "unknown"),
+            service_metrics.get("active_alert_count"),
+            service_metrics.get("filtered_alert_count"),
+            counts.get("machines"),
+            company_id,
+            getattr(current_user, "id", None),
+        )
+    return response
 
 
 @api_bp.get("/operator-metadata")
