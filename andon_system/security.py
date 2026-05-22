@@ -72,6 +72,19 @@ def _perf_log(event: str, started_at: float, **extra) -> None:
     current_app.logger.debug("PERF %s duration_ms=%.1f %s", event, duration_ms, suffix)
 
 
+def _safe_user_identity_id(user: User | None) -> int | None:
+    if user is None:
+        return None
+    try:
+        state = inspect(user)
+        identity = getattr(state, "identity", None)
+        if identity and len(identity) > 0:
+            return identity[0]
+    except Exception:
+        return None
+    return None
+
+
 def generate_csrf_token() -> str:
     token = session.get(CSRF_SESSION_KEY)
     if not token:
@@ -440,7 +453,7 @@ def get_authenticated_user() -> User | None:
         return None
     cached = getattr(g, "authenticated_user", None)
     if cached is not None:
-        _perf_log("get_authenticated_user(cache)", started_at, user_id=getattr(cached, "id", None))
+        _perf_log("get_authenticated_user(cache)", started_at, user_id=_safe_user_identity_id(cached))
         return cached
     user_id = session.get(USER_SESSION_KEY)
     user = (
@@ -494,15 +507,31 @@ def authenticate_user(identity: str | None, password: str | None) -> User | None
 
 
 def authenticate_user_with_reason(identity: str | None, password: str | None) -> tuple[User | None, str]:
+    started_at = time.perf_counter()
     normalized_identity = str(identity or "").strip()
     if not normalized_identity:
+        _perf_log("authenticate_user(missing_identity)", started_at)
         return None, "missing_identity"
+    lookup_started_at = time.perf_counter()
     user = _find_user_by_identity(normalized_identity)
+    lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
     if not user:
+        _perf_log("authenticate_user(unknown_identity)", started_at, lookup_ms=round(lookup_ms, 1))
         return None, "unknown_identity"
     if not user.is_active:
+        _perf_log("authenticate_user(inactive_user)", started_at, lookup_ms=round(lookup_ms, 1), user_id=user.id)
         return None, "inactive_user"
-    if not user.check_password(password):
+    verify_started_at = time.perf_counter()
+    password_ok = user.check_password(password)
+    verify_ms = (time.perf_counter() - verify_started_at) * 1000
+    _perf_log(
+        "authenticate_user(password_verify)",
+        started_at,
+        lookup_ms=round(lookup_ms, 1),
+        verify_ms=round(verify_ms, 1),
+        user_id=user.id,
+    )
+    if not password_ok:
         return None, "invalid_password"
     return user, "ok"
 

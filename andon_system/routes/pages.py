@@ -227,7 +227,45 @@ def home_page():
 
 @pages_bp.post("/andon/login")
 def login_page():
+    started_at = time.perf_counter()
+    form_parse_ms = 0.0
+    rate_limit_ms = 0.0
+    auth_ms = 0.0
+    session_write_ms = 0.0
+    membership_load_ms = 0.0
+    commit_ms = 0.0
+    redirect_resolution_ms = 0.0
+    outcome = "unknown"
+    status_code = 500
+    landing_endpoint = None
+
+    def _log_login_perf() -> None:
+        if not current_app.config.get("ANDON_PERF_LOGS"):
+            return
+        route_total_ms = (time.perf_counter() - started_at) * 1000
+        current_app.logger.debug(
+            "PERF login_post form_parse_ms=%.1f rate_limit_ms=%.1f auth_ms=%.1f session_write_ms=%.1f "
+            "membership_load_ms=%.1f commit_ms=%.1f redirect_resolution_ms=%.1f route_total_ms=%.1f "
+            "status=%s outcome=%s landing=%s remote=%s",
+            form_parse_ms,
+            rate_limit_ms,
+            auth_ms,
+            session_write_ms,
+            membership_load_ms,
+            commit_ms,
+            redirect_resolution_ms,
+            route_total_ms,
+            status_code,
+            outcome,
+            landing_endpoint,
+            request.remote_addr,
+        )
+        g.login_route_total_ms = route_total_ms
+
     if bool(current_app.config.get("SESSION_COOKIE_SECURE")) and not _is_secure_request():
+        outcome = "blocked_insecure_cookie_transport"
+        status_code = 400
+        _log_login_perf()
         current_app.logger.warning(
             "LOGIN blocked reason=insecure_cookie_transport remote=%s forwarded_proto=%s",
             request.remote_addr,
@@ -240,6 +278,9 @@ def login_page():
             400,
         )
     if not _session_cookie_domain_matches_request():
+        outcome = "blocked_cookie_domain_mismatch"
+        status_code = 400
+        _log_login_perf()
         current_app.logger.warning(
             "LOGIN blocked reason=session_cookie_domain_mismatch remote=%s host=%s cookie_domain=%s",
             request.remote_addr,
@@ -256,12 +297,16 @@ def login_page():
     # and clear old session context up front.
     if is_authenticated():
         logout_user()
+    form_parse_started_at = time.perf_counter()
     identity = request.form.get("identity")
     password = request.form.get("password")
     next_url = request.form.get("next")
+    form_parse_ms = (time.perf_counter() - form_parse_started_at) * 1000
     identity_key = _login_rate_limit_key(identity, request.remote_addr)
     identity_fingerprint = identity_key.split(":", 1)[-1]
+    rate_limit_started_at = time.perf_counter()
     is_blocked, retry_after = _is_login_rate_limited(identity, request.remote_addr)
+    rate_limit_ms = (time.perf_counter() - rate_limit_started_at) * 1000
     if is_blocked:
         current_app.logger.info(
             "LOGIN blocked reason=rate_limited identity=%s remote=%s retry_after=%s",
@@ -269,12 +314,17 @@ def login_page():
             request.remote_addr,
             retry_after,
         )
+        outcome = "blocked_rate_limited"
+        status_code = 429
+        _log_login_perf()
         return _render_home_with_flash(
             f"Too many login attempts. Please try again in {retry_after} seconds.",
             "warning",
             429,
         )
+    auth_started_at = time.perf_counter()
     user, auth_reason = authenticate_user_with_reason(identity, password)
+    auth_ms = (time.perf_counter() - auth_started_at) * 1000
     if user is None:
         current_app.logger.info(
             "LOGIN failed reason=%s identity=%s remote=%s",
@@ -284,7 +334,13 @@ def login_page():
         )
         _record_login_failure(identity, request.remote_addr)
         if "@" in str(identity or ""):
+            outcome = f"failed_{auth_reason}"
+            status_code = 401
+            _log_login_perf()
             return _render_home_with_flash("Email sign-in is disabled. Use your username.", "warning", 401)
+        outcome = f"failed_{auth_reason}"
+        status_code = 401
+        _log_login_perf()
         return _render_home_with_flash("Invalid username or password.", "warning", 401)
     current_app.logger.info(
         "LOGIN success identity=%s user_id=%s remote=%s",
@@ -293,8 +349,12 @@ def login_page():
         request.remote_addr,
     )
     _clear_login_failures(identity, request.remote_addr)
+    session_write_started_at = time.perf_counter()
     login_user(user)
+    session_write_ms = (time.perf_counter() - session_write_started_at) * 1000
+    membership_started_at = time.perf_counter()
     memberships = get_user_memberships(user=user, active_only=True)
+    membership_load_ms = (time.perf_counter() - membership_started_at) * 1000
     if not memberships:
         current_app.logger.warning(
             "LOGIN denied reason=no_active_memberships user_id=%s username=%s remote=%s",
@@ -303,10 +363,16 @@ def login_page():
             request.remote_addr,
         )
         logout_user()
+        outcome = "denied_no_memberships"
+        status_code = 403
+        _log_login_perf()
         return _render_home_with_flash("This account does not have any active company access.", "warning", 403)
     user.last_login_at = datetime.now(timezone.utc)
+    commit_started_at = time.perf_counter()
     db.session.commit()
+    commit_ms = (time.perf_counter() - commit_started_at) * 1000
     membership = memberships[0]
+    redirect_started_at = time.perf_counter()
     if len(memberships) == 1:
         session.pop(WORKSPACE_PROMPT_SESSION_KEY, None)
         set_current_company_id(membership.company_id)
@@ -319,10 +385,25 @@ def login_page():
         ]
         if next_url and is_safe_redirect_target(next_url):
             session["andon_workspace_next"] = next_url
+        redirect_resolution_ms = (time.perf_counter() - redirect_started_at) * 1000
+        landing_endpoint = "pages.home_page"
+        outcome = "success_workspace_prompt"
+        status_code = 302
+        _log_login_perf()
         return redirect(url_for("pages.home_page"))
     if next_url and is_safe_redirect_target(next_url):
+        redirect_resolution_ms = (time.perf_counter() - redirect_started_at) * 1000
+        landing_endpoint = "next_url"
+        outcome = "success_next_url"
+        status_code = 302
+        _log_login_perf()
         return redirect(next_url)
-    return redirect(url_for(get_default_landing_endpoint(user, membership)))
+    landing_endpoint = get_default_landing_endpoint(user, membership)
+    redirect_resolution_ms = (time.perf_counter() - redirect_started_at) * 1000
+    outcome = "success_default_landing"
+    status_code = 302
+    _log_login_perf()
+    return redirect(url_for(landing_endpoint))
 
 
 @pages_bp.get("/andon/workspace/select")

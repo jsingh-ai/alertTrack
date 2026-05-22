@@ -609,6 +609,7 @@ def create_app(config_name: str | None = None) -> Flask:
 
     @app.after_request
     def log_request_timing(response):
+        after_request_started_at = time.perf_counter()
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -634,6 +635,16 @@ def create_app(config_name: str | None = None) -> Flask:
                 duration_ms,
                 request.remote_addr,
             )
+            if request.path == "/andon/login" and request.method == "POST":
+                route_total_ms = float(getattr(g, "login_route_total_ms", 0.0) or 0.0)
+                if route_total_ms > 0:
+                    app.logger.debug(
+                        "PERF login_post_hooks route_total_ms=%.1f request_total_ms=%.1f outside_route_ms=%.1f after_request_ms=%.1f",
+                        route_total_ms,
+                        duration_ms,
+                        max(0.0, duration_ms - route_total_ms),
+                        (time.perf_counter() - after_request_started_at) * 1000,
+                    )
         return response
 
     @app.errorhandler(400)
