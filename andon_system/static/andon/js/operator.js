@@ -206,6 +206,23 @@ function applyOperatorMetadata(metadata) {
   state.metadataLoaded = true;
 }
 
+function getProblemsForDepartment(departmentId) {
+  const targetDepartmentId = Number(departmentId || 0);
+  if (!targetDepartmentId) return [];
+  const flattened = [];
+  (state.issueGroups || []).forEach((group) => {
+    if (Number(group?.department_id || 0) !== targetDepartmentId) return;
+    const categoryId = Number(group?.category_id || 0) || null;
+    (group?.problems || []).forEach((problem) => {
+      flattened.push({
+        ...problem,
+        issue_category_id: categoryId,
+      });
+    });
+  });
+  return flattened;
+}
+
 function hydrateOperatorMetadataFromCache() {
   const cached = getCachedOperatorMetadata();
   if (!cached) return false;
@@ -436,8 +453,8 @@ function onProblemClick(button) {
   const problemId = Number(button.dataset.problemId);
   const department = state.selectedDepartment;
   if (!department) return;
-  const group = state.issueGroups.find((entry) => Number(entry.department_id) === Number(department.id));
-  const problem = group?.problems?.find((entry) => Number(entry.id) === problemId);
+  const problems = getProblemsForDepartment(department.id);
+  const problem = problems.find((entry) => Number(entry.id) === problemId);
   if (!problem) return;
   state.selectedMachine = machine || state.selectedMachine;
   state.selectedProblem = problem;
@@ -556,12 +573,18 @@ async function createAlertFromModal() {
     alert("Select a department and problem.");
     return;
   }
+  const issueCategoryId = Number(state.selectedProblem.issue_category_id || 0);
+  if (!issueCategoryId) {
+    alert("Selected issue is missing a category. Refresh metadata and try again.");
+    return;
+  }
   createAlertInFlight = true;
   createAlertMachineId = Number(state.selectedMachine.id);
   renderBoard();
   const payload = {
     machine_id: state.selectedMachine.id,
     department_id: state.selectedDepartment.id,
+    issue_category_id: issueCategoryId,
     issue_problem_id: Number(state.selectedProblem.id),
     operator_name_text: null,
     note: state.createNoteDraft.trim() || null,
@@ -1031,9 +1054,7 @@ function renderRadiusPanel(machine, modifier = "") {
 
 function renderCreateInlinePanel(machine, detailed) {
   const preferredDepartment = state.selectedDepartment;
-  const problems = preferredDepartment
-    ? (state.issueGroups.find((entry) => Number(entry.department_id) === Number(preferredDepartment.id))?.problems || [])
-    : [];
+  const problems = preferredDepartment ? getProblemsForDepartment(preferredDepartment.id) : [];
   const showFollowup = Boolean(preferredDepartment);
   const isSubmitting = createAlertInFlight && Number(createAlertMachineId) === Number(machine?.id);
   const canSubmit = Boolean(machine && state.selectedDepartment && state.selectedProblem) && !isSubmitting;
