@@ -820,8 +820,7 @@ function onProblemClick(button) {
   if (!problem) return;
   state.selectedMachine = machine || state.selectedMachine;
   state.selectedProblem = problem;
-  syncProblemButtonState();
-  syncCreateSubmitState();
+  renderBoard();
 }
 
 function onUserChoiceClick(button) {
@@ -1490,13 +1489,29 @@ function renderCreateInlinePanel(machine, detailed) {
   const problems = preferredDepartment ? getProblemsForDepartment(preferredDepartment.id) : [];
   const showFollowup = Boolean(preferredDepartment);
   const isSubmitting = createAlertInFlight && Number(createAlertMachineId) === Number(machine?.id);
-  const hasDepartment = Boolean(state.selectedDepartment);
-  const hasProblem = Boolean(state.selectedProblem);
+  const hasDepartment = Boolean(state.selectedDepartment || state.selectedDepartmentId);
+  const hasProblem = Boolean(
+    state.selectedProblem
+    || state.selectedProblemId
+    || state.selectedIssue
+    || state.selectedIssueId
+  );
   const canSubmit = Boolean(machine && hasDepartment && hasProblem) && !isSubmitting;
   const showCallAction = Boolean(machine && hasDepartment && hasProblem);
+  const showHealthyBanner = !hasDepartment;
   const healthyTime = formatCurrentTime();
+  console.log("[operator create] selection state", {
+    selectedDepartment: state.selectedDepartment,
+    selectedDepartmentId: state.selectedDepartmentId,
+    selectedProblem: state.selectedProblem,
+    selectedProblemId: state.selectedProblemId,
+    selectedIssue: state.selectedIssue,
+    selectedIssueId: state.selectedIssueId,
+    showCallAction,
+  });
   return `
     <div class="machine-tile__inline-panel--create machine-modal--create machine-modal__create-stack ${detailed ? "machine-tile__inline-panel--detailed" : ""}" data-followup="${showFollowup ? "true" : "false"}">
+      ${showHealthyBanner ? `
       <div class="machine-tile__inline-panel machine-tile__inline-panel--healthy">
         <div class="machine-tile__healthy-band">
           <div class="machine-tile__healthy-intro">
@@ -1516,6 +1531,7 @@ function renderCreateInlinePanel(machine, detailed) {
           </div>
         </div>
       </div>
+      ` : ""}
       ${renderRadiusPanel(machine, "machine-tile__radius-panel")}
       <div class="machine-tile__inline-panel machine-tile__inline-panel--create-body machine-modal__section--create-body">
         <div class="machine-modal__section machine-modal__section--departments machine-modal__section--create-departments">
