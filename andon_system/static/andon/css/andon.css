@@ -3284,11 +3284,11 @@ body.operator-shell.operator-single-machine-mode .app-main {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 body.operator-shell.operator-single-machine-mode {
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 body.operator-shell.operator-single-machine-mode .button-board-shell {
@@ -3308,17 +3308,18 @@ body.operator-shell.operator-single-machine-mode .operator-layout-shell {
 body.operator-shell.operator-single-machine-mode .operator-board-shell {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   padding: 0.35rem 0.3rem 0.35rem;
 }
 
 body.operator-shell.operator-single-machine-mode .operator-board-stage,
 body.operator-shell.operator-single-machine-mode .operator-board-stage__inner {
   min-height: 0;
+  overflow: visible;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard {
-  overflow: hidden;
+  overflow: visible;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] {
@@ -3435,6 +3436,20 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-note-entry {
   padding: 0.36rem 0.42rem;
   gap: 0.08rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-close-row {
+  padding: 0.38rem 0.42rem;
+  gap: 0.18rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__close-row-controls {
+  gap: 0.28rem;
+  align-items: center;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__close-note {
+  min-height: 2rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__note-input {
@@ -5495,7 +5510,7 @@ html[data-theme="light"] .operator-machine-group__count {
 }
 
 .button-board-shell .operator-machine-tile .machine-modal--response-working .machine-tile__inline-panel-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .machine-tile__inline-panel--response .machine-modal__section--timer-hero,
@@ -5546,7 +5561,7 @@ html[data-theme="light"] .operator-machine-group__count {
 }
 
 .machine-modal__response-waiting-title {
-  font-size: 1.02rem;
+  font-size: 1.08rem;
   font-weight: 900;
   line-height: 1.05;
   letter-spacing: 0.01em;
@@ -5563,7 +5578,7 @@ html[data-theme="light"] .operator-machine-group__count {
 .machine-modal__response-label {
   margin: 0;
   margin-bottom: 0.05rem;
-  font-size: 0.64rem;
+  font-size: 0.74rem;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -5572,7 +5587,7 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal__response-value {
   margin: 0;
-  font-size: clamp(0.96rem, 1.55vw, 1.5rem);
+  font-size: clamp(0.92rem, 1.45vw, 1.38rem);
   line-height: 1.02;
   font-weight: 900;
   letter-spacing: -0.02em;
@@ -5715,6 +5730,28 @@ html[data-theme="light"] .operator-machine-group__count {
   padding: 0.48rem 0.55rem;
 }
 
+.machine-modal--response .machine-modal__section--response-close-row {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.46rem 0.52rem;
+}
+
+.machine-modal--response .machine-modal__close-row-copy {
+  display: grid;
+  gap: 0.06rem;
+}
+
+.machine-modal--response .machine-modal__close-row-controls {
+  display: flex;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.machine-modal--response .machine-modal__close-note {
+  flex: 1 1 auto;
+  min-height: 2.15rem;
+}
+
 .machine-modal--response .machine-modal__followup-group + .machine-modal__followup-group {
   margin-top: 0.36rem;
   padding-top: 0.36rem;
@@ -5750,16 +5787,20 @@ html[data-theme="light"] .operator-machine-group__count {
   resize: none;
 }
 
+.machine-modal--response .machine-modal__close-row-controls .machine-modal__footer-btn {
+  min-width: 8.5rem;
+}
+
 .machine-modal--response .machine-modal__footer {
   justify-content: center;
   padding-top: 0.08rem;
 }
 
 .machine-modal--response .machine-modal__footer-btn {
-  min-width: 12rem;
-  min-height: 2.1rem;
-  padding: 0.34rem 0.8rem;
-  font-size: 0.84rem;
+  min-width: 10rem;
+  min-height: 2rem;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
 }
 
 .machine-modal .modal-body {
@@ -6187,10 +6228,16 @@ body.board-screen-shell .machine-modal .btn-close:focus-visible {
   padding: 0.5rem 0.58rem 0.58rem;
 }
 
+.machine-modal--response .machine-modal__section.machine-modal__section--response-responder,
+.machine-modal--response .machine-modal__section.machine-modal__section--response-ack {
+  padding: 0.5rem 0.54rem 0.55rem;
+}
+
 .machine-modal--response .machine-modal__section.machine-modal__section--timer-hero,
 .machine-modal--response .machine-modal__section.machine-modal__section--reels,
 .machine-modal--response .machine-modal__section.machine-modal__section--note,
 .machine-modal--response .machine-modal__section.machine-modal__section--response-followup,
+.machine-modal--response .machine-modal__section.machine-modal__section--response-close-row,
 .machine-modal--response .machine-modal__section.machine-modal__section--response-note-entry,
 .machine-modal--response .machine-modal__footer {
   margin-top: 0.2rem;
