@@ -3435,11 +3435,11 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__response-label {
   margin-bottom: 0.01rem;
-  font-size: 0.5rem;
+  font-size: 0.58rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__response-value {
-  font-size: clamp(0.74rem, 1.05vw, 0.98rem);
+  font-size: clamp(1rem, 1.4vw, 1.45rem);
   line-height: 1;
 }
 
@@ -5594,7 +5594,7 @@ html[data-theme="light"] .operator-machine-group__count {
 .machine-modal__response-label {
   margin: 0;
   margin-bottom: 0.02rem;
-  font-size: 0.66rem;
+  font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -5603,7 +5603,7 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal__response-value {
   margin: 0;
-  font-size: clamp(0.86rem, 1.3vw, 1.24rem);
+  font-size: clamp(1.12rem, 1.7vw, 1.82rem);
   line-height: 1;
   font-weight: 900;
   letter-spacing: -0.02em;
@@ -5748,7 +5748,9 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal--response .machine-modal__section--response-close-row {
   display: grid;
-  gap: 0.3rem;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 0.35rem;
+  align-items: center;
   padding: 0.46rem 0.52rem;
 }
 
@@ -5758,14 +5760,13 @@ html[data-theme="light"] .operator-machine-group__count {
 }
 
 .machine-modal--response .machine-modal__close-row-controls {
-  display: flex;
-  align-items: stretch;
-  gap: 0.45rem;
+  display: contents;
 }
 
 .machine-modal--response .machine-modal__close-note {
   flex: 1 1 auto;
   min-height: 2.15rem;
+  width: 100%;
 }
 
 .machine-modal--response .machine-modal__followup-group + .machine-modal__followup-group {
@@ -5817,6 +5818,10 @@ html[data-theme="light"] .operator-machine-group__count {
   min-height: 2rem;
   padding: 0.3rem 0.75rem;
   font-size: 0.8rem;
+}
+
+.machine-modal--response .machine-modal__footer-btn--full {
+  width: 100%;
 }
 
 .machine-modal .modal-body {

@@ -1316,6 +1316,10 @@ function renderAlertInlinePanel(machine, alert, detailed) {
             </div>
           </div>
         ` : ""}
+        <div class="machine-modal__section machine-modal__section--timer-hero">
+          <div class="machine-modal__timer-hero-label">Elapsed timer</div>
+          <div class="machine-modal__timer-hero-value machine-tile__timer" data-live-timer="true" data-live-timer-format="alert-duration" data-elapsed-seconds="${Math.max(0, Math.floor(alert.elapsed_seconds || 0))}">${escapeHtml(liveTimerText)}</div>
+        </div>
         ${isOpen ? `
           <div class="machine-modal__section machine-modal__section--response-waiting machine-modal__section--response-waiting--closed">
             <div class="machine-modal__response-waiting-title">Awaiting acknowledgement</div>
@@ -1327,16 +1331,12 @@ function renderAlertInlinePanel(machine, alert, detailed) {
               <div class="machine-modal__response-label">Add note</div>
               <div class="machine-tile__section-description">Append context before you close.</div>
             </div>
-            <div class="machine-modal__close-row-controls">
-              <textarea class="form-control machine-tile__note-input machine-modal__close-note" data-note-kind="alert" rows="2" placeholder="Append note before closing">${escapeHtml(state.alertNoteDraft)}</textarea>
-              <button class="btn btn-danger btn-lg machine-modal__footer-btn" type="button" data-inline-action="act-on-alert">${actionLabel}</button>
-            </div>
+            <textarea class="form-control machine-tile__note-input machine-modal__close-note" data-note-kind="alert" rows="2" placeholder="Append note before closing">${escapeHtml(state.alertNoteDraft)}</textarea>
+          </div>
+          <div class="modal-footer machine-modal__footer machine-tile__inline-actions">
+            <button class="btn btn-danger btn-lg machine-modal__footer-btn machine-modal__footer-btn--full" type="button" data-inline-action="act-on-alert">${actionLabel}</button>
           </div>
         `}
-        <div class="machine-modal__section machine-modal__section--timer-hero">
-          <div class="machine-modal__timer-hero-label">Elapsed timer</div>
-          <div class="machine-modal__timer-hero-value machine-tile__timer" data-live-timer="true" data-live-timer-format="alert-duration" data-elapsed-seconds="${Math.max(0, Math.floor(alert.elapsed_seconds || 0))}">${escapeHtml(liveTimerText)}</div>
-        </div>
       </div>
     </div>`;
 }
