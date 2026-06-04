@@ -4,11 +4,12 @@ import json
 import secrets
 from datetime import datetime, timezone
 
-from sqlalchemy import func, text, update
+from sqlalchemy import func, insert, text, update
 from sqlalchemy.exc import OperationalError
 import time
 
 from flask import Blueprint, current_app, jsonify, flash, redirect, request, url_for
+from werkzeug.security import generate_password_hash
 
 from ..company_context import get_current_company
 from ..extensions import db
@@ -152,6 +153,30 @@ def _pager_device_payload(company_id: int, department_id: int) -> dict:
         .order_by(PagerDevice.id.asc())
         .first()
     )
+    if row is None:
+        return {"active": False, "name": None, "last_seen_at": None}
+    return {
+        "active": bool(row.active),
+        "name": row.name,
+        "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
+    }
+
+
+def _create_department_pager_device(company_id: int, department_id: int, department_name: str) -> dict:
+    placeholder_token = secrets.token_urlsafe(32)
+    placeholder_token_hash = hash_pager_token(placeholder_token)
+    row = db.session.execute(
+        insert(PagerDevice)
+        .values(
+            company_id=company_id,
+            department_id=department_id,
+            name=f"{department_name} Pager",
+            token_hash=placeholder_token_hash,
+            token_fingerprint=fingerprint_pager_token(placeholder_token),
+            active=False,
+        )
+        .returning(PagerDevice.active, PagerDevice.name, PagerDevice.last_seen_at),
+    ).first()
     if row is None:
         return {"active": False, "name": None, "last_seen_at": None}
     return {
@@ -447,6 +472,7 @@ def _validation_error(message: str):
 
 @admin_bp.post("/department/create")
 def create_department():
+    started_at = time.perf_counter()
     company_id = _company_id()
     name = request.form["name"].strip()
     if not name:
@@ -455,22 +481,66 @@ def create_department():
         flash("Department name is required", "warning")
         return redirect(url_for("pages.admin_page"))
 
-    department = Department(company_id=company_id, name=name, is_active=True)
-    db.session.add(department)
-    db.session.flush()
-    pager_device = _ensure_department_pager_device(department)
-    db.session.commit()
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        existing = Department.query.filter(Department.company_id == company_id, Department.name == name).one_or_none()
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if existing:
+            db.session.rollback()
+            if _is_ajax_request():
+                return jsonify({"ok": False, "message": "Department already exists"}), 400
+            flash("Department already exists", "warning")
+            return redirect(url_for("pages.admin_page"))
+
+        insert_started_at = time.perf_counter()
+        row = db.session.execute(
+            insert(Department)
+            .values(company_id=company_id, name=name, is_active=True)
+            .returning(Department.id, Department.name, Department.is_active),
+        ).first()
+        if row is None:
+            db.session.rollback()
+            return _error_or_404("Department not found")
+        pager_device = _create_department_pager_device(company_id, row.id, row.name)
+        insert_ms = (time.perf_counter() - insert_started_at) * 1000
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
+
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
+        _log_admin_mutation_perf(
+            "create_department",
+            started_at,
+            company_id=company_id,
+            lookup_ms=f"{lookup_ms:.1f}",
+            insert_ms=f"{insert_ms:.1f}",
+            commit_ms=f"{commit_ms:.1f}",
+            invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+        )
         return _json_response(
             "Department created",
             department={
-                "id": department.id,
-                "name": department.name,
-                "is_active": department.is_active,
+                "id": row.id,
+                "name": row.name,
+                "is_active": bool(row.is_active),
                 "pager_device": _serialize_pager_device(pager_device),
             },
         )
+    _log_admin_mutation_perf(
+        "create_department",
+        started_at,
+        company_id=company_id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        insert_ms=f"{insert_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("Department created", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -671,6 +741,7 @@ def toggle_department_pager_token(department_id: int):
 
 @admin_bp.post("/machine/create")
 def create_machine():
+    started_at = time.perf_counter()
     company_id = _company_id()
     group_name = request.form.get("machine_group") or None
     if not group_name:
@@ -696,44 +767,86 @@ def create_machine():
     if not machine_code:
         machine_code = _machine_code_from_name(name, company_id)
 
-    existing_machine = Machine.query.filter_by(company_id=company_id, machine_code=machine_code).one_or_none()
-    if existing_machine:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Machine code already exists"}), 400
-        flash("Machine code already exists", "warning")
-        return redirect(url_for("pages.admin_page"))
+    department_id = _int_or_none(request.form.get("department_id"))
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        existing_machine = Machine.query.filter_by(company_id=company_id, machine_code=machine_code).one_or_none()
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if existing_machine:
+            db.session.rollback()
+            if _is_ajax_request():
+                return jsonify({"ok": False, "message": "Machine code already exists"}), 400
+            flash("Machine code already exists", "warning")
+            return redirect(url_for("pages.admin_page"))
 
-    machine = Machine(
-        company_id=company_id,
-        machine_code=machine_code,
-        name=name,
-        machine_type=group.name,
-        radius_machine_id=None,
-        department_id=_int_or_none(request.form.get("department_id")),
-        is_active=True,
-    )
-    if machine_code.isdigit():
-        machine.radius_machine_id = int(machine_code)
-    else:
-        machine.radius_machine_id = resolve_radius_machine_id(machine)
-    db.session.add(machine)
-    db.session.commit()
+        radius_machine_id = int(machine_code) if machine_code.isdigit() else resolve_radius_machine_id(
+            Machine(
+                company_id=company_id,
+                machine_code=machine_code,
+                name=name,
+                machine_type=group.name,
+                radius_machine_id=None,
+                department_id=department_id,
+                is_active=True,
+            )
+        )
+        insert_started_at = time.perf_counter()
+        row = db.session.execute(
+            insert(Machine)
+            .values(
+                company_id=company_id,
+                machine_code=machine_code,
+                name=name,
+                machine_type=group.name,
+                radius_machine_id=radius_machine_id,
+                department_id=department_id,
+                is_active=True,
+            )
+            .returning(Machine.id, Machine.machine_code),
+        ).first()
+        if row is None:
+            db.session.rollback()
+            return _error_or_404("Machine not found")
+        insert_ms = (time.perf_counter() - insert_started_at) * 1000
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
+
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
+        payload_started_at = time.perf_counter()
+        payload = _machine_payload(company_id, row.id)
+        if payload is None:
+            return _error_or_404("Machine not found")
+        payload_ms = (time.perf_counter() - payload_started_at) * 1000
+        _log_admin_mutation_perf(
+            "create_machine",
+            started_at,
+            company_id=company_id,
+            lookup_ms=f"{lookup_ms:.1f}",
+            insert_ms=f"{insert_ms:.1f}",
+            commit_ms=f"{commit_ms:.1f}",
+            invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+            payload_ms=f"{payload_ms:.1f}",
+        )
         return _json_response(
             "Machine created",
-            machine={
-                "id": machine.id,
-                "machine_code": machine.machine_code,
-                "name": machine.name,
-                "machine_type": machine.machine_type,
-                "machine_group": machine.machine_type,
-                "radius_machine_id": machine.radius_machine_id,
-                "department_id": machine.department_id,
-                "department_name": machine.department.name if machine.department else None,
-                "is_active": machine.is_active,
-            },
+            machine=payload,
         )
+    _log_admin_mutation_perf(
+        "create_machine",
+        started_at,
+        company_id=company_id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        insert_ms=f"{insert_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("Machine created", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -817,6 +930,7 @@ def delete_machine(machine_id):
 
 @admin_bp.post("/machine-group/create")
 def create_machine_group():
+    started_at = time.perf_counter()
     company_id = _company_id()
     name = request.form["name"].strip()
     if not name:
@@ -825,27 +939,65 @@ def create_machine_group():
         flash("Machine group name is required", "warning")
         return redirect(url_for("pages.admin_page"))
 
-    existing = MachineGroup.query.filter_by(company_id=company_id, name=name).one_or_none()
-    if existing:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Machine group already exists"}), 400
-        flash("Machine group already exists", "warning")
-        return redirect(url_for("pages.admin_page"))
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        existing = MachineGroup.query.filter_by(company_id=company_id, name=name).one_or_none()
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if existing:
+            db.session.rollback()
+            if _is_ajax_request():
+                return jsonify({"ok": False, "message": "Machine group already exists"}), 400
+            flash("Machine group already exists", "warning")
+            return redirect(url_for("pages.admin_page"))
 
-    group = MachineGroup(company_id=company_id, name=name, is_active=True)
-    db.session.add(group)
-    db.session.commit()
+        insert_started_at = time.perf_counter()
+        row = db.session.execute(
+            insert(MachineGroup)
+            .values(company_id=company_id, name=name, is_active=True)
+            .returning(MachineGroup.id, MachineGroup.name, MachineGroup.is_active),
+        ).first()
+        if row is None:
+            db.session.rollback()
+            return _error_or_404("Machine group not found")
+        insert_ms = (time.perf_counter() - insert_started_at) * 1000
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
+
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
+        _log_admin_mutation_perf(
+            "create_machine_group",
+            started_at,
+            company_id=company_id,
+            lookup_ms=f"{lookup_ms:.1f}",
+            insert_ms=f"{insert_ms:.1f}",
+            commit_ms=f"{commit_ms:.1f}",
+            invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+        )
         return _json_response(
             "Machine group created",
             machine_group={
-                "id": group.id,
-                "name": group.name,
-                "is_active": group.is_active,
+                "id": row.id,
+                "name": row.name,
+                "is_active": bool(row.is_active),
                 "machine_count": 0,
             },
         )
+    _log_admin_mutation_perf(
+        "create_machine_group",
+        started_at,
+        company_id=company_id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        insert_ms=f"{insert_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("Machine group created", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -1056,6 +1208,7 @@ def toggle_machine_type(machine_type):
 
 @admin_bp.post("/user/create")
 def create_user():
+    started_at = time.perf_counter()
     company_id = _company_id()
     display_name = (request.form.get("display_name") or "").strip()
     username = (request.form.get("username") or "").strip() or None
@@ -1095,54 +1248,112 @@ def create_user():
     if error_response is not None:
         return error_response
 
-    user = None
-    if username:
-        user = User.query.filter_by(username=username).one_or_none()
-    if user is None and email:
-        user = User.query.filter_by(email=email).one_or_none()
-    if user is None:
-        user = User(
-            company_id=company_id,
-            employee_id=work_id,
-            display_name=display_name,
-            username=username,
-            role=role,
-            email=email,
-            phone_number=phone_number,
-            department_id=department.id if role in {"Admin", "Viewer"} and department else None,
-            machine_group_id=machine_group.id if role == "Admin" and machine_group else None,
-            is_active=True,
-        )
-        user.set_password(password.strip())
-        db.session.add(user)
-        db.session.flush()
-    else:
-        existing_access = UserCompanyAccess.query.filter_by(user_id=user.id, company_id=company_id).one_or_none()
-        if existing_access is not None:
-            return _validation_error("This user already has access to the selected company")
-        user.display_name = display_name
-        user.employee_id = work_id
-        user.username = username or user.username
-        user.email = email
-        user.phone_number = phone_number
-        if password.strip():
-            user.set_password(password.strip())
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        user_department_id = department.id if role in {"Admin", "Viewer"} and department else None
+        user_machine_group_id = machine_group.id if role == "Admin" and machine_group else None
+        user = None
+        if username:
+            user = User.query.filter_by(username=username).one_or_none()
+        if user is None and email:
+            user = User.query.filter_by(email=email).one_or_none()
+        if user is None:
+            user_row = db.session.execute(
+                insert(User)
+                .values(
+                    company_id=company_id,
+                    employee_id=work_id,
+                    display_name=display_name,
+                    username=username,
+                    role=role,
+                    email=email,
+                    phone_number=phone_number,
+                    password_hash=generate_password_hash(password.strip()),
+                    department_id=user_department_id,
+                    machine_group_id=user_machine_group_id,
+                    is_active=True,
+                )
+                .returning(User.id),
+            ).first()
+            if user_row is None:
+                db.session.rollback()
+                return _error_or_404("User not found")
+            user_id = user_row.id
+        else:
+            existing_access = UserCompanyAccess.query.filter_by(user_id=user.id, company_id=company_id).one_or_none()
+            if existing_access is not None:
+                db.session.rollback()
+                return _validation_error("This user already has access to the selected company")
+            db.session.execute(
+                update(User)
+                .where(User.id == user.id)
+                .values(
+                    display_name=display_name,
+                    employee_id=work_id,
+                    username=username or user.username,
+                    email=email,
+                    phone_number=phone_number,
+                    password_hash=generate_password_hash(password.strip()) if password.strip() else user.password_hash,
+                    role=role,
+                    department_id=user_department_id,
+                    machine_group_id=user_machine_group_id,
+                ),
+            )
+            user_id = user.id
 
-    access = UserCompanyAccess(
-        user_id=user.id,
-        company_id=company_id,
-        role=role,
-        scope_mode="all" if role == "Admin" else scope_mode,
-        department_id=department.id if role in {"Admin", "Viewer"} and department else None,
-        machine_group_id=machine_group.id if role == "Admin" and machine_group else None,
-        scope_config_json=json.dumps(scope_config or {}, separators=(",", ":"), sort_keys=True),
-        is_active=True,
-    )
-    db.session.add(access)
-    db.session.commit()
+        access_row = db.session.execute(
+            insert(UserCompanyAccess)
+            .values(
+                user_id=user_id,
+                company_id=company_id,
+                role=role,
+                scope_mode="all" if role == "Admin" else scope_mode,
+                department_id=user_department_id,
+                machine_group_id=user_machine_group_id,
+                scope_config_json=json.dumps(scope_config or {}, separators=(",", ":"), sort_keys=True),
+                is_active=True,
+            )
+            .returning(UserCompanyAccess.id),
+        ).first()
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if access_row is None:
+            db.session.rollback()
+            return _error_or_404("User not found")
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
+
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
-        return _json_response("User created", user=_membership_payload(access))
+        payload_started_at = time.perf_counter()
+        access = UserCompanyAccess.query.filter_by(user_id=user_id, company_id=company_id).one_or_none()
+        if access is None:
+            return _error_or_404("User not found")
+        payload = _membership_payload(access)
+        payload_ms = (time.perf_counter() - payload_started_at) * 1000
+        _log_admin_mutation_perf(
+            "create_user",
+            started_at,
+            company_id=company_id,
+            lookup_ms=f"{lookup_ms:.1f}",
+            commit_ms=f"{commit_ms:.1f}",
+            invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+            payload_ms=f"{payload_ms:.1f}",
+        )
+        return _json_response("User created", user=payload)
+    _log_admin_mutation_perf(
+        "create_user",
+        started_at,
+        company_id=company_id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("User created", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -1330,28 +1541,10 @@ def delete_user(user_id):
 
 @admin_bp.post("/problem/create")
 def create_problem():
+    started_at = time.perf_counter()
     company_id = _company_id()
     department_id = _int_or_none(request.form.get("department_id"))
     if department_id is None:
-        if _is_ajax_request():
-            return jsonify({"ok": False, "message": "Please add a department"}), 400
-        flash("Please add a department", "warning")
-        return redirect(url_for("pages.admin_page"))
-    category = IssueCategory.query.filter_by(company_id=company_id, department_id=department_id).one_or_none() if department_id else None
-    if not category and department_id:
-        department = Department.query.filter_by(id=department_id, company_id=company_id).one_or_none()
-        if department:
-            category = IssueCategory(
-                name=department.name,
-                department_id=department.id,
-                company_id=department.company_id,
-                color="#0d6efd",
-                priority_default=3,
-                is_active=True,
-            )
-            db.session.add(category)
-            db.session.flush()
-    if not category:
         if _is_ajax_request():
             return jsonify({"ok": False, "message": "Please add a department"}), 400
         flash("Please add a department", "warning")
@@ -1364,27 +1557,101 @@ def create_problem():
         flash("Issue name is required", "warning")
         return redirect(url_for("pages.admin_page"))
 
-    problem = IssueProblem(
-        company_id=company_id,
-        category_id=category.id,
-        name=name,
-        severity_default=3,
-        is_active=True,
-    )
-    db.session.add(problem)
-    db.session.commit()
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        department = Department.query.filter_by(id=department_id, company_id=company_id).one_or_none()
+        if not department:
+            db.session.rollback()
+            if _is_ajax_request():
+                return jsonify({"ok": False, "message": "Please add a department"}), 400
+            flash("Please add a department", "warning")
+            return redirect(url_for("pages.admin_page"))
+
+        category = IssueCategory.query.filter_by(company_id=company_id, department_id=department_id).one_or_none()
+        if category is None:
+            category_row = db.session.execute(
+                insert(IssueCategory)
+                .values(
+                    name=department.name,
+                    department_id=department.id,
+                    company_id=department.company_id,
+                    color="#0d6efd",
+                    priority_default=3,
+                    is_active=True,
+                )
+                .returning(IssueCategory.id),
+            ).first()
+            category_id = category_row.id if category_row is not None else None
+        else:
+            category_id = category.id
+        if category_id is None:
+            db.session.rollback()
+            return _error_or_404("Issue category not found")
+
+        existing_problem = IssueProblem.query.filter_by(company_id=company_id, category_id=category_id, name=name).one_or_none()
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if existing_problem:
+            db.session.rollback()
+            if _is_ajax_request():
+                return jsonify({"ok": False, "message": "Issue already exists"}), 400
+            flash("Issue already exists", "warning")
+            return redirect(url_for("pages.admin_page"))
+
+        insert_started_at = time.perf_counter()
+        row = db.session.execute(
+            insert(IssueProblem)
+            .values(
+                company_id=company_id,
+                category_id=category_id,
+                name=name,
+                severity_default=3,
+                is_active=True,
+            )
+            .returning(IssueProblem.id, IssueProblem.name, IssueProblem.is_active),
+        ).first()
+        if row is None:
+            db.session.rollback()
+            return _error_or_404("Issue problem not found")
+        insert_ms = (time.perf_counter() - insert_started_at) * 1000
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
+
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
+        payload_started_at = time.perf_counter()
+        payload = _issue_problem_payload(company_id, row.id)
+        if payload is None:
+            return _error_or_404("Issue problem not found")
+        payload_ms = (time.perf_counter() - payload_started_at) * 1000
+        _log_admin_mutation_perf(
+            "create_problem",
+            started_at,
+            company_id=company_id,
+            lookup_ms=f"{lookup_ms:.1f}",
+            insert_ms=f"{insert_ms:.1f}",
+            commit_ms=f"{commit_ms:.1f}",
+            invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+            payload_ms=f"{payload_ms:.1f}",
+        )
         return _json_response(
             "Issue problem created",
-            problem={
-                "id": problem.id,
-                "name": problem.name,
-                "is_active": problem.is_active,
-                "department_id": department_id,
-                "department_name": category.department.name if category.department else None,
-            },
+            problem=payload,
         )
+    _log_admin_mutation_perf(
+        "create_problem",
+        started_at,
+        company_id=company_id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        insert_ms=f"{insert_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("Issue problem created", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -1468,22 +1735,48 @@ def delete_problem(problem_id):
 
 @admin_bp.post("/escalation/create")
 def create_escalation_rule():
+    started_at = time.perf_counter()
     company_id = _company_id()
-    rule = EscalationRule(
-        company_id=company_id,
-        department_id=_int_or_none(request.form.get("department_id")),
-        issue_category_id=_int_or_none(request.form.get("issue_category_id")),
-        issue_problem_id=_int_or_none(request.form.get("issue_problem_id")),
-        machine_id=_int_or_none(request.form.get("machine_id")),
-        level=int(request.form.get("level") or 1),
-        delay_seconds=int(request.form.get("delay_seconds") or 300),
-        notify_role=request.form.get("notify_role"),
-        notify_target=request.form.get("notify_target"),
-        is_active=True,
-    )
-    db.session.add(rule)
-    db.session.commit()
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        row = db.session.execute(
+            insert(EscalationRule)
+            .values(
+                company_id=company_id,
+                department_id=_int_or_none(request.form.get("department_id")),
+                issue_category_id=_int_or_none(request.form.get("issue_category_id")),
+                issue_problem_id=_int_or_none(request.form.get("issue_problem_id")),
+                machine_id=_int_or_none(request.form.get("machine_id")),
+                level=int(request.form.get("level") or 1),
+                delay_seconds=int(request.form.get("delay_seconds") or 300),
+                notify_role=request.form.get("notify_role"),
+                notify_target=request.form.get("notify_target"),
+                is_active=True,
+            )
+            .returning(EscalationRule.id, EscalationRule.level, EscalationRule.delay_seconds, EscalationRule.is_active),
+        ).first()
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if row is None:
+            db.session.rollback()
+            return _error_or_404("Escalation rule not found")
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
+
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
+    _log_admin_mutation_perf(
+        "create_escalation_rule",
+        started_at,
+        company_id=company_id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("Escalation rule created", "success")
     return redirect(url_for("pages.admin_page"))
 

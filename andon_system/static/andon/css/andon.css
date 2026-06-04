@@ -3222,6 +3222,7 @@ tbody tr:has(.admin-filter-link:focus-visible) {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  min-height: 0;
 }
 
 .operator-view-shell {
@@ -3242,15 +3243,195 @@ tbody tr:has(.admin-filter-link:focus-visible) {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 12rem);
+  min-width: 0;
+}
+
+.operator-board-stage {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.operator-board-stage__inner {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+body.operator-shell.operator-single-machine-mode .operator-board-stage__inner {
+  --operator-single-machine-scale: 1;
+  transform-origin: top center;
+  transform: scale(var(--operator-single-machine-scale));
+  height: calc(100% / var(--operator-single-machine-scale));
+  will-change: transform;
 }
 
 #machineBoard {
   flex: 1 1 auto;
+  min-height: 0;
 }
 
 .operator-status-dock {
   margin-top: auto;
   padding-top: 0.6rem;
+}
+
+body.operator-shell.operator-single-machine-mode .app-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.operator-shell.operator-single-machine-mode {
+  overflow: hidden;
+}
+
+body.operator-shell.operator-single-machine-mode .button-board-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+body.operator-shell.operator-single-machine-mode .operator-layout-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 0.35rem;
+}
+
+body.operator-shell.operator-single-machine-mode .operator-board-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.35rem 0.3rem 0.35rem;
+}
+
+body.operator-shell.operator-single-machine-mode .operator-board-stage,
+body.operator-shell.operator-single-machine-mode .operator-board-stage__inner {
+  min-height: 0;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard {
+  overflow: hidden;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] {
+  gap: 0.35rem !important;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-group {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.3rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-group__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile {
+  width: 100%;
+  max-width: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__top {
+  padding-block: 0.22rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__inline-panel {
+  margin-top: 0.28rem;
+  padding: 0.38rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__inline-panel--create-body {
+  gap: 0.34rem;
+  padding: 0.48rem 0.5rem 0.5rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--departments {
+  padding-bottom: 0.4rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__section-copy--departments,
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__section-copy--create-alert,
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__section-copy--note {
+  gap: 0.08rem;
+  margin-bottom: 0.24rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__section-title {
+  font-size: 0.58rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__section-description {
+  font-size: 0.68rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__department-strip {
+  gap: 0.28rem;
+  margin-top: 0.22rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__department-strip .board-category-btn {
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.42rem 0.5rem;
+  font-size: 0.82rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .problem-list {
+  margin-top: 0.24rem;
+  padding: 0.38rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .problem-btn {
+  min-height: 2.15rem;
+  padding: 0.42rem 0.55rem;
+  font-size: 0.74rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__note-input {
+  min-height: 3rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__footer {
+  margin-top: 0.02rem;
+  padding-top: 0.05rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__footer-btn {
+  min-height: 2.2rem;
+  padding: 0.38rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+body.operator-shell.operator-single-machine-mode .operator-status-dock {
+  padding-top: 0.35rem;
+}
+
+body.operator-shell.operator-single-machine-mode .operator-status-dock__panel {
+  gap: 0.55rem;
+  padding: 0.55rem 0.65rem;
+}
+
+body.operator-shell.operator-single-machine-mode .operator-status-dock__title {
+  font-size: clamp(0.9rem, 1.2vw, 1.1rem);
+}
+
+body.operator-shell.operator-single-machine-mode .operator-status-dock__subcopy {
+  font-size: 0.68rem;
 }
 
 .operator-status-dock__panel {

@@ -18,6 +18,8 @@ const operatorMachineSelect = document.getElementById("operatorMachine");
 const operatorLockView = document.getElementById("operatorLockView");
 const operatorClearView = document.getElementById("operatorClearView");
 const operatorViewSummary = document.getElementById("operatorViewSummary");
+const operatorBoardStage = document.getElementById("operatorBoardStage");
+const operatorBoardStageInner = document.getElementById("operatorBoardStageInner");
 const operatorStatusDock = document.getElementById("operatorStatusDock");
 const csrfHeaders = (headers = {}) => window.AndonSecurity?.withCsrfHeaders(headers) || headers;
 
@@ -63,6 +65,7 @@ let elapsedTimerIntervalId = null;
 let operatorRefreshTimeoutId = null;
 let operatorFallbackPollIntervalId = null;
 let operatorCreateTransitionFrameId = null;
+let operatorSingleMachineFitFrameId = null;
 let operatorRefreshInFlight = false;
 let operatorRefreshQueued = false;
 let operatorInteractionLockUntil = 0;
@@ -168,6 +171,8 @@ async function boot() {
   });
   startElapsedTimers();
   document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("resize", scheduleSingleMachineFit, { passive: true });
+  window.visualViewport?.addEventListener("resize", scheduleSingleMachineFit, { passive: true });
   window.AndonRefreshBus?.onRefresh(scheduleOperatorRefresh);
   window.AndonRealtime?.onEvent((event) => {
     if (["alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
@@ -758,11 +763,14 @@ async function actOnActiveAlert() {
 function renderBoard() {
   const visibleMachines = getVisibleMachines();
   const detailed = isDetailedOperatorView();
+  const singleMachineMode = visibleMachines.length === 1;
   const groupedCardSizing = !detailed;
   const boardKey = buildBoardKey(visibleMachines, detailed);
   machineBoard.dataset.machineCount = String(visibleMachines.length);
   machineBoard.dataset.viewMode = detailed ? "detailed" : "compact";
   machineBoard.dataset.groupCardSizing = groupedCardSizing ? "detailed" : "native";
+  machineBoard.dataset.singleMachine = singleMachineMode ? "true" : "false";
+  document.body.classList.toggle("operator-single-machine-mode", singleMachineMode);
   applyDetailedBoardDensity(visibleMachines.length, detailed || groupedCardSizing);
   if (!visibleMachines.length) {
     machineBoard.innerHTML = renderEmptyBoard();
@@ -770,6 +778,7 @@ function renderBoard() {
     syncLiveTimerNodes();
     renderStatusDock(visibleMachines, detailed);
     primeCreatePanelTransitions();
+    applySingleMachineFit(false);
     return;
   }
 
@@ -781,6 +790,7 @@ function renderBoard() {
   syncLiveTimerNodes();
   renderStatusDock(visibleMachines, detailed);
   primeCreatePanelTransitions();
+  applySingleMachineFit(singleMachineMode);
 }
 
 function buildBoardKey(visibleMachines, detailed) {
@@ -899,6 +909,40 @@ function applyDetailedBoardDensity(machineCount, detailed) {
   machineBoard.style.setProperty("--operator-detailed-columns", String(columns));
   machineBoard.style.setProperty("--operator-detailed-card-min-height", cardMinHeight);
   machineBoard.style.setProperty("--operator-detailed-request-square-min-height", requestSquareMinHeight);
+}
+
+function applySingleMachineFit(singleMachineMode) {
+  if (!operatorBoardStageInner) return;
+  if (!singleMachineMode) {
+    if (operatorSingleMachineFitFrameId) {
+      cancelAnimationFrame(operatorSingleMachineFitFrameId);
+      operatorSingleMachineFitFrameId = null;
+    }
+    operatorBoardStageInner.style.removeProperty("--operator-single-machine-scale");
+    return;
+  }
+  if (operatorSingleMachineFitFrameId) {
+    cancelAnimationFrame(operatorSingleMachineFitFrameId);
+  }
+  operatorSingleMachineFitFrameId = requestAnimationFrame(() => {
+    operatorSingleMachineFitFrameId = null;
+    const availableHeight = operatorBoardStage?.clientHeight || 0;
+    const currentScale = Number.parseFloat(
+      window.getComputedStyle(operatorBoardStageInner).getPropertyValue("--operator-single-machine-scale"),
+    ) || 1;
+    const renderedHeight = operatorBoardStageInner.getBoundingClientRect().height || 0;
+    const contentHeight = renderedHeight > 0 ? renderedHeight / currentScale : operatorBoardStageInner.scrollHeight || 0;
+    if (!availableHeight || !contentHeight) {
+      operatorBoardStageInner.style.setProperty("--operator-single-machine-scale", "1");
+      return;
+    }
+    const scale = Math.min(1, Math.max(0.4, availableHeight / contentHeight));
+    operatorBoardStageInner.style.setProperty("--operator-single-machine-scale", scale.toFixed(4));
+  });
+}
+
+function scheduleSingleMachineFit() {
+  applySingleMachineFit(machineBoard?.dataset.singleMachine === "true");
 }
 
 function renderGroupedBoard(rows, detailed) {
