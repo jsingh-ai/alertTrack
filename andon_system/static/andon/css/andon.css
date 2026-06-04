@@ -3471,7 +3471,9 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
   padding-inline: 1.35rem;
 }
 
-body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .alert-create-action-row {
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .alert-create-action-row,
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .operator-create-action-row,
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__call-action-row {
   grid-template-columns: minmax(0, 1fr) minmax(360px, 460px) minmax(0, 1fr);
 }
 
@@ -4300,7 +4302,9 @@ html[data-theme="light"] .operator-machine-group__count {
   box-shadow: inset 0 1px 2px rgba(13, 36, 68, 0.04);
 }
 
-.button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .alert-create-action-row {
+.button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .alert-create-action-row,
+.button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .operator-create-action-row,
+.button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .machine-modal__call-action-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 460px) minmax(0, 1fr);
   gap: 12px;
@@ -4309,7 +4313,9 @@ html[data-theme="light"] .operator-machine-group__count {
   margin-bottom: 24px;
 }
 
-.button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .call-alert-btn {
+.button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .call-alert-btn,
+.button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .machine-modal__call-action-row .call-alert-btn,
+.button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .operator-create-action-row .call-alert-btn {
   grid-column: 2;
   width: 100%;
   min-width: 0;
@@ -5907,11 +5913,15 @@ body.operator-shell .machine-modal--response .machine-modal__alert-action-row .m
     grid-column: 1;
   }
 
-  .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .alert-create-action-row {
+  .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .alert-create-action-row,
+  .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .operator-create-action-row,
+  .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .machine-modal__call-action-row {
     grid-template-columns: 1fr;
   }
 
-  .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .call-alert-btn {
+  .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .call-alert-btn,
+  .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .machine-modal__call-action-row .call-alert-btn,
+  .button-board-shell .operator-machine-tile .machine-tile__inline-panel--create-body .operator-create-action-row .call-alert-btn {
     grid-column: 1;
   }
 }

@@ -1490,7 +1490,10 @@ function renderCreateInlinePanel(machine, detailed) {
   const problems = preferredDepartment ? getProblemsForDepartment(preferredDepartment.id) : [];
   const showFollowup = Boolean(preferredDepartment);
   const isSubmitting = createAlertInFlight && Number(createAlertMachineId) === Number(machine?.id);
-  const canSubmit = Boolean(machine && state.selectedDepartment && state.selectedProblem) && !isSubmitting;
+  const hasDepartment = Boolean(state.selectedDepartment);
+  const hasProblem = Boolean(state.selectedProblem);
+  const canSubmit = Boolean(machine && hasDepartment && hasProblem) && !isSubmitting;
+  const showCallAction = Boolean(machine && hasDepartment && hasProblem);
   const healthyTime = formatCurrentTime();
   return `
     <div class="machine-tile__inline-panel--create machine-modal--create machine-modal__create-stack ${detailed ? "machine-tile__inline-panel--detailed" : ""}" data-followup="${showFollowup ? "true" : "false"}">
@@ -1538,9 +1541,10 @@ function renderCreateInlinePanel(machine, detailed) {
           </div>
           <textarea class="form-control machine-tile__note-input" data-note-kind="create" rows="3" placeholder="Add context for the responder">${escapeHtml(state.createNoteDraft)}</textarea>
         </div>
-        <div class="alert-create-action-row">
+        ${showCallAction ? `
+        <div class="alert-create-action-row operator-create-action-row machine-modal__call-action-row">
           <button class="btn btn-danger btn-lg machine-modal__footer-btn call-alert-btn" type="button" data-inline-action="send-message" ${canSubmit ? "" : "disabled"}>${isSubmitting ? "Calling..." : "Call"}</button>
-        </div>
+        </div>` : ""}
       </div>
     </div>`;
 }
