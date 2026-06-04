@@ -1559,7 +1559,7 @@ function renderCreateInlinePanel(machine, detailed) {
         </div>
         ${showCallAction ? `
         <div class="alert-create-action-row operator-create-action-row machine-modal__call-action-row">
-          <button class="btn btn-danger btn-lg machine-modal__footer-btn call-alert-btn" type="button" data-inline-action="send-message" ${canSubmit ? "" : "disabled"}>${isSubmitting ? "Calling..." : "Call"}</button>
+          <button class="btn btn-danger btn-lg machine-modal__footer-btn machine-modal__action-btn machine-modal__action-btn--danger call-alert-btn" type="button" data-inline-action="send-message" ${canSubmit ? "" : "disabled"}>${isSubmitting ? "Calling..." : "Call"}</button>
         </div>` : ""}
       </div>
     </div>`;
@@ -1633,7 +1633,7 @@ function renderAlertInlinePanel(machine, alert, detailed) {
           </div>
         </div>
         <div class="machine-modal__alert-action-row">
-          <button class="btn btn-primary machine-modal__footer-btn machine-modal__footer-btn--full" type="button" data-inline-action="act-on-alert">${actionLabel}</button>
+          <button class="btn btn-primary machine-modal__footer-btn machine-modal__footer-btn--full machine-modal__action-btn machine-modal__action-btn--primary" type="button" data-inline-action="act-on-alert">${actionLabel}</button>
         </div>
       `}
     </div>`;

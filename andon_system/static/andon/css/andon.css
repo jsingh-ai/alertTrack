@@ -5999,8 +5999,64 @@ body.operator-shell .machine-modal--response .machine-modal__alert-action-row .m
   transform: translateY(-2px);
 }
 
+.machine-modal--create .machine-modal__action-btn,
+.machine-modal--response .machine-modal__action-btn {
+  width: 100%;
+  min-width: 0;
+  min-height: 72px !important;
+  padding: 0.85rem 1.35rem !important;
+  font-size: 1.25rem !important;
+  font-weight: 700 !important;
+  line-height: 1.15 !important;
+  border-radius: 18px !important;
+  display: block;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.machine-modal--create .machine-modal__action-btn:hover,
+.machine-modal--create .machine-modal__action-btn:focus-visible,
+.machine-modal--response .machine-modal__action-btn:hover,
+.machine-modal--response .machine-modal__action-btn:focus-visible {
+  transform: translateY(-2px);
+}
+
+.machine-modal--response .machine-modal__action-btn--primary {
+  background: #0d6efd;
+  border-color: #0d6efd;
+  box-shadow: 0 10px 24px rgba(13, 110, 253, 0.2);
+}
+
+.machine-modal--response .machine-modal__action-btn--primary:hover,
+.machine-modal--response .machine-modal__action-btn--primary:focus-visible {
+  background: #0b5ed7;
+  border-color: #0b5ed7;
+  box-shadow: 0 14px 28px rgba(11, 94, 215, 0.24);
+}
+
+.machine-modal--create .machine-modal__action-btn--danger {
+  color: #fff;
+  background: linear-gradient(180deg, #d62828 0%, #a91515 100%);
+  border: none;
+  box-shadow: 0 10px 24px rgba(169, 21, 21, 0.24);
+}
+
+.machine-modal--create .machine-modal__action-btn--danger:hover,
+.machine-modal--create .machine-modal__action-btn--danger:focus-visible {
+  color: #fff;
+  background: linear-gradient(180deg, #e03131 0%, #ba181b 100%);
+  box-shadow: 0 14px 28px rgba(186, 24, 27, 0.28);
+}
+
 @media (max-width: 767.98px) {
   .machine-modal--response .machine-modal__footer-btn--full {
+    min-height: 68px !important;
+    padding: 0.8rem 1.2rem !important;
+    font-size: 1.12rem !important;
+  }
+
+  .machine-modal--create .machine-modal__action-btn,
+  .machine-modal--response .machine-modal__action-btn {
     min-height: 68px !important;
     padding: 0.8rem 1.2rem !important;
     font-size: 1.12rem !important;
