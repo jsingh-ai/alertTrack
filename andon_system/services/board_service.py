@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..company_context import get_current_company_id
 from ..extensions import db
-from ..models.alert import ALERT_STATUSES_ACTIVE, EVENT_CREATED, AndonAlert, AndonAlertEvent
+from ..models.alert import EVENT_CREATED, AndonAlertEvent
 from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
@@ -746,24 +746,16 @@ def _load_board_context(
         if include_metadata
         else None
     )
-    alert_query = AndonAlert.query.filter(AndonAlert.status.in_(ALERT_STATUSES_ACTIVE))
     if company_id:
         machine_query = machine_query.filter(Machine.company_id == company_id)
         if include_metadata:
             department_query = department_query.filter(Department.company_id == company_id)
             issue_query = issue_query.filter(IssueCategory.company_id == company_id)
             user_query = user_query.filter(UserCompanyAccess.company_id == company_id)
-        alert_query = alert_query.filter(AndonAlert.company_id == company_id)
     if machine_ids:
         machine_query = machine_query.filter(Machine.id.in_(machine_ids))
-        alert_query = alert_query.filter(AndonAlert.machine_id.in_(machine_ids))
     if department_ids:
         machine_query = machine_query.filter(Machine.department_id.in_(department_ids))
-        # For Operator scope we anchor on allowed machine IDs; filtering alerts
-        # again by alert.department_id can hide valid calls when the selected
-        # call department differs from the machine's native department.
-        if role != "Operator":
-            alert_query = alert_query.filter(AndonAlert.department_id.in_(department_ids))
     if include_metadata and metadata_department_ids:
         department_query = department_query.filter(Department.id.in_(metadata_department_ids))
         issue_query = issue_query.filter(IssueCategory.department_id.in_(metadata_department_ids))
@@ -772,7 +764,8 @@ def _load_board_context(
         machine_query = machine_query.filter(Machine.machine_type.in_(machine_group_names))
         if include_metadata:
             user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
-        alert_query = alert_query.filter(AndonAlert.machine.has(Machine.machine_type.in_(machine_group_names)))
+
+    machine_query = machine_query.filter(Machine.is_active.is_(True))
 
     machine_query_started_at = time.perf_counter()
     machines = machine_query.order_by(Machine.machine_type.asc().nullslast(), Machine.name.asc()).all()

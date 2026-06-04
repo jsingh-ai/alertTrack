@@ -5545,6 +5545,18 @@ body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__id
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.22);
 }
 
+.button-board-shell .operator-machine-tile .machine-modal--response-working {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.28rem;
+  align-items: start;
+}
+
+.button-board-shell .operator-machine-tile .machine-modal--response-working > .machine-tile__radius-panel--response,
+.button-board-shell .operator-machine-tile .machine-modal--response-working > .machine-tile__inline-panel-grid {
+  grid-column: 1 / -1;
+}
+
 .machine-tile__inline-panel--response .machine-tile__inline-panel-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

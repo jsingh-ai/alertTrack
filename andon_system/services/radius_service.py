@@ -7,6 +7,8 @@ from flask import current_app, has_app_context
 from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from .cache_service import get_cached, set_cached
+
 
 _RADIUS_ENGINE = None
 _RADIUS_ENGINE_URL = None
@@ -17,6 +19,7 @@ _PRESS_MACHINE_OVERRIDES = {
 }
 _MIN_SUPPORTED_PRESS_NUMBER = 2
 _MAX_SUPPORTED_PRESS_NUMBER = 15
+_DEFAULT_RADIUS_STATUS_CACHE_TTL_SECONDS = 10
 
 
 def build_radius_status_map(machines):
@@ -79,8 +82,18 @@ def _extract_machine_number(machine):
 
 def _fetch_radius_rows(radius_machine_ids):
     engine = _get_radius_engine()
-    if engine is None or not radius_machine_ids:
+    url = _radius_database_url()
+    if engine is None or not radius_machine_ids or not url:
         return {}
+
+    cache_key = (
+        "radius_status_current",
+        url,
+        tuple(sorted(int(machine_id) for machine_id in radius_machine_ids)),
+    )
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
 
     statement = text(
         """
@@ -101,7 +114,9 @@ def _fetch_radius_rows(radius_machine_ids):
             current_app.logger.exception("Unable to load Radius machine status data")
         return {}
 
-    return {int(row["machine_id"]): dict(row) for row in rows if row.get("machine_id") is not None}
+    result = {int(row["machine_id"]): dict(row) for row in rows if row.get("machine_id") is not None}
+    set_cached(cache_key, result, ttl_seconds=_radius_status_cache_ttl_seconds())
+    return result
 
 
 def _get_radius_engine():
@@ -128,6 +143,16 @@ def _radius_database_url():
     if has_app_context():
         return current_app.config.get("PRESS_RADIUS_DATABASE_URL")
     return None
+
+
+def _radius_status_cache_ttl_seconds() -> int:
+    if has_app_context():
+        try:
+            raw_value = int(current_app.config.get("PRESS_RADIUS_CACHE_TTL_SECONDS", _DEFAULT_RADIUS_STATUS_CACHE_TTL_SECONDS))
+        except (TypeError, ValueError):
+            raw_value = _DEFAULT_RADIUS_STATUS_CACHE_TTL_SECONDS
+        return max(1, min(raw_value, 60))
+    return _DEFAULT_RADIUS_STATUS_CACHE_TTL_SECONDS
 
 
 def _status_label(row):

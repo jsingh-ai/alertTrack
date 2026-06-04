@@ -16,6 +16,10 @@ def _env_int(name: str, default: int = 0) -> int:
     raw_value = os.getenv(name)
     if raw_value is None:
         return default
+    try:
+        return max(0, int(raw_value))
+    except (TypeError, ValueError):
+        return default
 
 
 def _env_csv(name: str) -> list[str]:
@@ -23,10 +27,6 @@ def _env_csv(name: str) -> list[str]:
     if not raw_value:
         return []
     return [item.strip() for item in re.split(r"[,\n]", raw_value) if item.strip()]
-    try:
-        return max(0, int(raw_value))
-    except (TypeError, ValueError):
-        return default
 
 
 class BaseConfig:
@@ -67,6 +67,7 @@ class BaseConfig:
     OPERATOR_METADATA_INCLUDE_PROBLEM_DESCRIPTION = _env_flag("OPERATOR_METADATA_INCLUDE_PROBLEM_DESCRIPTION")
     OPERATOR_METADATA_MAX_PROBLEMS = _env_int("OPERATOR_METADATA_MAX_PROBLEMS", 20000)
     OPERATOR_SNAPSHOT_CACHE_TTL_SECONDS = _env_int("OPERATOR_SNAPSHOT_CACHE_TTL_SECONDS", 3)
+    PRESS_RADIUS_CACHE_TTL_SECONDS = _env_int("PRESS_RADIUS_CACHE_TTL_SECONDS", 10)
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
     SESSION_COOKIE_SECURE = _env_flag("SESSION_COOKIE_SECURE")
