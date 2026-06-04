@@ -748,14 +748,28 @@ async function actOnActiveAlert() {
     headers: csrfHeaders(),
     credentials: "same-origin",
   });
-  const data = await response.json();
-  if (!data.success) {
-    alert(data.error.message);
+  let data = null;
+  try {
+    data = await response.json();
+  } catch (_error) {
+    data = null;
+  }
+  if (!response.ok) {
+    alert(data?.error?.message || "Unable to close alert.");
     return;
+  }
+  if (!data?.success) {
+    alert(data?.error?.message || "Unable to close alert.");
+    return;
+  }
+  const machine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine?.id));
+  if (machine) {
+    machine.active_alert = null;
   }
   closeMachinePanel();
   localMutationRefreshLockUntil = Date.now() + 700;
   window.AndonRefreshBus?.notify();
+  renderBoard();
 }
 
 function renderBoard() {
@@ -1310,14 +1324,17 @@ function renderAlertInlinePanel(machine, alert, detailed) {
           </div>
         ` : `
           <div class="machine-modal__section machine-modal__section--response-close-row">
-            <div class="machine-modal__close-row-copy">
+            <div class="machine-modal__close-note-block machine-modal__close-note-block--existing">
               <div class="machine-modal__response-label">Note</div>
               <div class="machine-modal__close-row-preview">${closeNotePreviewMarkup}</div>
             </div>
-            <textarea class="form-control machine-tile__note-input machine-modal__close-note" data-note-kind="alert" rows="2" placeholder="Append note before closing">${escapeHtml(state.alertNoteDraft)}</textarea>
+            <div class="machine-modal__close-note-block machine-modal__close-note-block--append">
+              <div class="machine-modal__response-label">Add note</div>
+              <textarea class="form-control machine-tile__note-input machine-modal__close-note" data-note-kind="alert" rows="2" placeholder="Append note before closing">${escapeHtml(state.alertNoteDraft)}</textarea>
+            </div>
           </div>
-          <div class="modal-footer machine-modal__footer machine-tile__inline-actions">
-            <button class="btn btn-primary btn-lg machine-modal__footer-btn machine-modal__footer-btn--full" type="button" data-inline-action="act-on-alert">${actionLabel}</button>
+          <div class="machine-modal__section machine-modal__section--response-close-action machine-tile__inline-actions">
+            <button class="btn btn-primary machine-modal__footer-btn machine-modal__footer-btn--full" type="button" data-inline-action="act-on-alert">${actionLabel}</button>
           </div>
         `}
       </div>
