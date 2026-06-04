@@ -2,49 +2,10 @@
 {% block body_class %}button-board-shell operator-shell{% endblock %}
 {% block content %}
 <div class="container-fluid button-board-shell">
-  {% set page_title = "Operator Station" %}
-  {% set page_subtitle = scope_summary_text or "" %}
-  {% set page_action_html %}
-    <button class="btn btn-light btn-sm operator-page-header__badge" type="button" data-bs-toggle="collapse" data-bs-target="#operatorViewPanel" aria-expanded="false" aria-controls="operatorViewPanel">
-      <i class="bi bi-house-door-fill"></i>
-      <span>Filter View</span>
-    </button>
-  {% endset %}
-  {% include "andon/_page_header.html" %}
+  <div class="operator-top-strip">
+    <div class="operator-top-strip__company">{{ current_company.name if current_company else "Operator" }}</div>
+  </div>
   <div class="operator-layout-shell">
-    <div class="operator-view-shell mb-0">
-      <div class="collapse" id="operatorViewPanel">
-        <div class="card operator-view-panel andon-panel">
-          <div class="card-body">
-            <div class="operator-view-panel__header">
-              <div>
-                <div class="section-heading mb-0">Display Filter</div>
-              </div>
-            </div>
-            <div class="operator-view-panel__controls">
-              <div class="operator-view-panel__field">
-                <label class="form-label small text-uppercase text-secondary mb-0" for="operatorMachineGroup">Machine Group</label>
-                <select class="form-select" id="operatorMachineGroup">
-                  <option value="">All Groups</option>
-                </select>
-              </div>
-              <div class="operator-view-panel__field">
-                <label class="form-label small text-uppercase text-secondary mb-0" for="operatorMachine">Machine</label>
-                <select class="form-select" id="operatorMachine">
-                  <option value="">All Machines</option>
-                </select>
-              </div>
-              <div class="operator-view-panel__field operator-view-panel__field--action">
-                <button class="btn btn-warning w-100" id="operatorLockView" type="button">Lock View</button>
-              </div>
-              <div class="operator-view-panel__field operator-view-panel__field--clear">
-                <button class="btn btn-outline-secondary w-100" id="operatorClearView" type="button">Clear View</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
     <div class="operator-board-shell mt-0">
       <div class="operator-board-stage" id="operatorBoardStage">
         <div class="operator-board-stage__inner" id="operatorBoardStageInner">

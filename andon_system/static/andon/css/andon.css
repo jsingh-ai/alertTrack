@@ -3215,6 +3215,21 @@ tbody tr:has(.admin-filter-link:focus-visible) {
   box-shadow: 0 8px 18px rgba(28, 79, 147, 0.12);
 }
 
+.operator-top-strip {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0.15rem 0.1rem 0.4rem;
+}
+
+.operator-top-strip__company {
+  font-size: clamp(1.5rem, 2.8vw, 2.85rem);
+  font-weight: 900;
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+  color: #102b4d;
+}
+
 .operator-layout-shell {
   width: 100%;
   max-width: 100%;
@@ -3408,23 +3423,23 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-tile {
-  min-height: 5.8rem;
-  padding: 0.5rem 0.55rem 0.55rem;
-  gap: 0.08rem;
+  min-height: 4.1rem;
+  padding: 0.34rem 0.38rem 0.38rem;
+  gap: 0.04rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-department,
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-issue {
-  padding: 0.5rem 0.55rem 0.55rem;
+  padding: 0.34rem 0.38rem 0.38rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__response-label {
-  margin-bottom: 0.03rem;
-  font-size: 0.56rem;
+  margin-bottom: 0.01rem;
+  font-size: 0.5rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__response-value {
-  font-size: clamp(0.88rem, 1.4vw, 1.2rem);
+  font-size: clamp(0.74rem, 1.05vw, 0.98rem);
   line-height: 1;
 }
 
@@ -3434,13 +3449,13 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-note-entry {
-  padding: 0.36rem 0.42rem;
-  gap: 0.08rem;
+  padding: 0.32rem 0.38rem;
+  gap: 0.06rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-close-row {
-  padding: 0.38rem 0.42rem;
-  gap: 0.18rem;
+  padding: 0.32rem 0.38rem;
+  gap: 0.12rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__close-row-controls {
@@ -3449,11 +3464,11 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__close-note {
-  min-height: 2rem;
+  min-height: 1.8rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__note-input {
-  min-height: 2.4rem;
+  min-height: 2rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__footer {
@@ -3462,9 +3477,9 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__footer-btn {
-  min-height: 1.8rem;
-  padding: 0.28rem 0.58rem;
-  font-size: 0.72rem;
+  min-height: 1.7rem;
+  padding: 0.24rem 0.52rem;
+  font-size: 0.68rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal--response-open .alert-note-bubble {
@@ -5511,6 +5526,7 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .button-board-shell .operator-machine-tile .machine-modal--response-working .machine-tile__inline-panel-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.28rem;
 }
 
 .machine-tile__inline-panel--response .machine-modal__section--timer-hero,
@@ -5527,7 +5543,7 @@ html[data-theme="light"] .operator-machine-group__count {
 }
 
 .button-board-shell .operator-machine-tile .machine-modal--response-working .machine-modal__section--response-responder {
-  grid-column: 1 / -1;
+  grid-column: auto;
 }
 
 .machine-tile__inline-panel--response .machine-modal__section--timer-hero {
@@ -5537,9 +5553,9 @@ html[data-theme="light"] .operator-machine-group__count {
 .machine-modal__section--response-tile {
   display: grid;
   align-content: start;
-  gap: 0.12rem;
-  padding: 0.72rem 0.8rem 0.78rem;
-  min-height: 6.85rem;
+  gap: 0.08rem;
+  padding: 0.46rem 0.5rem 0.48rem;
+  min-height: 4.8rem;
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.92));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
@@ -5577,8 +5593,8 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal__response-label {
   margin: 0;
-  margin-bottom: 0.05rem;
-  font-size: 0.74rem;
+  margin-bottom: 0.02rem;
+  font-size: 0.66rem;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -5587,8 +5603,8 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal__response-value {
   margin: 0;
-  font-size: clamp(0.92rem, 1.45vw, 1.38rem);
-  line-height: 1.02;
+  font-size: clamp(0.86rem, 1.3vw, 1.24rem);
+  line-height: 1;
   font-weight: 900;
   letter-spacing: -0.02em;
   color: #143f86;
@@ -6225,12 +6241,13 @@ body.board-screen-shell .machine-modal .btn-close:focus-visible {
 .machine-modal--response .machine-modal__section.machine-modal__section--response-department,
 .machine-modal--response .machine-modal__section.machine-modal__section--response-issue {
   margin-top: 0;
-  padding: 0.5rem 0.58rem 0.58rem;
+  padding: 0.42rem 0.48rem 0.48rem;
 }
 
 .machine-modal--response .machine-modal__section.machine-modal__section--response-responder,
 .machine-modal--response .machine-modal__section.machine-modal__section--response-ack {
-  padding: 0.5rem 0.54rem 0.55rem;
+  padding: 0.42rem 0.48rem 0.48rem;
+  min-width: 0;
 }
 
 .machine-modal--response .machine-modal__section.machine-modal__section--timer-hero,
