@@ -422,15 +422,16 @@ function onBoardClick(event) {
   const actionButton = event.target.closest("[data-inline-action]");
   if (!actionButton) return;
   const action = actionButton.dataset.inlineAction;
+  const actionMachineId = Number(actionButton.closest(".operator-machine-tile")?.dataset.machineId || 0);
   console.log("[operator] inline action click", {
     action,
-    machineId: actionButton.closest(".operator-machine-tile")?.dataset.machineId || null,
+    machineId: actionMachineId || null,
     alertId: state.selectedAlert?.id || state.board.machines.find((machine) => Number(machine.id) === Number(state.selectedMachine?.id))?.active_alert?.id || null,
   });
   if (action === "send-message") {
     void createAlertFromModal();
   } else if (action === "act-on-alert") {
-    void actOnActiveAlert();
+    void actOnActiveAlert(actionMachineId);
   } else if (action === "close-panel") {
     closeMachinePanel();
   }
@@ -752,12 +753,14 @@ async function createAlertFromModal() {
   }
 }
 
-async function actOnActiveAlert() {
+async function actOnActiveAlert(machineId = 0) {
   try {
-    const liveMachine = state.board.machines.find((machine) => Number(machine.id) === Number(state.selectedMachine?.id));
-    const activeAlert = liveMachine?.active_alert || state.selectedAlert || null;
-    const alertId = activeAlert?.id;
+    const effectiveMachineId = Number(machineId || state.selectedMachine?.id || 0);
+    let liveMachine = state.board.machines.find((machine) => Number(machine.id) === effectiveMachineId);
+    let activeAlert = liveMachine?.active_alert || state.selectedAlert || null;
+    let alertId = activeAlert?.id;
     console.log("[operator] actOnActiveAlert start", {
+      machineId: effectiveMachineId || null,
       selectedMachineId: state.selectedMachine?.id || null,
       liveMachineId: liveMachine?.id || null,
       alertId: alertId || null,
@@ -765,6 +768,19 @@ async function actOnActiveAlert() {
       activeStatus: activeAlert?.status || null,
       responderUserId: activeAlert?.responder_user_id || null,
     });
+    if ((!alertId || !activeAlert || !liveMachine?.active_alert) && effectiveMachineId) {
+      console.log("[operator] refreshing board state before resolve", { machineId: effectiveMachineId });
+      await refreshBoardState();
+      liveMachine = state.board.machines.find((machine) => Number(machine.id) === effectiveMachineId);
+      activeAlert = liveMachine?.active_alert || state.selectedAlert || null;
+      alertId = activeAlert?.id;
+      console.log("[operator] post-refresh alert lookup", {
+        machineId: effectiveMachineId,
+        liveMachineId: liveMachine?.id || null,
+        alertId: alertId || null,
+        activeStatus: activeAlert?.status || null,
+      });
+    }
     if (!alertId || !activeAlert) return;
     if (activeAlert.status === "OPEN") {
       console.warn("[operator] close blocked because alert is still OPEN", { alertId });
@@ -1355,11 +1371,11 @@ function renderAlertInlinePanel(machine, alert, detailed) {
           </div>
         ` : `
           <div class="machine-modal__section machine-modal__section--response-close-row">
-            <div class="machine-modal__close-note-block machine-modal__close-note-block--existing">
+            <div class="machine-modal__close-note-panel machine-modal__close-note-panel--existing">
               <div class="machine-modal__response-label">Note</div>
               <div class="machine-modal__close-row-preview">${closeNotePreviewMarkup}</div>
             </div>
-            <div class="machine-modal__close-note-block machine-modal__close-note-block--append">
+            <div class="machine-modal__close-note-panel machine-modal__close-note-panel--append">
               <div class="machine-modal__response-label">Add note</div>
               <textarea class="form-control machine-tile__note-input machine-modal__close-note" data-note-kind="alert" rows="2" placeholder="Append note before closing">${escapeHtml(state.alertNoteDraft)}</textarea>
             </div>
