@@ -1538,8 +1538,8 @@ function renderCreateInlinePanel(machine, detailed) {
           </div>
           <textarea class="form-control machine-tile__note-input" data-note-kind="create" rows="3" placeholder="Add context for the responder">${escapeHtml(state.createNoteDraft)}</textarea>
         </div>
-        <div class="modal-footer machine-modal__footer machine-tile__inline-actions">
-          <button class="btn btn-danger btn-lg machine-modal__footer-btn" type="button" data-inline-action="send-message" ${canSubmit ? "" : "disabled"}>${isSubmitting ? "Calling..." : "Call"}</button>
+        <div class="alert-create-action-row">
+          <button class="btn btn-danger btn-lg machine-modal__footer-btn call-alert-btn" type="button" data-inline-action="send-message" ${canSubmit ? "" : "disabled"}>${isSubmitting ? "Calling..." : "Call"}</button>
         </div>
       </div>
     </div>`;
