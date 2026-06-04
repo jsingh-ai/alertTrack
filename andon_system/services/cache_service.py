@@ -14,6 +14,10 @@ except ImportError:  # pragma: no cover - optional dependency
     redis = None
 
 
+# Pilot mode: Redis is intentionally disabled until shared cache/fanout is needed.
+_REDIS_PILOT_DISABLED = True
+
+
 _LOCAL_CACHE = {}
 _LOCAL_VERSIONS = {}
 _LOCAL_LOCK = threading.RLock()
@@ -87,6 +91,14 @@ def set_cached(key, value, ttl_seconds: int):
 
 
 def cache_runtime_status() -> dict:
+    if _REDIS_PILOT_DISABLED:
+        return {
+            "backend": "memory",
+            "redis_configured": False,
+            "redis_required": False,
+            "redis_reachable": None,
+        }
+
     redis_url = os.getenv("REDIS_URL")
     configured = bool(redis_url)
     required = _redis_required()
@@ -267,6 +279,8 @@ def _version_key(scope_type, company_id=None, namespace=None):
 
 
 def _get_redis_client():
+    if _REDIS_PILOT_DISABLED:
+        return None
     global _REDIS_CLIENT
     global _REDIS_DISABLED
     if redis is None:
@@ -355,6 +369,8 @@ def _mark_redis_unavailable():
 
 
 def _redis_required():
+    if _REDIS_PILOT_DISABLED:
+        return False
     if has_app_context():
         return bool(current_app.config.get("REDIS_REQUIRED"))
     return os.getenv("REDIS_REQUIRED", "false").lower() in {"1", "true", "yes", "on"}

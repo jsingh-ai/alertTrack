@@ -5,7 +5,9 @@ import secrets
 from datetime import datetime, timezone
 
 from sqlalchemy import update
-from flask import Blueprint, jsonify, flash, redirect, request, url_for
+import time
+
+from flask import Blueprint, current_app, jsonify, flash, redirect, request, url_for
 
 from ..company_context import get_current_company
 from ..extensions import db
@@ -73,15 +75,49 @@ def _company_id():
 def _invalidate_company_caches(company_id):
     if company_id is None:
         return
-    # A company-level version bump invalidates all company-scoped namespaces.
-    invalidate_cache(company_id=company_id)
+    app = current_app._get_current_object()
+
+    def _run_invalidation():
+        started_at = time.perf_counter()
+        with app.app_context():
+            invalidate_started_at = time.perf_counter()
+            # A company-level version bump invalidates all company-scoped namespaces.
+            invalidate_cache(company_id=company_id)
+            invalidate_ms = (time.perf_counter() - invalidate_started_at) * 1000
+
+            emit_started_at = time.perf_counter()
+            emit_admin_metadata_updated(company_id)
+            emit_ms = (time.perf_counter() - emit_started_at) * 1000
+
+            if app.config.get("ANDON_PERF_LOGS"):
+                app.logger.debug(
+                    "PERF admin_cache_invalidate company_id=%s invalidate_ms=%.1f emit_ms=%.1f total_ms=%.1f",
+                    company_id,
+                    invalidate_ms,
+                    emit_ms,
+                    (time.perf_counter() - started_at) * 1000,
+                )
+
     try:
         if socketio is not None:
-            socketio.start_background_task(emit_admin_metadata_updated, company_id)
+            socketio.start_background_task(_run_invalidation)
             return
     except Exception:
-        pass
-    emit_admin_metadata_updated(company_id)
+        current_app.logger.exception("Unable to queue admin cache invalidation company_id=%s", company_id)
+
+    _run_invalidation()
+
+
+def _log_admin_mutation_perf(action: str, started_at: float, **segments):
+    if not current_app.config.get("ANDON_PERF_LOGS"):
+        return
+    suffix = " ".join(f"{key}={value}" for key, value in segments.items())
+    current_app.logger.debug(
+        "PERF admin_mutation action=%s total_ms=%.1f %s",
+        action,
+        (time.perf_counter() - started_at) * 1000,
+        suffix,
+    )
 
 
 def _machine_code_from_name(name: str, company_id: int | None) -> str:
@@ -327,15 +363,34 @@ def create_department():
 
 @admin_bp.post("/department/<int:department_id>/toggle")
 def toggle_department(department_id):
+    started_at = time.perf_counter()
     company_id = _company_id()
+    lookup_started_at = time.perf_counter()
     department = Department.query.filter_by(id=department_id, company_id=company_id).one_or_none()
+    lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
     if not department:
         return _error_or_404("Department not found")
     department.is_active = not department.is_active
+    commit_started_at = time.perf_counter()
     db.session.commit()
+    commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
+        pager_started_at = time.perf_counter()
         pager_device = PagerDevice.query.filter_by(company_id=company_id, department_id=department.id).order_by(PagerDevice.id.asc()).first()
+        pager_ms = (time.perf_counter() - pager_started_at) * 1000
+        _log_admin_mutation_perf(
+            "toggle_department",
+            started_at,
+            company_id=company_id,
+            department_id=department.id,
+            lookup_ms=f"{lookup_ms:.1f}",
+            commit_ms=f"{commit_ms:.1f}",
+            invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+            pager_lookup_ms=f"{pager_ms:.1f}",
+        )
         return _json_response(
             "Department updated",
             department={
@@ -345,6 +400,15 @@ def toggle_department(department_id):
                 "pager_device": _serialize_pager_device(pager_device),
             },
         )
+    _log_admin_mutation_perf(
+        "toggle_department",
+        started_at,
+        company_id=company_id,
+        department_id=department.id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("Department updated", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -631,26 +695,59 @@ def create_machine_group():
 
 @admin_bp.post("/machine-group/<int:group_id>/toggle")
 def toggle_machine_group(group_id):
+    started_at = time.perf_counter()
     company_id = _company_id()
+    lookup_started_at = time.perf_counter()
     group = MachineGroup.query.filter_by(id=group_id, company_id=company_id).one_or_none()
+    lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
     if not group:
         return _error_or_404("Machine group not found")
     group.is_active = not group.is_active
     target_state = group.is_active
+    machine_load_started_at = time.perf_counter()
     for machine in Machine.query.filter(Machine.company_id == company_id, Machine.machine_type == group.name).all():
         machine.is_active = target_state
+    machine_mutation_ms = (time.perf_counter() - machine_load_started_at) * 1000
+    commit_started_at = time.perf_counter()
     db.session.commit()
+    commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
+        count_started_at = time.perf_counter()
+        machine_count = _machine_group_count(group.name)
+        count_ms = (time.perf_counter() - count_started_at) * 1000
+        _log_admin_mutation_perf(
+            "toggle_machine_group",
+            started_at,
+            company_id=company_id,
+            group_id=group.id,
+            lookup_ms=f"{lookup_ms:.1f}",
+            machine_mutation_ms=f"{machine_mutation_ms:.1f}",
+            commit_ms=f"{commit_ms:.1f}",
+            invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+            count_ms=f"{count_ms:.1f}",
+        )
         return _json_response(
             "Machine group updated",
             machine_group={
                 "id": group.id,
                 "name": group.name,
                 "is_active": group.is_active,
-                "machine_count": _machine_group_count(group.name),
+                "machine_count": machine_count,
             },
         )
+    _log_admin_mutation_perf(
+        "toggle_machine_group",
+        started_at,
+        company_id=company_id,
+        group_id=group.id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        machine_mutation_ms=f"{machine_mutation_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("Machine group updated", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -920,15 +1017,44 @@ def update_user(user_id):
 
 @admin_bp.post("/user/<int:user_id>/toggle")
 def toggle_user(user_id):
+    started_at = time.perf_counter()
     company_id = _company_id()
+    lookup_started_at = time.perf_counter()
     access = UserCompanyAccess.query.filter_by(user_id=user_id, company_id=company_id).one_or_none()
+    lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
     if not access or access.user is None:
         return _error_or_404("User not found")
     access.is_active = not access.is_active
+    commit_started_at = time.perf_counter()
     db.session.commit()
+    commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
-        return _json_response("User updated", user=_membership_payload(access))
+        payload_started_at = time.perf_counter()
+        user_payload = _membership_payload(access)
+        payload_ms = (time.perf_counter() - payload_started_at) * 1000
+        _log_admin_mutation_perf(
+            "toggle_user",
+            started_at,
+            company_id=company_id,
+            user_id=user_id,
+            lookup_ms=f"{lookup_ms:.1f}",
+            commit_ms=f"{commit_ms:.1f}",
+            invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+            payload_ms=f"{payload_ms:.1f}",
+        )
+        return _json_response("User updated", user=user_payload)
+    _log_admin_mutation_perf(
+        "toggle_user",
+        started_at,
+        company_id=company_id,
+        user_id=user_id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("User updated", "success")
     return redirect(url_for("pages.admin_page"))
 

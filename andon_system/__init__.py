@@ -426,7 +426,8 @@ def create_app(config_name: str | None = None) -> Flask:
         socketio.init_app(
             app,
             async_mode=app.config.get("SOCKETIO_ASYNC_MODE"),
-            message_queue=app.config.get("SOCKETIO_MESSAGE_QUEUE"),
+            # Pilot mode: disable Redis-backed fanout and keep Socket.IO local.
+            message_queue=None,
             cors_allowed_origins=None,
             ping_interval=app.config.get("SOCKETIO_PING_INTERVAL"),
             ping_timeout=app.config.get("SOCKETIO_PING_TIMEOUT"),
