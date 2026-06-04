@@ -1503,7 +1503,7 @@ function renderAlertInlinePanel(machine, alert, detailed) {
             <textarea class="form-control machine-tile__note-input machine-modal__close-note" data-note-kind="alert" rows="2" placeholder="Append note before closing">${escapeHtml(state.alertNoteDraft)}</textarea>
           </div>
         </div>
-        <div class="machine-modal__section machine-modal__section--response-close-action machine-modal__alert-action-row machine-tile__inline-actions">
+        <div class="machine-modal__alert-action-row">
           <button class="btn btn-primary machine-modal__footer-btn machine-modal__footer-btn--full" type="button" data-inline-action="act-on-alert">${actionLabel}</button>
         </div>
       `}
