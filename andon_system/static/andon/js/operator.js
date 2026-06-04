@@ -84,6 +84,7 @@ let liveTimerNodes = [];
 let operatorMetadataLoadPromise = null;
 let operatorDepartmentsLoadPromise = null;
 let operatorBoardLoadPromise = null;
+const operatorMetadataLoadPromisesByKey = new Map();
 let operatorLastPersistedViewKey = "";
 let createAlertInFlight = false;
 let createAlertMachineId = null;
@@ -169,6 +170,21 @@ async function fetchJson(url, options = {}) {
 function buildNoStoreUrl(url) {
   const separator = String(url).includes("?") ? "&" : "?";
   return `${url}${separator}t=${Date.now()}`;
+}
+
+function buildOperatorMetadataUrl(options = {}) {
+  const params = new URLSearchParams();
+  if (options.departmentsOnly) {
+    params.set("departments_only", "1");
+  }
+  if (options.departmentId) {
+    params.set("department_id", String(options.departmentId));
+  }
+  if (options.includeUsers === false) {
+    params.set("include_users", "0");
+  }
+  const query = params.toString();
+  return query ? `${operatorMetadataUrl}?${query}` : operatorMetadataUrl;
 }
 
 function logOperatorTiming(stage, details = {}) {
@@ -607,21 +623,6 @@ function applyOperatorMetadata(metadata, options = {}) {
 function getProblemsForDepartment(departmentId) {
   const targetDepartmentId = Number(departmentId || 0);
   if (!targetDepartmentId) return [];
-  const selectedDepartmentName = _normalizeDepartmentNameForIssues(
-    state.selectedDepartment && Number(state.selectedDepartment.id) === targetDepartmentId
-      ? state.selectedDepartment.name
-      : state.departments.find((department) => Number(department.id) === targetDepartmentId)?.name,
-  );
-  if (selectedDepartmentName === "quality and supervisor") {
-    const qualityDepartment = state.departments.find((department) => _normalizeDepartmentNameForIssues(department.name) === "quality");
-    const supervisorDepartment = state.departments.find((department) => _normalizeDepartmentNameForIssues(department.name) === "supervisor");
-    const compositeProblems = [];
-    [qualityDepartment?.id, supervisorDepartment?.id].forEach((linkedDepartmentId) => {
-      if (!linkedDepartmentId) return;
-      compositeProblems.push(...getProblemsForDepartment(linkedDepartmentId));
-    });
-    return compositeProblems;
-  }
   const flattened = [];
   (state.issueGroups || []).forEach((group) => {
     if (Number(group?.department_id || 0) !== targetDepartmentId) return;
@@ -656,10 +657,22 @@ function hydrateOperatorDepartmentsFromCache() {
 
 async function loadOperatorMetadata(options = {}) {
   const force = Boolean(options.force);
-  if (state.detailMetadataLoaded && !force) return;
-  if (!operatorMetadataLoadPromise) {
-    operatorMetadataLoadPromise = (async () => {
-      if (!force && hydrateOperatorMetadataFromCache()) {
+  const departmentId = Number(options.departmentId || 0) || null;
+  const includeUsers = options.includeUsers !== false;
+  const requestKey = `${force ? "force" : "normal"}:${departmentId || "all"}:${includeUsers ? "users" : "no-users"}`;
+  if (!departmentId && state.detailMetadataLoaded && !force) return;
+  if (departmentId && !force && state.detailMetadataLoaded && getProblemsForDepartment(departmentId).length > 0) {
+    console.log("[operator issues] issue load start", {
+      departmentId,
+      source: "state",
+      sinceScriptMs: operatorSinceScriptMs(),
+    });
+    completeOperatorIssuesTimer(getProblemsForDepartment(departmentId).length);
+    return;
+  }
+  if (!operatorMetadataLoadPromisesByKey.has(requestKey)) {
+    const promise = (async () => {
+      if (!force && !departmentId && hydrateOperatorMetadataFromCache()) {
         console.log("[operator issues] issue load start", {
           departmentId: state.selectedDepartmentId,
           source: "cache",
@@ -668,20 +681,39 @@ async function loadOperatorMetadata(options = {}) {
         return;
       }
       console.log("[operator issues] issue load start", {
-        departmentId: state.selectedDepartmentId,
-        source: "api",
+        departmentId,
+        source: departmentId ? "api:department" : "api:warm-all",
         sinceScriptMs: operatorSinceScriptMs(),
       });
-      const metadata = await fetchJson(buildNoStoreUrl(operatorMetadataUrl), {
+      const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const metadata = await fetchJson(buildNoStoreUrl(buildOperatorMetadataUrl({
+        departmentId,
+        includeUsers,
+      })), {
         cache: "no-store",
       });
+      const responseAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+      console.log("[operator issues] department-specific issue fetch response received", {
+        departmentId,
+        elapsedMs: Math.round(responseAt - startedAt),
+        sinceScriptMs: operatorSinceScriptMs(),
+      });
       applyOperatorMetadata(metadata, { level: "full" });
-      setCachedOperatorMetadata(metadata);
+      if (!departmentId) {
+        setCachedOperatorMetadata(metadata);
+      }
     })().finally(() => {
-      operatorMetadataLoadPromise = null;
+      operatorMetadataLoadPromisesByKey.delete(requestKey);
+      if (!departmentId) {
+        operatorMetadataLoadPromise = null;
+      }
     });
+    operatorMetadataLoadPromisesByKey.set(requestKey, promise);
+    if (!departmentId) {
+      operatorMetadataLoadPromise = promise;
+    }
   }
-  await operatorMetadataLoadPromise;
+  await operatorMetadataLoadPromisesByKey.get(requestKey);
 }
 
 async function loadOperatorDepartments(options = {}) {
@@ -712,7 +744,14 @@ async function ensureOperatorDepartmentsLoaded() {
 function scheduleOperatorMetadataWarmup() {
   if (state.detailMetadataLoaded || operatorMetadataLoadPromise) return;
   const runWarmup = () => {
+    console.log("[operator issues] issue metadata warmup start", {
+      departmentId: null,
+      sinceScriptMs: operatorSinceScriptMs(),
+    });
     void loadOperatorMetadata().then(() => {
+      console.log("[operator issues] issue metadata warmup complete", {
+        sinceScriptMs: operatorSinceScriptMs(),
+      });
       renderBoard();
     }).catch((_error) => {
       console.warn("Failed to preload operator metadata.");
@@ -953,9 +992,18 @@ function onDepartmentButtonClick(button) {
     completeOperatorIssuesTimer(cachedProblems.length);
     return;
   }
-  if (!state.detailMetadataLoaded && !operatorMetadataLoadPromise) {
-    void loadOperatorMetadata().then(renderBoard).catch(() => {});
-  }
+  void loadOperatorMetadata({
+    departmentId,
+    includeUsers: false,
+  }).then(() => {
+    const issueCount = getProblemsForDepartment(departmentId).length;
+    console.log("[operator issues] issue buttons rendered", {
+      departmentId,
+      issueCount,
+      sinceScriptMs: operatorSinceScriptMs(),
+    });
+    renderBoard();
+  }).catch(() => {});
 }
 
 function onProblemClick(button) {
@@ -1555,9 +1603,10 @@ function renderProblemOptionsMarkup(problems) {
   if (state.selectedDepartment && !state.detailMetadataLoaded) {
     return '<div class="problem-empty">Loading issues...</div>';
   }
+  const selectedDepartmentName = _normalizeDepartmentNameForIssues(state.selectedDepartment?.name);
   const selectedProblemId = state.selectedProblem ? Number(state.selectedProblem.id) : null;
   const problemKey = problems.map((problem) => `${problem.id}:${problem.name}`).join("|");
-  const cacheKey = `${selectedProblemId || ""}|${problemKey}`;
+  const cacheKey = `${selectedProblemId || ""}|${selectedDepartmentName}|${problemKey}`;
   if (cacheKey === problemOptionsMarkupCacheKey) {
     return problemOptionsMarkupCacheValue;
   }
@@ -1570,7 +1619,9 @@ function renderProblemOptionsMarkup(problems) {
             </button>`,
       )
       .join("")
-    : '<div class="problem-empty">No issues found for this department.</div>';
+    : selectedDepartmentName === "quality and supervisor"
+      ? '<div class="problem-empty">No issues configured for Call Quality and Supervisor.</div>'
+      : '<div class="problem-empty">No issues found for this department.</div>';
   problemOptionsMarkupCacheKey = cacheKey;
   problemOptionsMarkupCacheValue = markup;
   return markup;
@@ -1940,15 +1991,37 @@ async function refreshBoardState(options = {}) {
   operatorRefreshInFlight = true;
   operatorRefreshPromise = (async () => {
     try {
+      if (options.includeRadius !== false) {
+        console.log("[operator radius] hydrate start", {
+          reason: options.reason || "refresh",
+          sinceScriptMs: operatorSinceScriptMs(),
+        });
+      }
       await loadBoardState({
         force: true,
         includeRadius: options.includeRadius !== false,
         includeAlerts: options.includeAlerts !== false,
         reason: options.reason || "refresh",
       });
+      if (options.includeRadius !== false) {
+        const radiusCount = (state.board.machines || []).filter((machine) => machine.radius).length;
+        console.log("[operator radius] applied to state", {
+          reason: options.reason || "refresh",
+          radiusCount,
+          sinceScriptMs: operatorSinceScriptMs(),
+        });
+      }
       normalizeViewState();
       renderViewControls();
       renderBoard();
+      if (options.includeRadius !== false) {
+        const radiusCount = (state.board.machines || []).filter((machine) => machine.radius).length;
+        console.log("[operator radius] rendered", {
+          reason: options.reason || "refresh",
+          radiusCount,
+          sinceScriptMs: operatorSinceScriptMs(),
+        });
+      }
     } finally {
       operatorRefreshInFlight = false;
     }

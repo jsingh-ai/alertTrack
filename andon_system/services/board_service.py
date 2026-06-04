@@ -209,6 +209,7 @@ def build_operator_metadata(
     *,
     include_issue_groups: bool = True,
     include_users: bool = True,
+    metadata_department_ids_override: list[int] | None = None,
 ):
     started_at = time.perf_counter()
     company_id = company_id if company_id is not None else get_current_company_id()
@@ -222,6 +223,7 @@ def build_operator_metadata(
         scope,
         include_issue_groups=include_issue_groups,
         include_users=include_users,
+        metadata_department_ids_override=metadata_department_ids_override,
     )
 
     cache_started_at = time.perf_counter()
@@ -255,6 +257,7 @@ def build_operator_metadata(
         metrics=context_metrics,
         include_issue_groups=include_issue_groups,
         include_users=include_users,
+        metadata_department_ids_override=metadata_department_ids_override,
     )
     serialize_started_at = time.perf_counter()
     result = {
@@ -317,6 +320,7 @@ def _load_operator_metadata_context(
     *,
     include_issue_groups: bool = True,
     include_users: bool = True,
+    metadata_department_ids_override: list[int] | None = None,
 ):
     scope_started_at = time.perf_counter()
     scope = scope or get_scope_filters()
@@ -332,12 +336,16 @@ def _load_operator_metadata_context(
     department_ids = scope.get("department_ids") or ([scope["department_id"]] if scope.get("department_id") is not None else [])
     machine_ids = scope.get("machine_ids") or []
     machine_group_names = scope.get("machine_group_names") or ([scope["machine_group_name"]] if scope.get("machine_group_name") else [])
-    metadata_department_ids = list(department_ids)
+    metadata_department_ids = (
+        sorted({int(value) for value in (metadata_department_ids_override or []) if value is not None})
+        if metadata_department_ids_override
+        else list(department_ids)
+    )
 
     # For broad roles (Admin/Manager/etc), prevent first-load metadata from
     # pulling every company issue category/problem by default. Scope metadata
     # to departments that actually have visible machines.
-    if not metadata_department_ids and company_id:
+    if not metadata_department_ids and not metadata_department_ids_override and company_id:
         machine_scope_query = Machine.query.options(noload("*")).with_entities(Machine.department_id).filter(Machine.company_id == company_id)
         if machine_ids:
             machine_scope_query = machine_scope_query.filter(Machine.id.in_(machine_ids))
@@ -441,7 +449,7 @@ def _load_operator_metadata_context(
     }
 
 
-def _operator_metadata_cache_key(company_id, current_user, membership, scope, *, include_issue_groups: bool, include_users: bool):
+def _operator_metadata_cache_key(company_id, current_user, membership, scope, *, include_issue_groups: bool, include_users: bool, metadata_department_ids_override: list[int] | None = None):
     return (
         "operator_metadata",
         company_id,
@@ -456,6 +464,7 @@ def _operator_metadata_cache_key(company_id, current_user, membership, scope, *,
         tuple(sorted(scope.get("machine_ids") or [])),
         bool(include_issue_groups),
         bool(include_users),
+        tuple(sorted({int(value) for value in (metadata_department_ids_override or []) if value is not None})),
     )
 
 
