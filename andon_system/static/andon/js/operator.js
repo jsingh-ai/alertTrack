@@ -1564,7 +1564,11 @@ function renderAlertMessageThread(alert) {
 }
 
 function flattenNotePreviewMarkup(markup) {
-  return String(markup || "")
+  const normalized = String(markup || "").trim();
+  if (!normalized.startsWith('<div class="machine-tile__thread">')) {
+    return normalized;
+  }
+  return normalized
     .replace(/^<div class="machine-tile__thread">/, "")
     .replace(/<\/div>\s*$/, "");
 }
