@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
+from urllib.parse import urlsplit
 
 from flask import current_app, has_app_context
 from sqlalchemy import bindparam, create_engine, text
@@ -130,10 +131,14 @@ def _get_radius_engine():
     with _RADIUS_LOCK:
         if _RADIUS_ENGINE is not None and _RADIUS_ENGINE_URL == url:
             return _RADIUS_ENGINE
+        engine_kwargs = {
+            "pool_pre_ping": True,
+            "pool_recycle": 300,
+            "connect_args": _radius_connect_args(url),
+        }
         _RADIUS_ENGINE = create_engine(
             url,
-            pool_pre_ping=True,
-            pool_recycle=300,
+            **engine_kwargs,
         )
         _RADIUS_ENGINE_URL = url
         return _RADIUS_ENGINE
@@ -153,6 +158,41 @@ def _radius_status_cache_ttl_seconds() -> int:
             raw_value = _DEFAULT_RADIUS_STATUS_CACHE_TTL_SECONDS
         return max(1, min(raw_value, 60))
     return _DEFAULT_RADIUS_STATUS_CACHE_TTL_SECONDS
+
+
+def _radius_connect_args(url: str) -> dict:
+    parsed = urlsplit(url)
+    scheme = (parsed.scheme or "").lower()
+    connect_timeout_seconds = _radius_connect_timeout_seconds()
+    statement_timeout_ms = _radius_statement_timeout_ms()
+
+    if scheme.startswith("postgresql"):
+        options = f"-c statement_timeout={statement_timeout_ms}"
+        return {
+            "connect_timeout": connect_timeout_seconds,
+            "options": options,
+        }
+    return {}
+
+
+def _radius_connect_timeout_seconds() -> int:
+    if has_app_context():
+        try:
+            raw_value = int(current_app.config.get("PRESS_RADIUS_CONNECT_TIMEOUT_SECONDS", 2))
+        except (TypeError, ValueError):
+            raw_value = 2
+        return max(1, min(raw_value, 10))
+    return 2
+
+
+def _radius_statement_timeout_ms() -> int:
+    if has_app_context():
+        try:
+            raw_value = int(current_app.config.get("PRESS_RADIUS_STATEMENT_TIMEOUT_MS", 2500))
+        except (TypeError, ValueError):
+            raw_value = 2500
+        return max(250, min(raw_value, 10000))
+    return 2500
 
 
 def _status_label(row):

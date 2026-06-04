@@ -1462,38 +1462,36 @@ function renderAlertInlinePanel(machine, alert, detailed) {
         </div>
       ` : ""}
       ${renderRadiusPanel(machine, "machine-tile__radius-panel machine-tile__radius-panel--response")}
-      <div class="machine-tile__inline-panel-grid">
-        ${isOpen ? "" : `
-          <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-responder">
-            <div class="machine-modal__response-label">Who is responding</div>
-            <div class="machine-modal__response-value">${escapeHtml(alert.responder_name_text || "Unassigned")}</div>
-          </div>
-        `}
-        <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-department">
-          <div class="machine-modal__response-label">ISSUE TYPE</div>
-          <div class="machine-modal__response-value">${escapeHtml(alert.department_name || machine.department_name || "Unknown")}</div>
+      ${isOpen ? "" : `
+        <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-responder">
+          <div class="machine-modal__response-label">Who is responding</div>
+          <div class="machine-modal__response-value">${escapeHtml(alert.responder_name_text || "Unassigned")}</div>
         </div>
-        <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-issue">
-          <div class="machine-modal__response-label">Issue</div>
-          <div class="machine-modal__response-value">${escapeHtml(alert.problem_name || alert.category_name || "Unknown")}</div>
-        </div>
-        ${isOpen ? "" : `
-          <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-ack">
-            <div class="machine-modal__response-label">Acknowledged in</div>
-            <div class="machine-modal__response-value">${escapeHtml(acknowledgedInText)}</div>
-          </div>
-        `}
-        <div class="machine-modal__section machine-modal__section--timer-hero">
-          <div class="machine-modal__timer-hero-label">Elapsed timer</div>
-          <div class="machine-modal__timer-hero-value machine-tile__timer" data-live-timer="true" data-live-timer-format="alert-duration" data-elapsed-seconds="${Math.max(0, Math.floor(alert.elapsed_seconds || 0))}">${escapeHtml(liveTimerText)}</div>
-        </div>
-        ${isOpen ? `
-          <div class="machine-modal__section machine-modal__section--response-waiting machine-modal__section--response-waiting--closed">
-            <div class="machine-modal__response-waiting-title">Awaiting acknowledgement</div>
-            <div class="machine-modal__response-waiting-subtitle">Close Alert appears after the response is acknowledged.</div>
-          </div>
-        ` : ""}
+      `}
+      <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-department">
+        <div class="machine-modal__response-label">ISSUE TYPE</div>
+        <div class="machine-modal__response-value">${escapeHtml(alert.department_name || machine.department_name || "Unknown")}</div>
       </div>
+      <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-issue">
+        <div class="machine-modal__response-label">Issue</div>
+        <div class="machine-modal__response-value">${escapeHtml(alert.problem_name || alert.category_name || "Unknown")}</div>
+      </div>
+      ${isOpen ? "" : `
+        <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-ack">
+          <div class="machine-modal__response-label">Acknowledged in</div>
+          <div class="machine-modal__response-value">${escapeHtml(acknowledgedInText)}</div>
+        </div>
+      `}
+      <div class="machine-modal__section machine-modal__section--timer-hero">
+        <div class="machine-modal__timer-hero-label">Elapsed timer</div>
+        <div class="machine-modal__timer-hero-value machine-tile__timer" data-live-timer="true" data-live-timer-format="alert-duration" data-elapsed-seconds="${Math.max(0, Math.floor(alert.elapsed_seconds || 0))}">${escapeHtml(liveTimerText)}</div>
+      </div>
+      ${isOpen ? `
+        <div class="machine-modal__section machine-modal__section--response-waiting machine-modal__section--response-waiting--closed">
+          <div class="machine-modal__response-waiting-title">Awaiting acknowledgement</div>
+          <div class="machine-modal__response-waiting-subtitle">Close Alert appears after the response is acknowledged.</div>
+        </div>
+      ` : ""}
       ${isOpen ? "" : `
         <div class="machine-modal__existing-note">
           <div class="machine-modal__response-label">Note</div>
