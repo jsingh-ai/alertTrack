@@ -345,6 +345,21 @@ def _find_active_alert_id_for_machine(machine_id: int, company_id: int | None) -
     return db.session.execute(stmt.limit(1)).scalar_one_or_none()
 
 
+def _find_active_alert_id_for_machine_department(machine_id: int, department_id: int, company_id: int | None) -> int | None:
+    stmt = select(AndonAlert.id).where(
+        AndonAlert.machine_id == machine_id,
+        AndonAlert.department_id == department_id,
+        AndonAlert.status.in_([ALERT_STATUS_OPEN, ALERT_STATUS_ACKNOWLEDGED, ALERT_STATUS_ARRIVED]),
+    )
+    if company_id:
+        stmt = stmt.where(AndonAlert.company_id == company_id)
+    return db.session.execute(stmt.limit(1)).scalar_one_or_none()
+
+
+def _normalize_department_name(value: str | None) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
 def create_alert(payload: dict, metrics: dict | None = None):
     started_at = time.perf_counter()
     previous_step_at = started_at
@@ -446,18 +461,6 @@ def create_alert(payload: dict, metrics: dict | None = None):
     previous_step_at = _perf_step("after_permission_scope", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     # Keep the friendly conflict path even though the database also enforces
     # one active alert per machine now.
-    duplicate_check_started_at = time.perf_counter()
-    existing_alert_id = _find_active_alert_id_for_machine(machine.id, company_id)
-    perf["duplicate_active_check_ms"] = (time.perf_counter() - duplicate_check_started_at) * 1000
-    known_segments["duplicate_active_check_ms"] = perf["duplicate_active_check_ms"]
-    previous_step_at = _perf_step("after_duplicate_check", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
-    if existing_alert_id:
-        existing_payload = fetch_alert_payload_by_id(existing_alert_id, company_id=company_id)
-        raise AlertServiceError(
-            "An active alert already exists for this machine",
-            status_code=409,
-            data={"existing_alert": existing_payload or {"id": existing_alert_id}},
-        )
     gap_started_at = time.perf_counter()
     previous_step_at = _perf_step("gap_enter_after_duplicate", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     if not department_id and not issue_category:
@@ -499,7 +502,62 @@ def create_alert(payload: dict, metrics: dict | None = None):
         raise AlertServiceError("Issue problem does not belong to the selected company")
     previous_step_at = _perf_step("gap_after_issue_problem_company_check", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
 
-    department_id = issue_category.department_id
+    source_department = None
+    if payload.get("department_id"):
+        source_department = Department.query.options(
+            load_only(Department.id, Department.company_id, Department.name, Department.is_active),
+            noload("*"),
+        ).filter(Department.id == payload.get("department_id"))
+        if company_id:
+            source_department = source_department.filter(Department.company_id == company_id)
+        source_department = source_department.one_or_none()
+
+    target_departments = []
+    selected_department_name = _normalize_department_name(getattr(source_department, "name", None))
+    if selected_department_name == "quality and supervisor":
+        target_departments = (
+            Department.query.options(
+                load_only(Department.id, Department.company_id, Department.name, Department.is_active),
+                noload("*"),
+            )
+            .filter(
+                Department.company_id == company_id,
+                Department.name.in_(["Quality", "Supervisor"]),
+                Department.is_active.is_(True),
+            )
+            .order_by(Department.name.asc())
+            .all()
+        )
+        if len(target_departments) != 2:
+            raise AlertServiceError("Quality and Supervisor departments must both exist and be active")
+    else:
+        department_id = issue_category.department_id
+        target_departments = [
+            SimpleNamespace(
+                id=department_id,
+                name=getattr(source_department, "name", None),
+                company_id=company_id,
+                is_active=True,
+            )
+        ]
+
+    duplicate_check_started_at = time.perf_counter()
+    existing_alert_id = None
+    for target_department in target_departments:
+        existing_alert_id = _find_active_alert_id_for_machine_department(machine.id, int(target_department.id), company_id)
+        if existing_alert_id:
+            break
+    perf["duplicate_active_check_ms"] = (time.perf_counter() - duplicate_check_started_at) * 1000
+    known_segments["duplicate_active_check_ms"] = perf["duplicate_active_check_ms"]
+    previous_step_at = _perf_step("after_duplicate_check", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
+    if existing_alert_id:
+        existing_payload = fetch_alert_payload_by_id(existing_alert_id, company_id=company_id)
+        raise AlertServiceError(
+            "An active alert already exists for this machine and department",
+            status_code=409,
+            data={"existing_alert": existing_payload or {"id": existing_alert_id}},
+        )
+
     gap_ms = (time.perf_counter() - gap_started_at) * 1000
     perf["after_duplicate_to_before_build_ms"] = gap_ms
     if _deep_alert_debug_enabled():
@@ -512,27 +570,32 @@ def create_alert(payload: dict, metrics: dict | None = None):
     previous_step_at = _perf_step("before_alert_build", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     alert_build_started_at = time.perf_counter()
     resolved_company_id = company_id or machine.company_id
-    alert_number = f"AL-{utc_now():%Y%m%d%H%M%S}-{uuid4().hex[:6].upper()}"
-    alert = AndonAlert(
-        company_id=resolved_company_id,
-        alert_number=alert_number,
-        machine_id=machine.id,
-        department_id=department_id,
-        issue_category_id=issue_category.id,
-        issue_problem_id=issue_problem.id,
-        status=ALERT_STATUS_OPEN,
-        priority=payload.get("priority") or issue_category.priority_default or issue_problem.severity_default or 3,
-        operator_user_id=operator_user.id if operator_user else None,
-        operator_name_text=payload.get("operator_name_text"),
-        note=payload.get("note"),
-    )
+    alerts = []
+    for target_department in target_departments:
+        alert_number = f"AL-{utc_now():%Y%m%d%H%M%S}-{uuid4().hex[:6].upper()}"
+        alerts.append(
+            AndonAlert(
+                company_id=resolved_company_id,
+                alert_number=alert_number,
+                machine_id=machine.id,
+                department_id=int(target_department.id),
+                issue_category_id=issue_category.id,
+                issue_problem_id=issue_problem.id,
+                status=ALERT_STATUS_OPEN,
+                priority=payload.get("priority") or issue_category.priority_default or issue_problem.severity_default or 3,
+                operator_user_id=operator_user.id if operator_user else None,
+                operator_name_text=payload.get("operator_name_text"),
+                note=payload.get("note"),
+            )
+        )
     perf["alert_object_build_ms"] = (time.perf_counter() - alert_build_started_at) * 1000
     known_segments["alert_object_build_ms"] = perf["alert_object_build_ms"]
     previous_step_at = _perf_step("after_alert_build", started_at, previous_step_at, machine_id=machine.id, company_id=resolved_company_id)
     try:
         previous_step_at = _perf_step("before_db_add", started_at, previous_step_at, machine_id=machine.id, company_id=resolved_company_id)
         add_started_at = time.perf_counter()
-        db.session.add(alert)
+        for alert in alerts:
+            db.session.add(alert)
         perf["db_add_ms"] = (time.perf_counter() - add_started_at) * 1000
         known_segments["db_add_ms"] = perf["db_add_ms"]
         previous_step_at = _perf_step("after_db_add", started_at, previous_step_at, machine_id=machine.id, company_id=resolved_company_id)
@@ -542,44 +605,49 @@ def create_alert(payload: dict, metrics: dict | None = None):
         db.session.flush()
         perf["db_flush_ms"] = (time.perf_counter() - flush_started_at) * 1000
         known_segments["db_flush_ms"] = perf["db_flush_ms"]
-        previous_step_at = _perf_step("after_flush", started_at, previous_step_at, alert_id=alert.id, machine_id=machine.id, company_id=resolved_company_id)
+        previous_step_at = _perf_step("after_flush", started_at, previous_step_at, alert_id=alerts[0].id if alerts else None, machine_id=machine.id, company_id=resolved_company_id)
         _perf_pg_diagnostics("after_flush")
 
-        previous_step_at = _perf_step("before_event_insert", started_at, previous_step_at, alert_id=alert.id, machine_id=machine.id, company_id=resolved_company_id)
+        previous_step_at = _perf_step("before_event_insert", started_at, previous_step_at, alert_id=alerts[0].id if alerts else None, machine_id=machine.id, company_id=resolved_company_id)
         event_started_at = time.perf_counter()
-        _add_event(
-            alert,
-            EVENT_CREATED,
-            user=operator_user,
-            user_name_text=payload.get("operator_name_text") or (operator_user.display_name if operator_user else None),
-            message="Alert created",
-            metadata={"note": payload.get("note")},
-        )
+        for alert in alerts:
+            _add_event(
+                alert,
+                EVENT_CREATED,
+                user=operator_user,
+                user_name_text=payload.get("operator_name_text") or (operator_user.display_name if operator_user else None),
+                message="Alert created",
+                metadata={"note": payload.get("note")},
+            )
         perf["event_insert_ms"] = (time.perf_counter() - event_started_at) * 1000
         known_segments["event_insert_ms"] = perf["event_insert_ms"]
-        previous_step_at = _perf_step("after_event_insert", started_at, previous_step_at, alert_id=alert.id, machine_id=machine.id, company_id=resolved_company_id)
+        previous_step_at = _perf_step("after_event_insert", started_at, previous_step_at, alert_id=alerts[0].id if alerts else None, machine_id=machine.id, company_id=resolved_company_id)
         perf["note_insert_ms"] = 0.0
-        created_alert_id = alert.id
-        created_company_id = alert.company_id
-        created_machine_id = alert.machine_id
-        created_status = alert.status
-        created_at_iso = alert.created_at.isoformat() if alert.created_at else None
-        previous_step_at = _perf_step("before_commit", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
+        created_alert_ids = [alert.id for alert in alerts]
+        created_company_id = alerts[0].company_id
+        created_machine_id = alerts[0].machine_id
+        created_status = alerts[0].status
+        created_at_iso = alerts[0].created_at.isoformat() if alerts[0].created_at else None
+        previous_step_at = _perf_step("before_commit", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
         _perf_pg_diagnostics("before_commit")
         commit_started_at = time.perf_counter()
         db.session.commit()
         commit_done_at = time.perf_counter()
         perf["db_commit_ms"] = (commit_done_at - commit_started_at) * 1000
         known_segments["db_commit_ms"] = perf["db_commit_ms"]
-        previous_step_at = _perf_step("after_commit", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
+        previous_step_at = _perf_step("after_commit", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
         _perf_pg_diagnostics("after_commit")
     except IntegrityError as exc:
         db.session.rollback()
-        existing_alert_id = _find_active_alert_id_for_machine(machine.id, resolved_company_id)
+        existing_alert_id = None
+        for target_department in target_departments:
+            existing_alert_id = _find_active_alert_id_for_machine_department(machine.id, int(target_department.id), resolved_company_id)
+            if existing_alert_id:
+                break
         if existing_alert_id:
             existing_payload = fetch_alert_payload_by_id(existing_alert_id, company_id=resolved_company_id)
             raise AlertServiceError(
-                "An active alert already exists for this machine",
+                "An active alert already exists for this machine and department",
                 status_code=409,
                 data={"existing_alert": existing_payload or {"id": existing_alert_id}},
             ) from exc
@@ -598,7 +666,7 @@ def create_alert(payload: dict, metrics: dict | None = None):
         current_app.logger.debug(
             "PERF alert_create_checkpoint phase=before_cache after_commit_to_cache_start_ms=%.1f alert_id=%s company_id=%s machine_id=%s status=%s created_at=%s",
             perf["before_cache_call_ms"],
-            created_alert_id,
+            created_alert_ids[0] if created_alert_ids else None,
             created_company_id,
             created_machine_id,
             created_status,
@@ -615,16 +683,17 @@ def create_alert(payload: dict, metrics: dict | None = None):
             perf["before_cache_call_ms"],
             perf["actual_invalidate_call_ms"],
             perf["after_cache_call_ms"],
-            created_alert_id,
+            created_alert_ids[0] if created_alert_ids else None,
         )
-    previous_step_at = _perf_step("after_cache", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
-    previous_step_at = _perf_step("before_socket_emit", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
+    previous_step_at = _perf_step("after_cache", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
+    previous_step_at = _perf_step("before_socket_emit", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
     emit_started_at = time.perf_counter()
-    emit_alert_created(created_company_id, created_alert_id, machine_id=created_machine_id, status=created_status)
+    for created_alert_id in created_alert_ids:
+        emit_alert_created(created_company_id, created_alert_id, machine_id=created_machine_id, status=created_status)
     perf["socket_emit_ms"] = (time.perf_counter() - emit_started_at) * 1000
     known_segments["socket_emit_ms"] = perf["socket_emit_ms"]
-    previous_step_at = _perf_step("after_socket_emit", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
-    previous_step_at = _perf_step("before_return", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
+    previous_step_at = _perf_step("after_socket_emit", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
+    previous_step_at = _perf_step("before_return", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
     perf.setdefault("payload_fetch_ms", 0.0)
     perf.setdefault("escalation_check_ms", 0.0)
     perf.setdefault("email_send_ms", 0.0)
@@ -640,8 +709,13 @@ def create_alert(payload: dict, metrics: dict | None = None):
             unexplained,
         )
     _perf_log_create_alert(perf)
-    _perf_step("final_return", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
-    return SimpleNamespace(id=created_alert_id, company_id=created_company_id, machine_id=created_machine_id, status=created_status)
+    _perf_step("final_return", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
+    if len(created_alert_ids) == 1:
+        return SimpleNamespace(id=created_alert_ids[0], company_id=created_company_id, machine_id=created_machine_id, status=created_status)
+    return [
+        SimpleNamespace(id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id, status=alert.status)
+        for alert in alerts
+    ]
 
 
 def acknowledge_alert(alert_id: int, payload: dict, metrics: dict | None = None):

@@ -54,6 +54,7 @@ def build_board_state(include_metadata: bool = True):
             _serialize_machine(
                 machine,
                 context["alert_by_machine"],
+                context["alerts_by_machine"],
                 context["created_notes_by_alert_id"],
                 context["radius_status_by_machine"],
             )
@@ -164,6 +165,7 @@ def build_operator_snapshot(
             _serialize_machine(
                 machine,
                 context["alert_by_machine"],
+                context["alerts_by_machine"],
                 context["created_notes_by_alert_id"],
                 context["radius_status_by_machine"],
             )
@@ -817,6 +819,7 @@ def _load_board_context(
     board_status_ms = (time.perf_counter() - board_status_started_at) * 1000
 
     alert_by_machine = {}
+    alerts_by_machine = {}
     created_notes_by_alert_id = {}
     alert_query_ms = 0.0
     created_notes_query_ms = 0.0
@@ -856,6 +859,7 @@ def _load_board_context(
         ]
         filtered_alert_count = len(active_alerts)
         for alert in active_alerts:
+            alerts_by_machine.setdefault(alert["machine_id"], []).append(alert)
             alert_by_machine.setdefault(alert["machine_id"], alert)
 
     if metrics is not None:
@@ -875,6 +879,7 @@ def _load_board_context(
         "visible_users": visible_users,
         "radius_status_by_machine": radius_status_by_machine,
         "alert_by_machine": alert_by_machine,
+        "alerts_by_machine": alerts_by_machine,
         "created_notes_by_alert_id": created_notes_by_alert_id,
     }
 
@@ -902,8 +907,9 @@ def _serialize_active_alert(alert, created_note=None):
     }
 
 
-def _serialize_machine(machine, alert_by_machine, created_notes_by_alert_id, radius_status_by_machine):
+def _serialize_machine(machine, alert_by_machine, alerts_by_machine, created_notes_by_alert_id, radius_status_by_machine):
     active_alert = alert_by_machine.get(machine.id)
+    active_alerts = alerts_by_machine.get(machine.id) or []
     created_note = created_notes_by_alert_id.get(active_alert.get("id")) if active_alert else None
     return {
         "id": machine.id,
@@ -918,6 +924,10 @@ def _serialize_machine(machine, alert_by_machine, created_notes_by_alert_id, rad
         "is_active": machine.is_active,
         "radius": radius_status_by_machine.get(machine.id),
         "active_alert": _serialize_active_alert(active_alert, created_note),
+        "active_alerts": [
+            _serialize_active_alert(alert, created_notes_by_alert_id.get(alert.get("id")))
+            for alert in active_alerts
+        ],
     }
 
 

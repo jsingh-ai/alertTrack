@@ -43,6 +43,7 @@ class AndonAlert(db.Model):
         db.Index(
             "uq_andon_alerts_active_machine",
             "machine_id",
+            "department_id",
             unique=True,
             postgresql_where=text("status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')"),
             sqlite_where=text("status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')"),

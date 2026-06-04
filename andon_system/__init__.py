@@ -265,14 +265,23 @@ def _ensure_auth_schema() -> None:
                 "CHECK (role IN ('Admin', 'Manager', 'Operator', 'Viewer'))"
             )
         )
-        _ensure_postgres_performance_indexes()
+        _ensure_postgres_performance_indexes(allow_alter=True)
     _ensure_pager_device_token_fingerprint_schema(allow_alter=True)
     db.session.commit()
 
 
-def _ensure_postgres_performance_indexes() -> None:
+def _ensure_postgres_performance_indexes(allow_alter: bool = False) -> None:
     if db.engine.dialect.name != "postgresql":
         return
+    if allow_alter:
+        db.session.execute(text("DROP INDEX IF EXISTS uq_andon_alerts_active_machine"))
+        db.session.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_andon_alerts_active_machine "
+                "ON andon_alerts (machine_id, department_id) "
+                "WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')"
+            )
+        )
     # Pager polls and operator snapshot reads.
     db.session.execute(
         text(
@@ -597,7 +606,7 @@ def create_app(config_name: str | None = None) -> Flask:
     with app.app_context():
         # PostgreSQL-only runtime: schema creation/repair must be migration-driven.
         if db.engine.dialect.name == "postgresql":
-            _ensure_postgres_performance_indexes()
+            _ensure_postgres_performance_indexes(allow_alter=False)
         _ensure_pager_device_token_fingerprint_schema(allow_alter=False)
         db.session.commit()
         app.logger.debug(

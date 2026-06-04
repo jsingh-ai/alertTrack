@@ -53,6 +53,7 @@ const state = {
   selectedAlert: null,
   createNoteDraft: "",
   alertNoteDraft: "",
+  alertNoteDrafts: {},
   refreshedAt: null,
   boardLoaded: false,
   boardLoadFailed: false,
@@ -182,6 +183,24 @@ function normalizeActiveAlert(alert, machine) {
     ack_to_clear_seconds: alert.ack_to_clear_seconds ?? null,
     color: alert.color ?? alert.issue_category?.color ?? "#ef476f",
   };
+}
+
+function getMachineActiveAlerts(machine) {
+  const alerts = Array.isArray(machine?.active_alerts) ? machine.active_alerts.filter(Boolean) : [];
+  if (alerts.length) return alerts;
+  return machine?.active_alert ? [machine.active_alert] : [];
+}
+
+function getPrimaryActiveAlert(machine) {
+  return getMachineActiveAlerts(machine)[0] || null;
+}
+
+function expandMachineRowsForRender(machines) {
+  return [...(machines || [])];
+}
+
+function getAlertDraftValue(alertId) {
+  return String(state.alertNoteDrafts?.[String(alertId)] || "");
 }
 
 function startElapsedTimers() {
@@ -347,9 +366,10 @@ function syncSelectedEntitiesFromBoard() {
 
   const selectedAlertId = Number(state.selectedAlert?.id || 0);
   if (!selectedAlertId) {
-    if (state.selectedMachine?.active_alert) {
-      state.selectedAlert = state.selectedMachine.active_alert;
-      state.selectedAlertUserId = state.selectedMachine.active_alert.responder_user_id || state.selectedAlertUserId;
+    const primaryAlert = getPrimaryActiveAlert(state.selectedMachine);
+    if (primaryAlert) {
+      state.selectedAlert = primaryAlert;
+      state.selectedAlertUserId = primaryAlert.responder_user_id || state.selectedAlertUserId;
     }
     return;
   }
@@ -357,9 +377,14 @@ function syncSelectedEntitiesFromBoard() {
   let matchedMachine = null;
   let matchedAlert = null;
   for (const machine of machines) {
-    if (Number(machine?.active_alert?.id || 0) === selectedAlertId) {
-      matchedMachine = machine;
-      matchedAlert = machine.active_alert;
+    for (const alert of getMachineActiveAlerts(machine)) {
+      if (Number(alert?.id || 0) === selectedAlertId) {
+        matchedMachine = machine;
+        matchedAlert = alert;
+        break;
+      }
+    }
+    if (matchedAlert) {
       break;
     }
   }
@@ -367,7 +392,7 @@ function syncSelectedEntitiesFromBoard() {
   if (!matchedAlert) {
     state.selectedAlert = null;
     state.selectedAlertUserId = null;
-    if (state.selectedMachine && !state.selectedMachine.active_alert) {
+    if (state.selectedMachine && !getPrimaryActiveAlert(state.selectedMachine)) {
       state.alertNoteDraft = "";
     }
     return;
@@ -658,10 +683,11 @@ function onBoardClick(event) {
   if (!actionButton) return;
   const action = actionButton.dataset.inlineAction;
   const actionMachineId = Number(actionButton.closest(".operator-machine-tile")?.dataset.machineId || 0);
+  const actionAlertId = Number(actionButton.closest(".operator-machine-tile")?.dataset.alertId || actionButton.dataset.alertId || 0);
   if (action === "send-message") {
     void createAlertFromModal();
   } else if (action === "act-on-alert") {
-    void actOnActiveAlert(actionMachineId);
+    void actOnActiveAlert(actionMachineId, actionAlertId);
   } else if (action === "close-panel") {
     closeMachinePanel();
   }
@@ -676,6 +702,10 @@ function onBoardInput(event) {
     return;
   }
   if (target.dataset.noteKind === "alert") {
+    const alertId = String(target.dataset.alertId || "");
+    if (alertId) {
+      state.alertNoteDrafts[alertId] = target.value;
+    }
     state.alertNoteDraft = target.value;
   }
 }
@@ -692,8 +722,9 @@ async function toggleMachinePanel(machineId) {
     closeMachinePanel();
     return;
   }
-  if (machine.active_alert) {
-    await openActiveAlertModal(machine.active_alert, machine);
+  const primaryAlert = getPrimaryActiveAlert(machine);
+  if (primaryAlert) {
+    await openActiveAlertModal(primaryAlert, machine);
     return;
   }
   await openCreatePanel(machine);
@@ -713,6 +744,7 @@ async function openActiveAlertModal(activeAlert, machine) {
   state.selectedProblem = null;
   state.createNoteDraft = "";
   state.alertNoteDraft = "";
+  state.alertNoteDrafts = {};
   renderBoard();
   if (!state.detailMetadataLoaded) {
     void loadOperatorMetadata().then(() => {
@@ -735,6 +767,7 @@ async function openCreatePanel(machine) {
   state.selectedProblem = null;
   state.createNoteDraft = "";
   state.alertNoteDraft = "";
+  state.alertNoteDrafts = {};
   renderBoard();
   if (!state.detailMetadataLoaded) {
     void loadOperatorMetadata().then(() => {
@@ -751,6 +784,7 @@ function closeMachinePanel() {
   state.selectedProblem = null;
   state.createNoteDraft = "";
   state.alertNoteDraft = "";
+  state.alertNoteDrafts = {};
   renderBoard();
 }
 
@@ -831,7 +865,7 @@ function onUserChoiceClick(button) {
   const userId = Number(button.dataset.userId);
   if (button.dataset.userChoice === "alert") {
     state.selectedMachine = machine || state.selectedMachine;
-    state.selectedAlert = machine?.active_alert || state.selectedAlert;
+    state.selectedAlert = getPrimaryActiveAlert(machine) || state.selectedAlert;
     state.selectedAlertUserId = Number.isFinite(userId) ? userId : null;
     renderBoard();
   }
@@ -962,6 +996,7 @@ async function createAlertFromModal() {
       const targetMachine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine.id)) || state.selectedMachine;
       const activeAlert = normalizeActiveAlert(data.error.existing_alert, targetMachine);
       if (targetMachine) {
+        targetMachine.active_alerts = [activeAlert];
         targetMachine.active_alert = activeAlert;
       }
       await openActiveAlertModal(activeAlert, targetMachine);
@@ -973,14 +1008,10 @@ async function createAlertFromModal() {
       alert(data.error?.message || "Unable to create alert.");
       return;
     }
-    const createdAlert = normalizeActiveAlert(data.data, state.selectedMachine);
-    const machine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine.id));
-    if (machine) {
-      machine.active_alert = createdAlert;
-    }
     closeMachinePanel();
     localMutationRefreshLockUntil = Date.now() + 700;
     window.AndonRefreshBus?.notify();
+    await refreshBoardState({ reason: "create-alert-success" });
   } catch (_error) {
     alert("Unable to create alert. Please try again.");
   } finally {
@@ -990,16 +1021,24 @@ async function createAlertFromModal() {
   }
 }
 
-async function actOnActiveAlert(machineId = 0) {
+async function actOnActiveAlert(machineId = 0, alertIdHint = 0) {
   try {
     const effectiveMachineId = Number(machineId || state.selectedMachine?.id || 0);
     let liveMachine = state.board.machines.find((machine) => Number(machine.id) === effectiveMachineId);
-    let activeAlert = liveMachine?.active_alert || state.selectedAlert || null;
+    let activeAlerts = getMachineActiveAlerts(liveMachine);
+    let activeAlert = activeAlerts.find((alert) => Number(alert.id) === Number(alertIdHint))
+      || state.selectedAlert
+      || getPrimaryActiveAlert(liveMachine)
+      || null;
     let alertId = activeAlert?.id;
-    if ((!alertId || !activeAlert || !liveMachine?.active_alert) && effectiveMachineId) {
+    if ((!alertId || !activeAlert || !activeAlerts.length) && effectiveMachineId) {
       await refreshBoardState();
       liveMachine = state.board.machines.find((machine) => Number(machine.id) === effectiveMachineId);
-      activeAlert = liveMachine?.active_alert || state.selectedAlert || null;
+      activeAlerts = getMachineActiveAlerts(liveMachine);
+      activeAlert = activeAlerts.find((alert) => Number(alert.id) === Number(alertIdHint))
+        || state.selectedAlert
+        || getPrimaryActiveAlert(liveMachine)
+        || null;
       alertId = activeAlert?.id;
     }
     if (!alertId || !activeAlert) return;
@@ -1012,7 +1051,7 @@ async function actOnActiveAlert(machineId = 0) {
     if (responderUserId) {
       payload.responder_user_id = Number(responderUserId);
     }
-    const note = state.alertNoteDraft.trim();
+    const note = getAlertDraftValue(alertId).trim();
     if (note) {
       payload.note = note;
     }
@@ -1022,12 +1061,15 @@ async function actOnActiveAlert(machineId = 0) {
       body: JSON.stringify(payload),
     });
     if (liveMachine) {
-      liveMachine.active_alert = null;
+      const remainingAlerts = getMachineActiveAlerts(liveMachine).filter((alert) => Number(alert.id) !== Number(alertId));
+      liveMachine.active_alerts = remainingAlerts;
+      liveMachine.active_alert = remainingAlerts[0] || null;
     }
     if (state.selectedAlert && Number(state.selectedAlert.id) === Number(alertId)) {
       state.selectedAlert = null;
     }
-    closeMachinePanel();
+    delete state.alertNoteDrafts[String(alertId)];
+    state.alertNoteDraft = "";
     localMutationRefreshLockUntil = Date.now() + 700;
     window.AndonRefreshBus?.notify();
     renderBoard();
@@ -1040,56 +1082,57 @@ function renderBoard() {
   if (!state.boardLoaded && !state.boardLoadFailed) {
     machineBoard.innerHTML = renderLoadingBoard();
     syncLiveTimerNodes();
-    renderStatusDock([], false);
+    renderStatusDock([], [], false);
     return;
   }
 
   if (state.boardLoadFailed && !(state.board.machines || []).length) {
     machineBoard.innerHTML = renderBoardErrorState();
     syncLiveTimerNodes();
-    renderStatusDock([], false);
+    renderStatusDock([], [], false);
     return;
   }
 
   const visibleMachines = getVisibleMachines();
+  const renderRows = expandMachineRowsForRender(visibleMachines);
   const detailed = isDetailedOperatorView();
-  const singleMachineMode = visibleMachines.length === 1;
+  const singleMachineMode = renderRows.length === 1;
   const groupedCardSizing = !detailed;
-  const boardKey = buildBoardKey(visibleMachines, detailed);
-  machineBoard.dataset.machineCount = String(visibleMachines.length);
+  const boardKey = buildBoardKey(renderRows, detailed);
+  machineBoard.dataset.machineCount = String(renderRows.length);
   machineBoard.dataset.viewMode = detailed ? "detailed" : "compact";
   machineBoard.dataset.groupCardSizing = groupedCardSizing ? "detailed" : "native";
   machineBoard.dataset.singleMachine = singleMachineMode ? "true" : "false";
   document.body.classList.toggle("operator-single-machine-mode", singleMachineMode);
-  applyDetailedBoardDensity(visibleMachines.length, detailed || groupedCardSizing);
-  if (!visibleMachines.length) {
+  applyDetailedBoardDensity(renderRows.length, detailed || groupedCardSizing);
+  if (!renderRows.length) {
     machineBoard.innerHTML = renderEmptyBoard();
     machineBoard.dataset.boardKey = boardKey;
     syncLiveTimerNodes();
-    renderStatusDock(visibleMachines, detailed);
+    renderStatusDock(visibleMachines, renderRows, detailed);
     primeCreatePanelTransitions();
     applySingleMachineFit(false);
     return;
   }
 
-  const patched = machineBoard.dataset.boardKey === boardKey && patchBoardTiles(visibleMachines, detailed);
+  const patched = machineBoard.dataset.boardKey === boardKey && patchBoardTiles(renderRows, detailed);
   if (!patched) {
-    machineBoard.innerHTML = renderGroupedBoard(visibleMachines, detailed);
+    machineBoard.innerHTML = renderGroupedBoard(renderRows, detailed);
   }
   machineBoard.dataset.boardKey = boardKey;
   syncLiveTimerNodes();
-  renderStatusDock(visibleMachines, detailed);
+  renderStatusDock(visibleMachines, renderRows, detailed);
   primeCreatePanelTransitions();
   applySingleMachineFit(singleMachineMode);
 }
 
-function buildBoardKey(visibleMachines, detailed) {
-  return `${detailed ? "detailed" : "compact"}:${visibleMachines.map((machine) => machine.id).join(",")}`;
+function buildBoardKey(renderRows, detailed) {
+  return `${detailed ? "detailed" : "compact"}:${renderRows.map((machine) => `${machine.id}:${getMachineActiveAlerts(machine).map((alert) => alert.id).join(".")}`).join(",")}`;
 }
 
 function buildMachineTileSignature(machine, detailed) {
-  const active = Boolean(machine.active_alert);
-  const alert = machine.active_alert;
+  const alert = getPrimaryActiveAlert(machine) || machine.active_alert;
+  const active = Boolean(alert);
   const selectedMachineId = state.selectedMachine ? Number(state.selectedMachine.id) : null;
   const selectedDepartmentId = state.selectedDepartment ? Number(state.selectedDepartment.id) : null;
   const selectedProblemId = state.selectedProblem ? Number(state.selectedProblem.id) : null;
@@ -1116,6 +1159,7 @@ function buildMachineTileSignature(machine, detailed) {
     isSelectedMachine && selectedDepartmentId ? `dep:${selectedDepartmentId}` : "",
     isSelectedMachine && selectedProblemId ? `prob:${selectedProblemId}` : "",
     isSelectedAlert ? "sel" : "",
+    active ? `render:${getMachineActiveAlerts(machine).map((entry) => `${entry.id}:${entry.status}:${entry.elapsed_seconds || 0}`).join(",")}` : "render:0",
     createDraftState,
     alertDraftState,
     alertUserState,
@@ -1259,8 +1303,9 @@ function renderGroupSection(groupName, machines, detailed) {
 }
 
 function renderMachineTile(machine, detailed) {
-  const active = Boolean(machine.active_alert);
-  const alert = machine.active_alert;
+  const activeAlerts = getMachineActiveAlerts(machine);
+  const alert = activeAlerts[0] || machine.active_alert;
+  const active = Boolean(alert);
   const elapsedSeconds = active ? Math.max(0, Math.floor(alert.elapsed_seconds || 0)) : 0;
   const alertColor = alert?.color || "#ef476f";
   const tileStyle = active ? `style="--alert-accent:${alertColor}"` : "";
@@ -1272,13 +1317,20 @@ function renderMachineTile(machine, detailed) {
   const topTone = !active ? "healthy" : isOpen ? "open" : "warning";
   const renderSignature = buildMachineTileSignature(machine, detailed);
   return `
-    <article class="machine-tile operator-machine-tile ${active ? "machine-tile--alert" : "machine-tile--idle"} ${machine.is_active ? "" : "machine-tile--off"} ${active && alert.status !== "OPEN" ? "machine-tile--working" : ""} ${isCreateFollowup ? "machine-tile--create-followup" : ""} ${detailed ? "operator-machine-tile--detailed" : ""}" ${tileStyle} data-machine-id="${machine.id}" data-create-followup="${isCreateFollowup ? "true" : "false"}" data-render-signature="${escapeHtml(renderSignature)}">
+    <article class="machine-tile operator-machine-tile ${active ? "machine-tile--alert" : "machine-tile--idle"} ${machine.is_active ? "" : "machine-tile--off"} ${active && alert.status !== "OPEN" ? "machine-tile--working" : ""} ${isCreateFollowup ? "machine-tile--create-followup" : ""} ${detailed ? "operator-machine-tile--detailed" : ""}" ${tileStyle} data-machine-id="${machine.id}" data-alert-id="${active ? alert.id : ""}" data-create-followup="${isCreateFollowup ? "true" : "false"}" data-render-signature="${escapeHtml(renderSignature)}">
       <div class="machine-tile__top machine-tile__top--tone-${topTone} ${detailed ? "machine-tile__top--detailed" : ""}">
         <div class="machine-tile__identity ${detailed ? "machine-tile__identity--detailed" : ""}">
           <div class="machine-tile__name">${escapeHtml(machine.name)}</div>
         </div>
       </div>
-      ${active ? renderAlertInlinePanel(machine, alert, detailed) : renderCreateInlinePanel(machine, detailed)}
+      ${active
+        ? (activeAlerts.length > 1
+          ? `
+            <div class="machine-modal__multi-alert-grid">
+              ${activeAlerts.map((entry) => renderAlertInlinePanel(machine, entry, detailed, { cardModifier: " machine-modal__alert-card--multi" })).join("")}
+            </div>`
+          : renderAlertInlinePanel(machine, alert, detailed))
+        : renderCreateInlinePanel(machine, detailed)}
     </article>`;
 }
 
@@ -1327,10 +1379,10 @@ function isDetailedOperatorView() {
 }
 
 function getGroupSummary(machines) {
-  const activeAlerts = machines.filter((machine) => Boolean(machine.active_alert));
+  const activeAlerts = machines.reduce((count, machine) => count + getMachineActiveAlerts(machine).length, 0);
   return {
-    activeAlerts: activeAlerts.length,
-    healthyMachines: machines.length - activeAlerts.length,
+    activeAlerts,
+    healthyMachines: machines.filter((machine) => !getMachineActiveAlerts(machine).length).length,
   };
 }
 
@@ -1569,7 +1621,8 @@ function formatCurrentTime() {
   return new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-function renderAlertInlinePanel(machine, alert, detailed) {
+function renderAlertInlinePanel(machine, alert, detailed, options = {}) {
+  const cardModifier = options.cardModifier ? ` ${options.cardModifier}` : "";
   const isOpen = alert.status === "OPEN";
   const threadMarkup = renderAlertMessageThread(alert);
   const operatorNoteMarkup = renderOperatorCreatedNote(alert);
@@ -1582,8 +1635,10 @@ function renderAlertInlinePanel(machine, alert, detailed) {
     : (threadMarkup ? `<div class="alert-note-summary">${threadMarkup}</div>` : '<div class="d-none" aria-hidden="true"></div>');
   const closeNotePreviewMarkup = flattenNotePreviewMarkup(threadMarkup || operatorNoteMarkup || '<div class="machine-modal__close-note-empty">No existing note</div>');
   const actionLabel = "Close Alert";
+  const alertDraftValue = getAlertDraftValue(alert.id);
+  const alertToneClass = `machine-modal__alert-card--${normalizeDepartmentName(alert.department_name || "general").replace(/\s+/g, "-")}`;
   return `
-    <div class="machine-tile__inline-panel machine-tile__inline-panel--response machine-modal machine-modal--response ${isOpen ? "machine-modal--response-open" : "machine-modal--response-working"} ${detailed ? "machine-tile__inline-panel--detailed" : ""}">
+    <article class="machine-tile__inline-panel machine-tile__inline-panel--response machine-modal machine-modal--response machine-modal__alert-card ${alertToneClass}${cardModifier} ${isOpen ? "machine-modal--response-open" : "machine-modal--response-working"} ${detailed ? "machine-tile__inline-panel--detailed" : ""}" data-alert-id="${alert.id}">
       ${isOpen ? `
         <div class="machine-modal__section machine-modal__section--response-waiting">
           <div class="machine-modal__response-waiting-title">Waiting on Response</div>
@@ -1629,14 +1684,14 @@ function renderAlertInlinePanel(machine, alert, detailed) {
           </div>
           <div class="machine-modal__append-note machine-modal__add-note-card">
             <div class="machine-modal__response-label">Add note</div>
-            <textarea class="form-control machine-tile__note-input machine-modal__close-note" data-note-kind="alert" rows="2" placeholder="Append note before closing">${escapeHtml(state.alertNoteDraft)}</textarea>
+            <textarea class="form-control machine-tile__note-input machine-modal__close-note" data-note-kind="alert" data-alert-id="${alert.id}" rows="2" placeholder="Append note before closing">${escapeHtml(alertDraftValue)}</textarea>
           </div>
         </div>
         <div class="machine-modal__alert-action-row">
-          <button class="btn btn-primary machine-modal__footer-btn machine-modal__footer-btn--full machine-modal__action-btn machine-modal__action-btn--primary" type="button" data-inline-action="act-on-alert">${actionLabel}</button>
+          <button class="btn btn-primary machine-modal__footer-btn machine-modal__footer-btn--full machine-modal__action-btn machine-modal__action-btn--primary" type="button" data-inline-action="act-on-alert" data-alert-id="${alert.id}">${actionLabel}</button>
         </div>
       `}
-    </div>`;
+    </article>`;
 }
 
 function renderOperatorCreatedNote(alert) {
@@ -1834,11 +1889,11 @@ function renderBoardErrorState() {
     </div>`;
 }
 
-function renderStatusDock(visibleMachines, detailed) {
+function renderStatusDock(visibleMachines, renderRows, detailed) {
   if (!operatorStatusDock) return;
   const total = visibleMachines.length;
-  const activeAlerts = visibleMachines.filter((machine) => Boolean(machine.active_alert)).length;
-  const healthy = total - activeAlerts;
+  const activeAlerts = visibleMachines.reduce((count, machine) => count + getMachineActiveAlerts(machine).length, 0);
+  const healthy = visibleMachines.filter((machine) => !getMachineActiveAlerts(machine).length).length;
   const offline = visibleMachines.filter((machine) => !machine.is_active).length;
   const lastRefresh = state.refreshedAt ? new Date(state.refreshedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "just now";
   const viewLabel = detailed ? "Focused view" : "Full floor";
@@ -1852,7 +1907,7 @@ function renderStatusDock(visibleMachines, detailed) {
           <span class="operator-status-dock__pulse"></span>
           <span class="operator-status-dock__label">${steady ? "Line steady" : "Active attention"}</span>
         </div>
-        <div class="operator-status-dock__title">${steady ? "All stations are running well" : `${activeAlerts} station${activeAlerts === 1 ? "" : "s"} need attention`}</div>
+        <div class="operator-status-dock__title">${steady ? "All stations are running well" : `${activeAlerts} active alert${activeAlerts === 1 ? "" : "s"} need attention`}</div>
         <div class="operator-status-dock__subcopy">${viewLabel} · refreshed ${escapeHtml(lastRefresh)}</div>
       </div>
       <div class="operator-status-dock__stats" role="list" aria-label="Operator status summary">

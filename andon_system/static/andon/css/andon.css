@@ -5575,6 +5575,22 @@ body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__id
   align-items: start;
 }
 
+.button-board-shell .operator-machine-tile .machine-modal__multi-alert-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+  gap: 16px;
+  width: 100%;
+  margin-top: 0.35rem;
+}
+
+.button-board-shell .operator-machine-tile .machine-modal__multi-alert-grid > .machine-modal__alert-card {
+  min-width: 0;
+}
+
+.button-board-shell .operator-machine-tile .machine-modal__multi-alert-grid > .machine-modal__alert-card.machine-modal--response {
+  height: 100%;
+}
+
 .button-board-shell .operator-machine-tile .machine-modal--response-working {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -5821,6 +5837,18 @@ body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__id
   grid-column: 1 / -1;
 }
 
+.machine-modal__alert-card--multi {
+  align-self: stretch;
+}
+
+.machine-modal__alert-card--quality {
+  border-color: rgba(234, 88, 12, 0.24);
+}
+
+.machine-modal__alert-card--supervisor {
+  border-color: rgba(124, 58, 237, 0.24);
+}
+
 .machine-modal--response .machine-modal__note-card,
 .machine-modal--response .machine-modal__add-note-card {
   display: grid;
@@ -5899,6 +5927,10 @@ body.operator-shell .machine-modal--response .machine-modal__alert-action-row .m
 }
 
 @media (max-width: 720px) {
+  .button-board-shell .operator-machine-tile .machine-modal__multi-alert-grid {
+    grid-template-columns: 1fr;
+  }
+
   .machine-modal--response .machine-modal__note-row {
     grid-template-columns: 1fr;
   }

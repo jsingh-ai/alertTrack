@@ -427,7 +427,11 @@ def api_create_alert():
         alert = create_alert(body, metrics=service_metrics)
         insert_or_update_ms = (time.perf_counter() - write_started_at) * 1000
         serialize_started_at = time.perf_counter()
-        alert_payload = fetch_alert_payload_by_id(alert.id, company_id=alert.company_id) or {"id": alert.id, "status": alert.status}
+        created_alerts = alert if isinstance(alert, list) else [alert]
+        alert_payload = [
+            fetch_alert_payload_by_id(item.id, company_id=item.company_id) or {"id": item.id, "status": item.status}
+            for item in created_alerts
+        ]
         serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
         service_metrics["payload_fetch_ms"] = serialize_ms
         if current_app.config.get("ANDON_PERF_LOGS"):
@@ -438,9 +442,9 @@ def api_create_alert():
                 insert_or_update_ms,
                 serialize_ms,
                 (time.perf_counter() - started_at) * 1000,
-                alert.id,
+                created_alerts[0].id if created_alerts else None,
             )
-        return jsonify({"success": True, "data": alert_payload}), 201
+        return jsonify({"success": True, "data": alert_payload if len(alert_payload) != 1 else alert_payload[0]}), 201
     except AlertServiceError as exc:
         return _error(str(exc), getattr(exc, "status_code", 400), getattr(exc, "data", None))
 
