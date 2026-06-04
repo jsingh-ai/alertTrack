@@ -56,6 +56,7 @@ const state = {
   selectedAlertUserId: null,
   selectedAlert: null,
   createNoteDraft: "",
+  createAlertError: "",
   alertNoteDraft: "",
   alertNoteDrafts: {},
   refreshedAt: null,
@@ -971,6 +972,7 @@ function onDepartmentButtonClick(button) {
     state.selectedProblemId = null;
     state.selectedIssue = null;
     state.selectedIssueId = null;
+    state.createAlertError = "";
     renderBoard();
     return;
   }
@@ -981,6 +983,7 @@ function onDepartmentButtonClick(button) {
   state.selectedProblemId = null;
   state.selectedIssue = null;
   state.selectedIssueId = null;
+  state.createAlertError = "";
   renderBoard();
   if (state.detailMetadataLoaded) {
     const cachedProblems = getProblemsForDepartment(departmentId);
@@ -1023,6 +1026,7 @@ function onProblemClick(button) {
   state.selectedProblemId = Number(problem.id);
   state.selectedIssue = problem;
   state.selectedIssueId = Number(problem.id);
+  state.createAlertError = "";
   renderBoard();
 }
 
@@ -1143,6 +1147,7 @@ async function createAlertFromModal() {
     return;
   }
   createAlertInFlight = true;
+  state.createAlertError = "";
   createAlertMachineId = Number(state.selectedMachine.id);
   renderBoard();
   const payload = {
@@ -1154,14 +1159,48 @@ async function createAlertFromModal() {
     note: state.createNoteDraft.trim() || null,
   };
   console.log("[operator create] submitting alert", payload);
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeoutId = controller
+    ? window.setTimeout(() => controller.abort(new Error("Operator alert create timed out")), 10000)
+    : null;
   try {
+    console.log("[operator create] fetch start", {
+      url: "/api/andon/alerts",
+      departmentId: payload.department_id,
+      machineId: payload.machine_id,
+    });
     const response = await fetch("/api/andon/alerts", {
       method: "POST",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
       credentials: "same-origin",
+      signal: controller?.signal,
     });
-    const data = await response.json();
+    console.log("[operator create] fetch response received", {
+      status: response.status,
+      ok: response.ok,
+    });
+    const responseText = await response.text();
+    console.log("[operator create] fetch response text received", {
+      status: response.status,
+      textLength: responseText.length,
+    });
+    let data = null;
+    try {
+      data = responseText ? JSON.parse(responseText) : null;
+      console.log("[operator create] fetch response parsed", {
+        status: response.status,
+        success: data?.success,
+        hasData: Boolean(data?.data),
+        hasError: Boolean(data?.error),
+      });
+    } catch (parseError) {
+      console.error("[operator create] fetch response parse failed", parseError, {
+        status: response.status,
+        responseText: responseText.slice(0, 400),
+      });
+      throw new Error(`Alert create returned non-JSON response (${response.status})`);
+    }
     if (response.status === 409 && data?.error?.existing_alert) {
       const targetMachine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine.id)) || state.selectedMachine;
       const activeAlert = normalizeActiveAlert(data.error.existing_alert, targetMachine);
@@ -1175,16 +1214,29 @@ async function createAlertFromModal() {
       return;
     }
     if (!data.success) {
-      alert(data.error?.message || "Unable to create alert.");
+      state.createAlertError = data.error?.message || "Unable to create alert.";
+      window.alert(state.createAlertError);
       return;
     }
     closeMachinePanel();
     localMutationRefreshLockUntil = Date.now() + 700;
     window.AndonRefreshBus?.notify();
     await refreshBoardState({ reason: "create-alert-success" });
-  } catch (_error) {
-    alert("Unable to create alert. Please try again.");
+  } catch (error) {
+    console.error("[operator create] fetch failed", error);
+    state.createAlertError = error?.name === "AbortError"
+      ? "Create alert timed out. Please try again."
+      : (error?.message || "Unable to create alert. Please try again.");
+    window.alert(state.createAlertError);
   } finally {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+    console.log("[operator create] submit finished", {
+      departmentId: payload.department_id,
+      machineId: payload.machine_id,
+      error: state.createAlertError || null,
+    });
     createAlertInFlight = false;
     createAlertMachineId = null;
     renderBoard();
@@ -1805,6 +1857,7 @@ function renderCreateInlinePanel(machine, detailed) {
           </div>
           <textarea class="form-control machine-tile__note-input" data-note-kind="create" rows="3" placeholder="Add context for the responder">${escapeHtml(state.createNoteDraft)}</textarea>
         </div>
+        ${state.createAlertError ? `<div class="problem-empty machine-modal__create-error">${escapeHtml(state.createAlertError)}</div>` : ""}
         ${showCallAction ? `
         <div class="alert-create-action-row operator-create-action-row machine-modal__call-action-row">
           <button class="btn btn-danger btn-lg machine-modal__footer-btn machine-modal__action-btn machine-modal__action-btn--danger call-alert-btn" type="button" data-inline-action="send-message" ${canSubmit ? "" : "disabled"}>${isSubmitting ? "Calling..." : "Call"}</button>

@@ -425,11 +425,18 @@ def api_create_alert():
     payload_started_at = time.perf_counter()
     body = _payload()
     payload_ms = (time.perf_counter() - payload_started_at) * 1000
+    current_app.logger.debug("API alert_create received payload=%s", body)
     try:
         service_metrics = {}
         write_started_at = time.perf_counter()
         alert = create_alert(body, metrics=service_metrics)
         insert_or_update_ms = (time.perf_counter() - write_started_at) * 1000
+        current_app.logger.debug(
+            "API alert_create service returned type=%s created_count=%s payload=%s",
+            type(alert).__name__,
+            len(alert) if isinstance(alert, list) else 1,
+            body,
+        )
         serialize_started_at = time.perf_counter()
         created_alerts = alert if isinstance(alert, list) else [alert]
         alert_payload = [
@@ -437,6 +444,11 @@ def api_create_alert():
             for item in created_alerts
         ]
         serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+        current_app.logger.debug(
+            "API alert_create serialized created_ids=%s serialize_ms=%.1f",
+            [item.id for item in created_alerts],
+            serialize_ms,
+        )
         service_metrics["payload_fetch_ms"] = serialize_ms
         if current_app.config.get("ANDON_PERF_LOGS"):
             current_app.logger.debug(
@@ -448,9 +460,13 @@ def api_create_alert():
                 (time.perf_counter() - started_at) * 1000,
                 created_alerts[0].id if created_alerts else None,
             )
+        current_app.logger.debug("API alert_create returning success created_ids=%s", [item.id for item in created_alerts])
         return jsonify({"success": True, "data": alert_payload if len(alert_payload) != 1 else alert_payload[0]}), 201
     except AlertServiceError as exc:
         return _error(str(exc), getattr(exc, "status_code", 400), getattr(exc, "data", None))
+    except Exception:
+        current_app.logger.exception("API alert_create unexpected failure payload=%s", body)
+        return _error("Unable to create alert", 500)
 
 
 @api_bp.post("/alerts/<int:alert_id>/toggle-machine-active")

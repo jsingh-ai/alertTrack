@@ -5355,6 +5355,13 @@ body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__id
   font-weight: 600;
 }
 
+.machine-modal__create-error {
+  background: rgba(255, 243, 244, 0.98);
+  border-style: solid;
+  border-color: rgba(193, 18, 31, 0.22);
+  color: #8f1732;
+}
+
 .user-chip-grid {
   display: flex;
   flex-wrap: wrap;

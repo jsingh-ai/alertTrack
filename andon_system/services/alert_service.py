@@ -373,6 +373,13 @@ def create_alert(payload: dict, metrics: dict | None = None):
     created_at_iso = None
     commit_done_at = started_at
     company_id = get_current_company_id()
+    current_app.logger.debug(
+        "SERVICE alert_create start machine_id=%s department_id=%s issue_category_id=%s issue_problem_id=%s",
+        payload.get("machine_id"),
+        payload.get("department_id"),
+        payload.get("issue_category_id"),
+        payload.get("issue_problem_id"),
+    )
     previous_step_at = _perf_step("start", started_at, previous_step_at, machine_id=payload.get("machine_id"), company_id=company_id)
     scope = get_scope_filters()
     machine_ids = scope.get("machine_ids") or []
@@ -522,6 +529,11 @@ def create_alert(payload: dict, metrics: dict | None = None):
     target_departments = []
     selected_department_name = _normalize_department_name(getattr(source_department, "name", None))
     if selected_department_name == "quality and supervisor":
+        current_app.logger.debug(
+            "SERVICE alert_create combined department detected source_department_id=%s source_department_name=%s",
+            getattr(source_department, "id", None),
+            getattr(source_department, "name", None),
+        )
         target_departments = (
             Department.query.options(
                 load_only(Department.id, Department.company_id, Department.name, Department.is_active),
@@ -547,6 +559,13 @@ def create_alert(payload: dict, metrics: dict | None = None):
                 is_active=True,
             )
         ]
+    current_app.logger.debug(
+        "SERVICE alert_create expanded targets=%s source_department_id=%s issue_category_id=%s issue_problem_id=%s",
+        [{"id": int(target.id), "name": getattr(target, "name", None)} for target in target_departments],
+        getattr(source_department, "id", None),
+        issue_category.id if issue_category else None,
+        issue_problem.id if issue_problem else None,
+    )
 
     duplicate_check_started_at = time.perf_counter()
     existing_alert_id = None
@@ -580,6 +599,13 @@ def create_alert(payload: dict, metrics: dict | None = None):
     alerts = []
     for target_department in target_departments:
         alert_number = f"AL-{utc_now():%Y%m%d%H%M%S}-{uuid4().hex[:6].upper()}"
+        current_app.logger.debug(
+            "SERVICE alert_create building alert target_department_id=%s target_department_name=%s machine_id=%s issue_problem_id=%s",
+            int(target_department.id),
+            getattr(target_department, "name", None),
+            machine.id,
+            issue_problem.id if issue_problem else None,
+        )
         alerts.append(
             AndonAlert(
                 company_id=resolved_company_id,
@@ -614,6 +640,11 @@ def create_alert(payload: dict, metrics: dict | None = None):
         known_segments["db_flush_ms"] = perf["db_flush_ms"]
         previous_step_at = _perf_step("after_flush", started_at, previous_step_at, alert_id=alerts[0].id if alerts else None, machine_id=machine.id, company_id=resolved_company_id)
         _perf_pg_diagnostics("after_flush")
+        current_app.logger.debug(
+            "SERVICE alert_create flush complete created_alert_ids=%s target_departments=%s",
+            [alert.id for alert in alerts],
+            [{"id": int(target.id), "name": getattr(target, "name", None)} for target in target_departments],
+        )
 
         previous_step_at = _perf_step("before_event_insert", started_at, previous_step_at, alert_id=alerts[0].id if alerts else None, machine_id=machine.id, company_id=resolved_company_id)
         event_started_at = time.perf_counter()
@@ -645,8 +676,20 @@ def create_alert(payload: dict, metrics: dict | None = None):
         known_segments["db_commit_ms"] = perf["db_commit_ms"]
         previous_step_at = _perf_step("after_commit", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
         _perf_pg_diagnostics("after_commit")
+        current_app.logger.debug(
+            "SERVICE alert_create commit complete created_alert_ids=%s machine_id=%s company_id=%s",
+            created_alert_ids,
+            created_machine_id,
+            created_company_id,
+        )
     except IntegrityError as exc:
         db.session.rollback()
+        current_app.logger.exception(
+            "SERVICE alert_create integrity failure machine_id=%s source_department_id=%s targets=%s",
+            machine.id if machine else None,
+            getattr(source_department, "id", None),
+            [{"id": int(target.id), "name": getattr(target, "name", None)} for target in target_departments],
+        )
         existing_alert_id = None
         for target_department in target_departments:
             existing_alert_id = _find_active_alert_id_for_machine_department(machine.id, int(target_department.id), resolved_company_id)
@@ -708,6 +751,12 @@ def create_alert(payload: dict, metrics: dict | None = None):
     emit_started_at = time.perf_counter()
     try:
         for emitted_alert_id in created_alert_ids:
+            current_app.logger.debug(
+                "SERVICE alert_create emitting realtime alert_id=%s machine_id=%s company_id=%s",
+                emitted_alert_id,
+                created_machine_id,
+                created_company_id,
+            )
             emit_alert_created(created_company_id, emitted_alert_id, machine_id=created_machine_id, status=created_status)
     except Exception:
         current_app.logger.exception(
@@ -736,6 +785,11 @@ def create_alert(payload: dict, metrics: dict | None = None):
         )
     _perf_log_create_alert(perf)
     _perf_step("final_return", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
+    current_app.logger.debug(
+        "SERVICE alert_create returning created_alert_ids=%s source_department_id=%s",
+        created_alert_ids,
+        getattr(source_department, "id", None),
+    )
     if len(created_alert_ids) == 1:
         return SimpleNamespace(id=created_alert_ids[0], company_id=created_company_id, machine_id=created_machine_id, status=created_status)
     return [
