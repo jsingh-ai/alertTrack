@@ -697,6 +697,14 @@ def api_resolve_alert(alert_id):
     payload_started_at = time.perf_counter()
     body = _payload()
     payload_ms = (time.perf_counter() - payload_started_at) * 1000
+    if current_app.config.get("ANDON_PERF_LOGS"):
+        current_app.logger.debug(
+            "PERF api_resolve_alert entry alert_id=%s payload_keys=%s user_id=%s company_id=%s",
+            alert_id,
+            sorted(body.keys()),
+            getattr(get_authenticated_user(), "id", None),
+            get_current_company_id(),
+        )
     try:
         update_started_at = time.perf_counter()
         service_metrics = {}

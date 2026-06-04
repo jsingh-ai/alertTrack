@@ -422,6 +422,11 @@ function onBoardClick(event) {
   const actionButton = event.target.closest("[data-inline-action]");
   if (!actionButton) return;
   const action = actionButton.dataset.inlineAction;
+  console.log("[operator] inline action click", {
+    action,
+    machineId: actionButton.closest(".operator-machine-tile")?.dataset.machineId || null,
+    alertId: state.selectedAlert?.id || state.board.machines.find((machine) => Number(machine.id) === Number(state.selectedMachine?.id))?.active_alert?.id || null,
+  });
   if (action === "send-message") {
     void createAlertFromModal();
   } else if (action === "act-on-alert") {
@@ -752,8 +757,17 @@ async function actOnActiveAlert() {
     const liveMachine = state.board.machines.find((machine) => Number(machine.id) === Number(state.selectedMachine?.id));
     const activeAlert = liveMachine?.active_alert || state.selectedAlert || null;
     const alertId = activeAlert?.id;
+    console.log("[operator] actOnActiveAlert start", {
+      selectedMachineId: state.selectedMachine?.id || null,
+      liveMachineId: liveMachine?.id || null,
+      alertId: alertId || null,
+      selectedAlertId: state.selectedAlert?.id || null,
+      activeStatus: activeAlert?.status || null,
+      responderUserId: activeAlert?.responder_user_id || null,
+    });
     if (!alertId || !activeAlert) return;
     if (activeAlert.status === "OPEN") {
+      console.warn("[operator] close blocked because alert is still OPEN", { alertId });
       window.alert("This alert must be acknowledged from the board before it can be closed here.");
       return;
     }
@@ -766,11 +780,13 @@ async function actOnActiveAlert() {
     if (note) {
       payload.note = note;
     }
+    console.log("[operator] resolve payload", { alertId, payload });
     await fetchJson(`/api/andon/alerts/${alertId}/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    console.log("[operator] resolve succeeded", { alertId });
     if (liveMachine) {
       liveMachine.active_alert = null;
     }
@@ -782,6 +798,7 @@ async function actOnActiveAlert() {
     window.AndonRefreshBus?.notify();
     renderBoard();
   } catch (error) {
+    console.error("[operator] resolve failed", error);
     window.alert(error?.message || "Unable to close alert.");
   }
 }
@@ -1295,7 +1312,7 @@ function renderAlertInlinePanel(machine, alert, detailed) {
   const noteMarkup = isOpen
     ? (operatorNoteMarkup ? `<div class="alert-note-summary">${operatorNoteMarkup}</div>` : '<div class="d-none" aria-hidden="true"></div>')
     : (threadMarkup ? `<div class="alert-note-summary">${threadMarkup}</div>` : '<div class="d-none" aria-hidden="true"></div>');
-  const closeNotePreviewMarkup = threadMarkup || operatorNoteMarkup || '<div class="machine-modal__close-note-empty">No existing note</div>';
+  const closeNotePreviewMarkup = flattenNotePreviewMarkup(threadMarkup || operatorNoteMarkup || '<div class="machine-modal__close-note-empty">No existing note</div>');
   const actionLabel = "Close Alert";
   return `
     <div class="machine-tile__inline-panel machine-tile__inline-panel--response machine-modal machine-modal--response ${isOpen ? "machine-modal--response-open" : "machine-modal--response-working"} ${detailed ? "machine-tile__inline-panel--detailed" : ""}">
@@ -1406,6 +1423,12 @@ function renderAlertMessageThread(alert) {
         )
         .join("")}
     </div>`;
+}
+
+function flattenNotePreviewMarkup(markup) {
+  return String(markup || "")
+    .replace(/^<div class="machine-tile__thread">/, "")
+    .replace(/<\/div>\s*$/, "");
 }
 
 function renderAlertTimerBlocks(alert) {
