@@ -692,7 +692,7 @@ def api_arrive_alert(alert_id):
 def api_resolve_alert(alert_id):
     started_at = time.perf_counter()
     auth_started_at = time.perf_counter()
-    _require_any_page_access(PAGE_BOARD, PAGE_MANAGEMENT)
+    _require_any_page_access(PAGE_OPERATOR, PAGE_BOARD, PAGE_MANAGEMENT)
     auth_ms = (time.perf_counter() - auth_started_at) * 1000
     payload_started_at = time.perf_counter()
     body = _payload()

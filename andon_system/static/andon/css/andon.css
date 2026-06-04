@@ -3439,7 +3439,7 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__response-value {
-  font-size: clamp(1rem, 1.4vw, 1.45rem);
+  font-size: clamp(1.28rem, 1.85vw, 1.95rem);
   line-height: 1;
 }
 
@@ -5603,7 +5603,7 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal__response-value {
   margin: 0;
-  font-size: clamp(1.12rem, 1.7vw, 1.82rem);
+  font-size: clamp(1.5rem, 2.3vw, 2.35rem);
   line-height: 1;
   font-weight: 900;
   letter-spacing: -0.02em;
@@ -5749,14 +5749,16 @@ html[data-theme="light"] .operator-machine-group__count {
 .machine-modal--response .machine-modal__section--response-close-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 0.3rem;
+  gap: 0.22rem;
   align-items: center;
   padding: 0.46rem 0.52rem;
 }
 
 .machine-modal--response .machine-modal__close-row-copy {
-  display: grid;
-  gap: 0.06rem;
+  display: flex;
+  align-items: center;
+  min-height: 2.35rem;
+  padding: 0 0.1rem;
 }
 
 .machine-modal--response .machine-modal__close-row-controls {
@@ -5767,6 +5769,12 @@ html[data-theme="light"] .operator-machine-group__count {
   flex: 1 1 auto;
   min-height: 2.35rem;
   width: 100%;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.92));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  resize: none;
 }
 
 .machine-modal--response .machine-modal__followup-group + .machine-modal__followup-group {
@@ -5822,9 +5830,10 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal--response .machine-modal__footer-btn--full {
   width: 100%;
-  min-height: 2.8rem;
-  padding: 0.55rem 0.9rem;
-  font-size: 0.98rem;
+  min-height: 3.6rem;
+  padding: 0.9rem 1rem;
+  font-size: 1.22rem;
+  line-height: 1.05;
 }
 
 .machine-modal--response .btn.btn-primary.machine-modal__footer-btn--full {
@@ -5838,6 +5847,14 @@ html[data-theme="light"] .operator-machine-group__count {
   background: #0b5ed7;
   border-color: #0b5ed7;
   box-shadow: none;
+}
+
+@media (max-width: 767.98px) {
+  .machine-modal--response .machine-modal__footer-btn--full {
+    min-height: 3.3rem;
+    padding: 0.82rem 0.9rem;
+    font-size: 1.08rem;
+  }
 }
 
 .machine-modal .modal-body {
@@ -7109,7 +7126,7 @@ html[data-sidebar="collapsed"] .app-sidebar__toggle {
   .machine-modal--create .modal-footer .btn-lg,
   .machine-modal--response .machine-modal__footer-btn,
   .machine-modal--response .modal-footer .btn-lg {
-    font-size: 0.72rem;
+    font-size: 1.02rem;
   }
 }
 

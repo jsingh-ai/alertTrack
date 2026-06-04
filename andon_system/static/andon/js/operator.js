@@ -1298,24 +1298,6 @@ function renderAlertInlinePanel(machine, alert, detailed) {
             <div class="machine-modal__response-value">${escapeHtml(acknowledgedInText)}</div>
           </div>
         `}
-        ${isOpen ? "" : `
-          <div class="machine-modal__section machine-modal__section--response-followup">
-            <div class="machine-modal__followup-group machine-modal__followup-group--note">
-              <div class="machine-tile__section-copy machine-tile__section-copy--note">
-                <div class="machine-tile__section-title">NOTE</div>
-              </div>
-              ${noteMarkup}
-            </div>
-          </div>
-        `}
-        ${isOpen ? `
-          <div class="machine-modal__section machine-modal__section--response-followup">
-            <div class="machine-modal__followup-group machine-modal__followup-group--note">
-              <div class="machine-modal__response-label">Note</div>
-              ${noteMarkup}
-            </div>
-          </div>
-        ` : ""}
         <div class="machine-modal__section machine-modal__section--timer-hero">
           <div class="machine-modal__timer-hero-label">Elapsed timer</div>
           <div class="machine-modal__timer-hero-value machine-tile__timer" data-live-timer="true" data-live-timer-format="alert-duration" data-elapsed-seconds="${Math.max(0, Math.floor(alert.elapsed_seconds || 0))}">${escapeHtml(liveTimerText)}</div>
@@ -1328,8 +1310,7 @@ function renderAlertInlinePanel(machine, alert, detailed) {
         ` : `
           <div class="machine-modal__section machine-modal__section--response-close-row">
             <div class="machine-modal__close-row-copy">
-              <div class="machine-modal__response-label">Add note</div>
-              <div class="machine-tile__section-description">Append context before you close.</div>
+              <div class="machine-modal__response-label">Note</div>
             </div>
             <textarea class="form-control machine-tile__note-input machine-modal__close-note" data-note-kind="alert" rows="2" placeholder="Append note before closing">${escapeHtml(state.alertNoteDraft)}</textarea>
           </div>
