@@ -4,7 +4,8 @@ import json
 import secrets
 from datetime import datetime, timezone
 
-from sqlalchemy import update
+from sqlalchemy import func, text, update
+from sqlalchemy.exc import OperationalError
 import time
 
 from flask import Blueprint, current_app, jsonify, flash, redirect, request, url_for
@@ -118,6 +119,47 @@ def _log_admin_mutation_perf(action: str, started_at: float, **segments):
         (time.perf_counter() - started_at) * 1000,
         suffix,
     )
+
+
+def _is_postgresql() -> bool:
+    try:
+        return db.engine.dialect.name == "postgresql"
+    except Exception:
+        return False
+
+
+def _configure_admin_pg_transaction(*, lock_timeout_ms: int = 1500, statement_timeout_ms: int = 5000) -> None:
+    if not _is_postgresql():
+        return
+    db.session.execute(text("SET LOCAL lock_timeout = :lock_timeout"), {"lock_timeout": f"{int(lock_timeout_ms)}ms"})
+    db.session.execute(
+        text("SET LOCAL statement_timeout = :statement_timeout"),
+        {"statement_timeout": f"{int(statement_timeout_ms)}ms"},
+    )
+
+
+def _admin_mutation_busy_response(message: str = "This record is busy. Please try again.") -> tuple:
+    db.session.rollback()
+    if _is_ajax_request():
+        return jsonify({"ok": False, "message": message}), 409
+    flash(message, "warning")
+    return redirect(url_for("pages.admin_page"))
+
+
+def _pager_device_payload(company_id: int, department_id: int) -> dict:
+    row = (
+        db.session.query(PagerDevice.active, PagerDevice.name, PagerDevice.last_seen_at)
+        .filter(PagerDevice.company_id == company_id, PagerDevice.department_id == department_id)
+        .order_by(PagerDevice.id.asc())
+        .first()
+    )
+    if row is None:
+        return {"active": False, "name": None, "last_seen_at": None}
+    return {
+        "active": bool(row.active),
+        "name": row.name,
+        "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
+    }
 
 
 def _machine_code_from_name(name: str, company_id: int | None) -> str:
@@ -365,27 +407,37 @@ def create_department():
 def toggle_department(department_id):
     started_at = time.perf_counter()
     company_id = _company_id()
-    lookup_started_at = time.perf_counter()
-    department = Department.query.filter_by(id=department_id, company_id=company_id).one_or_none()
-    lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
-    if not department:
-        return _error_or_404("Department not found")
-    department.is_active = not department.is_active
-    commit_started_at = time.perf_counter()
-    db.session.commit()
-    commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        row = db.session.execute(
+            update(Department)
+            .where(Department.id == department_id, Department.company_id == company_id)
+            .values(is_active=~Department.is_active)
+            .returning(Department.id, Department.name, Department.is_active),
+        ).first()
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if row is None:
+            db.session.rollback()
+            return _error_or_404("Department not found")
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
+
     invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
     invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
         pager_started_at = time.perf_counter()
-        pager_device = PagerDevice.query.filter_by(company_id=company_id, department_id=department.id).order_by(PagerDevice.id.asc()).first()
+        pager_device = _pager_device_payload(company_id, department_id)
         pager_ms = (time.perf_counter() - pager_started_at) * 1000
         _log_admin_mutation_perf(
             "toggle_department",
             started_at,
             company_id=company_id,
-            department_id=department.id,
+            department_id=department_id,
             lookup_ms=f"{lookup_ms:.1f}",
             commit_ms=f"{commit_ms:.1f}",
             invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
@@ -394,17 +446,17 @@ def toggle_department(department_id):
         return _json_response(
             "Department updated",
             department={
-                "id": department.id,
-                "name": department.name,
-                "is_active": department.is_active,
-                "pager_device": _serialize_pager_device(pager_device),
+                "id": row.id,
+                "name": row.name,
+                "is_active": bool(row.is_active),
+                "pager_device": pager_device,
             },
         )
     _log_admin_mutation_perf(
         "toggle_department",
         started_at,
         company_id=company_id,
-        department_id=department.id,
+        department_id=department_id,
         lookup_ms=f"{lookup_ms:.1f}",
         commit_ms=f"{commit_ms:.1f}",
         invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
@@ -697,32 +749,51 @@ def create_machine_group():
 def toggle_machine_group(group_id):
     started_at = time.perf_counter()
     company_id = _company_id()
-    lookup_started_at = time.perf_counter()
-    group = MachineGroup.query.filter_by(id=group_id, company_id=company_id).one_or_none()
-    lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
-    if not group:
-        return _error_or_404("Machine group not found")
-    group.is_active = not group.is_active
-    target_state = group.is_active
-    machine_load_started_at = time.perf_counter()
-    for machine in Machine.query.filter(Machine.company_id == company_id, Machine.machine_type == group.name).all():
-        machine.is_active = target_state
-    machine_mutation_ms = (time.perf_counter() - machine_load_started_at) * 1000
-    commit_started_at = time.perf_counter()
-    db.session.commit()
-    commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        row = db.session.execute(
+            update(MachineGroup)
+            .where(MachineGroup.id == group_id, MachineGroup.company_id == company_id)
+            .values(is_active=~MachineGroup.is_active)
+            .returning(MachineGroup.id, MachineGroup.name, MachineGroup.is_active),
+        ).first()
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if row is None:
+            db.session.rollback()
+            return _error_or_404("Machine group not found")
+
+        machine_load_started_at = time.perf_counter()
+        db.session.execute(
+            update(Machine)
+            .where(Machine.company_id == company_id, Machine.machine_type == row.name)
+            .values(is_active=bool(row.is_active)),
+        )
+        machine_mutation_ms = (time.perf_counter() - machine_load_started_at) * 1000
+
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
+
     invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
     invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
         count_started_at = time.perf_counter()
-        machine_count = _machine_group_count(group.name)
+        machine_count = (
+            db.session.query(func.count(Machine.id))
+            .filter(Machine.company_id == company_id, Machine.machine_type == row.name)
+            .scalar()
+            or 0
+        )
         count_ms = (time.perf_counter() - count_started_at) * 1000
         _log_admin_mutation_perf(
             "toggle_machine_group",
             started_at,
             company_id=company_id,
-            group_id=group.id,
+            group_id=group_id,
             lookup_ms=f"{lookup_ms:.1f}",
             machine_mutation_ms=f"{machine_mutation_ms:.1f}",
             commit_ms=f"{commit_ms:.1f}",
@@ -732,9 +803,9 @@ def toggle_machine_group(group_id):
         return _json_response(
             "Machine group updated",
             machine_group={
-                "id": group.id,
-                "name": group.name,
-                "is_active": group.is_active,
+                "id": row.id,
+                "name": row.name,
+                "is_active": bool(row.is_active),
                 "machine_count": machine_count,
             },
         )
@@ -742,7 +813,7 @@ def toggle_machine_group(group_id):
         "toggle_machine_group",
         started_at,
         company_id=company_id,
-        group_id=group.id,
+        group_id=group_id,
         lookup_ms=f"{lookup_ms:.1f}",
         machine_mutation_ms=f"{machine_mutation_ms:.1f}",
         commit_ms=f"{commit_ms:.1f}",
@@ -1019,20 +1090,33 @@ def update_user(user_id):
 def toggle_user(user_id):
     started_at = time.perf_counter()
     company_id = _company_id()
-    lookup_started_at = time.perf_counter()
-    access = UserCompanyAccess.query.filter_by(user_id=user_id, company_id=company_id).one_or_none()
-    lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
-    if not access or access.user is None:
-        return _error_or_404("User not found")
-    access.is_active = not access.is_active
-    commit_started_at = time.perf_counter()
-    db.session.commit()
-    commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        row = db.session.execute(
+            update(UserCompanyAccess)
+            .where(UserCompanyAccess.user_id == user_id, UserCompanyAccess.company_id == company_id)
+            .values(is_active=~UserCompanyAccess.is_active)
+            .returning(UserCompanyAccess.id),
+        ).first()
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if row is None:
+            db.session.rollback()
+            return _error_or_404("User not found")
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
+
     invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
     invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
         payload_started_at = time.perf_counter()
+        access = UserCompanyAccess.query.filter_by(user_id=user_id, company_id=company_id).one_or_none()
+        if not access or access.user is None:
+            return _error_or_404("User not found")
         user_payload = _membership_payload(access)
         payload_ms = (time.perf_counter() - payload_started_at) * 1000
         _log_admin_mutation_perf(

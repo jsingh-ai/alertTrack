@@ -143,7 +143,7 @@ def build_operator_snapshot(company_id=None, current_user=None, membership=None,
         company_id,
         include_alerts=True,
         include_metadata=False,
-        include_radius=False,
+        include_radius=True,
         membership=membership,
         scope=scope,
         metrics=context_metrics,
@@ -184,13 +184,29 @@ def build_operator_snapshot(company_id=None, current_user=None, membership=None,
     return result
 
 
-def build_operator_metadata(company_id=None, current_user=None, membership=None, scope=None, metrics: dict | None = None):
+def build_operator_metadata(
+    company_id=None,
+    current_user=None,
+    membership=None,
+    scope=None,
+    metrics: dict | None = None,
+    *,
+    include_issue_groups: bool = True,
+    include_users: bool = True,
+):
     started_at = time.perf_counter()
     company_id = company_id if company_id is not None else get_current_company_id()
     current_user = current_user or get_authenticated_user()
     membership = membership or get_current_membership(user=current_user)
     scope = scope or get_scope_filters(membership=membership)
-    cache_key = _operator_metadata_cache_key(company_id, current_user, membership, scope)
+    cache_key = _operator_metadata_cache_key(
+        company_id,
+        current_user,
+        membership,
+        scope,
+        include_issue_groups=include_issue_groups,
+        include_users=include_users,
+    )
 
     cache_started_at = time.perf_counter()
     cached = get_cached(cache_key)
@@ -221,6 +237,8 @@ def build_operator_metadata(company_id=None, current_user=None, membership=None,
         membership=membership,
         scope=scope,
         metrics=context_metrics,
+        include_issue_groups=include_issue_groups,
+        include_users=include_users,
     )
     serialize_started_at = time.perf_counter()
     result = {
@@ -275,7 +293,15 @@ def build_operator_metadata(company_id=None, current_user=None, membership=None,
     return result
 
 
-def _load_operator_metadata_context(company_id, membership=None, scope=None, metrics: dict | None = None):
+def _load_operator_metadata_context(
+    company_id,
+    membership=None,
+    scope=None,
+    metrics: dict | None = None,
+    *,
+    include_issue_groups: bool = True,
+    include_users: bool = True,
+):
     scope_started_at = time.perf_counter()
     scope = scope or get_scope_filters()
     if metrics is not None and "scope_ms" not in metrics:
@@ -349,23 +375,38 @@ def _load_operator_metadata_context(company_id, membership=None, scope=None, met
     departments_ms = (time.perf_counter() - departments_started_at) * 1000
 
     issue_started_at = time.perf_counter()
-    issue_groups, issue_metrics = _load_operator_issue_groups(
-        company_id=company_id,
-        metadata_department_ids=metadata_department_ids,
-    )
+    if include_issue_groups:
+        issue_groups, issue_metrics = _load_operator_issue_groups(
+            company_id=company_id,
+            metadata_department_ids=metadata_department_ids,
+        )
+    else:
+        issue_groups = []
+        issue_metrics = {
+            "issue_cache": "skipped",
+            "category_query_ms": 0.0,
+            "problem_query_ms": 0.0,
+            "grouping_ms": 0.0,
+            "category_count": 0,
+            "problem_count": 0,
+            "problem_cap_reached": False,
+        }
     issue_ms = (time.perf_counter() - issue_started_at) * 1000
 
     visible_departments = [department for department in departments if role == "Operator" or department.is_active]
 
     users_started_at = time.perf_counter()
-    visible_users = [
-        access.user
-        for access in user_query.filter_by(is_active=True).order_by(UserCompanyAccess.id.asc()).all()
-        if access.user
-        and access.user.is_active
-        and (access.department is None or access.department.is_active)
-        and (access.machine_group is None or access.machine_group.is_active)
-    ]
+    if include_users:
+        visible_users = [
+            access.user
+            for access in user_query.filter_by(is_active=True).order_by(UserCompanyAccess.id.asc()).all()
+            if access.user
+            and access.user.is_active
+            and (access.department is None or access.department.is_active)
+            and (access.machine_group is None or access.machine_group.is_active)
+        ]
+    else:
+        visible_users = []
     users_ms = (time.perf_counter() - users_started_at) * 1000
 
     if metrics is not None:
@@ -384,7 +425,7 @@ def _load_operator_metadata_context(company_id, membership=None, scope=None, met
     }
 
 
-def _operator_metadata_cache_key(company_id, current_user, membership, scope):
+def _operator_metadata_cache_key(company_id, current_user, membership, scope, *, include_issue_groups: bool, include_users: bool):
     return (
         "operator_metadata",
         company_id,
@@ -397,6 +438,8 @@ def _operator_metadata_cache_key(company_id, current_user, membership, scope):
         tuple(sorted(scope.get("department_ids") or [])),
         tuple(sorted(scope.get("machine_group_names") or [])),
         tuple(sorted(scope.get("machine_ids") or [])),
+        bool(include_issue_groups),
+        bool(include_users),
     )
 
 

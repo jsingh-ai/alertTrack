@@ -347,12 +347,15 @@ def operator_metadata():
 
     service_metrics = {}
     service_started_at = time.perf_counter()
+    departments_only = str(request.args.get("departments_only") or "").strip().lower() in {"1", "true", "yes", "on"}
     payload = build_operator_metadata(
         company_id=company_id,
         current_user=current_user,
         membership=membership,
         scope=scope,
         metrics=service_metrics,
+        include_issue_groups=not departments_only,
+        include_users=not departments_only,
     )
     service_ms = (time.perf_counter() - service_started_at) * 1000
 
