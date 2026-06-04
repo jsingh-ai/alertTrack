@@ -4657,11 +4657,11 @@ html[data-theme="light"] .operator-machine-group__count {
 }
 
 body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__top {
-  padding: 1rem 1.08rem 1.02rem;
+  padding: 1.12rem 1.15rem 1.14rem;
 }
 
 body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__top--detailed {
-  padding: 1.08rem 1.15rem 1.1rem;
+  padding: 1.2rem 1.2rem 1.18rem;
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__top--tone-healthy {
@@ -4699,12 +4699,12 @@ body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__to
 }
 
 body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__name {
-  font-size: clamp(1.28rem, 2vw, 1.9rem);
-  line-height: 1.04;
+  font-size: clamp(1.38rem, 2.15vw, 2.05rem);
+  line-height: 1.02;
 }
 
 body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__identity {
-  padding-bottom: 0.12rem;
+  padding-bottom: 0.18rem;
 }
 
 .button-board-shell .operator-machine-tile .machine-tile__meta {

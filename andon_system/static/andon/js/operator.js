@@ -749,7 +749,8 @@ async function createAlertFromModal() {
 
 async function actOnActiveAlert() {
   try {
-    const activeAlert = state.selectedAlert || state.board.machines.find((machine) => Number(machine.id) === Number(state.selectedMachine?.id))?.active_alert;
+    const liveMachine = state.board.machines.find((machine) => Number(machine.id) === Number(state.selectedMachine?.id));
+    const activeAlert = liveMachine?.active_alert || state.selectedAlert || null;
     const alertId = activeAlert?.id;
     if (!alertId || !activeAlert) return;
     if (activeAlert.status === "OPEN") {
@@ -770,9 +771,11 @@ async function actOnActiveAlert() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const machine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine?.id));
-    if (machine) {
-      machine.active_alert = null;
+    if (liveMachine) {
+      liveMachine.active_alert = null;
+    }
+    if (state.selectedAlert && Number(state.selectedAlert.id) === Number(alertId)) {
+      state.selectedAlert = null;
     }
     closeMachinePanel();
     localMutationRefreshLockUntil = Date.now() + 700;
