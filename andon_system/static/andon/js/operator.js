@@ -242,7 +242,10 @@ async function boot() {
   window.AndonRealtime?.onStatus((status) => setOperatorFallbackPolling(!status.connected));
   setOperatorFallbackPolling(!window.AndonRealtime?.connected);
 
-  const restorePromise = restoreViewState().catch((_error) => {
+  logOperatorTiming("before restore start");
+  const restorePromise = restoreViewState().then(() => {
+    logOperatorTiming("after restore complete");
+  }).catch((_error) => {
     console.warn("Failed to restore operator view state.");
   });
   const boardPromise = loadBoardState({
@@ -258,8 +261,21 @@ async function boot() {
     return null;
   });
 
-  await Promise.allSettled([restorePromise, boardPromise]);
+  logOperatorTiming("before initial-shell await");
+  await boardPromise;
+  logOperatorTiming("after initial-shell await", {
+    machineCount: Array.isArray(state.board.machines) ? state.board.machines.length : 0,
+  });
+  logOperatorTiming("before applySnapshot", {
+    machineCount: Array.isArray(state.board.machines) ? state.board.machines.length : 0,
+  });
   normalizeViewState();
+  logOperatorTiming("after applySnapshot", {
+    machineCount: Array.isArray(state.board.machines) ? state.board.machines.length : 0,
+  });
+  logOperatorTiming("before render invoke", {
+    machineCount: Array.isArray(state.board.machines) ? state.board.machines.length : 0,
+  });
   logOperatorTiming("first render start", {
     machineCount: Array.isArray(state.board.machines) ? state.board.machines.length : 0,
   });
@@ -272,6 +288,11 @@ async function boot() {
 
   void departmentsPromise.then(() => {
     normalizeViewState();
+    renderBoard();
+  });
+  void restorePromise.then(() => {
+    normalizeViewState();
+    renderViewControls();
     renderBoard();
   });
   void refreshBoardState({
