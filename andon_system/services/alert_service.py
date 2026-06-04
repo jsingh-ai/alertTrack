@@ -365,6 +365,13 @@ def create_alert(payload: dict, metrics: dict | None = None):
     previous_step_at = started_at
     perf = metrics if isinstance(metrics, dict) else {}
     known_segments = {}
+    created_alert_id = None
+    created_alert_ids: list[int] = []
+    created_machine_id = None
+    created_company_id = None
+    created_status = None
+    created_at_iso = None
+    commit_done_at = started_at
     company_id = get_current_company_id()
     previous_step_at = _perf_step("start", started_at, previous_step_at, machine_id=payload.get("machine_id"), company_id=company_id)
     scope = get_scope_filters()
@@ -624,11 +631,12 @@ def create_alert(payload: dict, metrics: dict | None = None):
         previous_step_at = _perf_step("after_event_insert", started_at, previous_step_at, alert_id=alerts[0].id if alerts else None, machine_id=machine.id, company_id=resolved_company_id)
         perf["note_insert_ms"] = 0.0
         created_alert_ids = [alert.id for alert in alerts]
+        created_alert_id = created_alert_ids[0] if created_alert_ids else None
         created_company_id = alerts[0].company_id
         created_machine_id = alerts[0].machine_id
         created_status = alerts[0].status
         created_at_iso = alerts[0].created_at.isoformat() if alerts[0].created_at else None
-        previous_step_at = _perf_step("before_commit", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
+        previous_step_at = _perf_step("before_commit", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
         _perf_pg_diagnostics("before_commit")
         commit_started_at = time.perf_counter()
         db.session.commit()
@@ -664,35 +672,53 @@ def create_alert(payload: dict, metrics: dict | None = None):
     perf["before_cache_call_ms"] = (cache_started_at - commit_done_at) * 1000
     if _deep_alert_debug_enabled():
         current_app.logger.debug(
-            "PERF alert_create_checkpoint phase=before_cache after_commit_to_cache_start_ms=%.1f alert_id=%s company_id=%s machine_id=%s status=%s created_at=%s",
+            "PERF alert_create_checkpoint phase=before_cache after_commit_to_cache_start_ms=%.1f alert_id=%s alert_ids=%s company_id=%s machine_id=%s status=%s created_at=%s",
             perf["before_cache_call_ms"],
-            created_alert_ids[0] if created_alert_ids else None,
+            created_alert_id,
+            created_alert_ids,
             created_company_id,
             created_machine_id,
             created_status,
             created_at_iso,
         )
-    _invalidate_live_caches(created_company_id)
+    try:
+        _invalidate_live_caches(created_company_id)
+    except Exception:
+        current_app.logger.exception(
+            "Alert created but cache invalidation failed alert_id=%s alert_ids=%s company_id=%s",
+            created_alert_id,
+            created_alert_ids,
+            created_company_id,
+        )
     cache_call_done_at = time.perf_counter()
     perf["actual_invalidate_call_ms"] = (cache_call_done_at - cache_started_at) * 1000
     perf["after_cache_call_ms"] = (time.perf_counter() - cache_call_done_at) * 1000
     perf["cache_invalidate_ms"] = perf["before_cache_call_ms"] + perf["actual_invalidate_call_ms"] + perf["after_cache_call_ms"]
     if _deep_alert_debug_enabled():
         current_app.logger.debug(
-            "PERF alert_create_checkpoint phase=after_cache after_commit_to_cache_start_ms=%.1f actual_cache_call_ms=%.1f after_cache_call_ms=%.1f alert_id=%s",
+            "PERF alert_create_checkpoint phase=after_cache after_commit_to_cache_start_ms=%.1f actual_cache_call_ms=%.1f after_cache_call_ms=%.1f alert_id=%s alert_ids=%s",
             perf["before_cache_call_ms"],
             perf["actual_invalidate_call_ms"],
             perf["after_cache_call_ms"],
-            created_alert_ids[0] if created_alert_ids else None,
+            created_alert_id,
+            created_alert_ids,
         )
-    previous_step_at = _perf_step("after_cache", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
-    previous_step_at = _perf_step("before_socket_emit", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
+    previous_step_at = _perf_step("after_cache", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
+    previous_step_at = _perf_step("before_socket_emit", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
     emit_started_at = time.perf_counter()
-    for created_alert_id in created_alert_ids:
-        emit_alert_created(created_company_id, created_alert_id, machine_id=created_machine_id, status=created_status)
+    try:
+        for emitted_alert_id in created_alert_ids:
+            emit_alert_created(created_company_id, emitted_alert_id, machine_id=created_machine_id, status=created_status)
+    except Exception:
+        current_app.logger.exception(
+            "Alert created but realtime emit failed alert_id=%s alert_ids=%s company_id=%s",
+            created_alert_id,
+            created_alert_ids,
+            created_company_id,
+        )
     perf["socket_emit_ms"] = (time.perf_counter() - emit_started_at) * 1000
     known_segments["socket_emit_ms"] = perf["socket_emit_ms"]
-    previous_step_at = _perf_step("after_socket_emit", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
+    previous_step_at = _perf_step("after_socket_emit", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
     previous_step_at = _perf_step("before_return", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
     perf.setdefault("payload_fetch_ms", 0.0)
     perf.setdefault("escalation_check_ms", 0.0)

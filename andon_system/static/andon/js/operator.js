@@ -48,7 +48,11 @@ const state = {
   users: [],
   selectedMachine: null,
   selectedDepartment: null,
+  selectedDepartmentId: null,
   selectedProblem: null,
+  selectedProblemId: null,
+  selectedIssue: null,
+  selectedIssueId: null,
   selectedAlertUserId: null,
   selectedAlert: null,
   createNoteDraft: "",
@@ -89,6 +93,7 @@ let problemOptionsMarkupCacheKey = "";
 let problemOptionsMarkupCacheValue = "";
 let localMutationRefreshLockUntil = 0;
 let operatorFirstRenderCompleted = false;
+let operatorIssuesTimingLabel = "";
 
 function normalizeDepartmentName(name) {
   return String(name || "").trim().toLowerCase();
@@ -99,6 +104,43 @@ function getDepartmentLabel(name) {
   const normalizedName = normalizeDepartmentName(rawName);
   if (!rawName) return "Call Department";
   return departmentLabelMap[normalizedName] || `Call ${rawName}`;
+}
+
+function operatorSinceScriptMs() {
+  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  return Math.round(now - operatorScriptStartedAt);
+}
+
+function startOperatorIssuesTimer(departmentId) {
+  if (operatorIssuesTimingLabel && typeof console.timeEnd === "function") {
+    try {
+      console.timeEnd(operatorIssuesTimingLabel);
+    } catch (_error) {
+      // Ignore duplicate or missing console timers.
+    }
+  }
+  operatorIssuesTimingLabel = `[operator issues] department ${departmentId} selected to issues visible`;
+  if (typeof console.time === "function") {
+    console.time(operatorIssuesTimingLabel);
+  }
+}
+
+function completeOperatorIssuesTimer(problemCount) {
+  if (!operatorIssuesTimingLabel) return;
+  if (typeof console.timeEnd === "function") {
+    try {
+      console.timeEnd(operatorIssuesTimingLabel);
+    } catch (_error) {
+      // Ignore duplicate or missing console timers.
+    }
+  }
+  console.log("[operator issues] issue load complete", {
+    departmentId: state.selectedDepartmentId,
+    issueCount: problemCount,
+    elapsedMs: null,
+    sinceScriptMs: operatorSinceScriptMs(),
+  });
+  operatorIssuesTimingLabel = "";
 }
 
 async function fetchJson(url, options = {}) {
@@ -547,6 +589,16 @@ function applyOperatorMetadata(metadata, options = {}) {
     state.users = metadata?.users || [];
     state.detailMetadataLoaded = true;
     state.metadataLoaded = true;
+    if (state.selectedDepartmentId) {
+      const problemCount = getProblemsForDepartment(state.selectedDepartmentId).length;
+      console.log("[operator issues] issue load complete", {
+        departmentId: state.selectedDepartmentId,
+        issueCount: problemCount,
+        elapsedMs: null,
+        sinceScriptMs: operatorSinceScriptMs(),
+      });
+      completeOperatorIssuesTimer(problemCount);
+    }
     return;
   }
   state.metadataLoaded = state.departmentsLoaded && state.detailMetadataLoaded;
@@ -555,6 +607,21 @@ function applyOperatorMetadata(metadata, options = {}) {
 function getProblemsForDepartment(departmentId) {
   const targetDepartmentId = Number(departmentId || 0);
   if (!targetDepartmentId) return [];
+  const selectedDepartmentName = _normalizeDepartmentNameForIssues(
+    state.selectedDepartment && Number(state.selectedDepartment.id) === targetDepartmentId
+      ? state.selectedDepartment.name
+      : state.departments.find((department) => Number(department.id) === targetDepartmentId)?.name,
+  );
+  if (selectedDepartmentName === "quality and supervisor") {
+    const qualityDepartment = state.departments.find((department) => _normalizeDepartmentNameForIssues(department.name) === "quality");
+    const supervisorDepartment = state.departments.find((department) => _normalizeDepartmentNameForIssues(department.name) === "supervisor");
+    const compositeProblems = [];
+    [qualityDepartment?.id, supervisorDepartment?.id].forEach((linkedDepartmentId) => {
+      if (!linkedDepartmentId) return;
+      compositeProblems.push(...getProblemsForDepartment(linkedDepartmentId));
+    });
+    return compositeProblems;
+  }
   const flattened = [];
   (state.issueGroups || []).forEach((group) => {
     if (Number(group?.department_id || 0) !== targetDepartmentId) return;
@@ -567,6 +634,10 @@ function getProblemsForDepartment(departmentId) {
     });
   });
   return flattened;
+}
+
+function _normalizeDepartmentNameForIssues(name) {
+  return String(name || "").trim().toLowerCase();
 }
 
 function hydrateOperatorMetadataFromCache() {
@@ -589,8 +660,18 @@ async function loadOperatorMetadata(options = {}) {
   if (!operatorMetadataLoadPromise) {
     operatorMetadataLoadPromise = (async () => {
       if (!force && hydrateOperatorMetadataFromCache()) {
+        console.log("[operator issues] issue load start", {
+          departmentId: state.selectedDepartmentId,
+          source: "cache",
+          sinceScriptMs: operatorSinceScriptMs(),
+        });
         return;
       }
+      console.log("[operator issues] issue load start", {
+        departmentId: state.selectedDepartmentId,
+        source: "api",
+        sinceScriptMs: operatorSinceScriptMs(),
+      });
       const metadata = await fetchJson(buildNoStoreUrl(operatorMetadataUrl), {
         cache: "no-store",
       });
@@ -637,11 +718,7 @@ function scheduleOperatorMetadataWarmup() {
       console.warn("Failed to preload operator metadata.");
     });
   };
-  if (typeof window.requestIdleCallback === "function") {
-    window.requestIdleCallback(runWarmup, { timeout: 1200 });
-    return;
-  }
-  setTimeout(runWarmup, 250);
+  setTimeout(runWarmup, 0);
 }
 
 function wireEvents() {
@@ -655,6 +732,10 @@ function wireEvents() {
 }
 
 function onBoardClick(event) {
+  console.log("[operator create] root click", {
+    target: event.target,
+    action: event.target?.dataset?.inlineAction || event.target?.closest("[data-inline-action]")?.dataset?.inlineAction || null,
+  });
   const toggle = event.target.closest("[data-machine-toggle]");
   if (toggle) {
     void toggleMachinePanel(Number(toggle.dataset.machineId));
@@ -741,7 +822,11 @@ async function openActiveAlertModal(activeAlert, machine) {
   state.selectedMachine = machine;
   state.selectedAlertUserId = activeAlert.responder_user_id || null;
   state.selectedDepartment = null;
+  state.selectedDepartmentId = null;
   state.selectedProblem = null;
+  state.selectedProblemId = null;
+  state.selectedIssue = null;
+  state.selectedIssueId = null;
   state.createNoteDraft = "";
   state.alertNoteDraft = "";
   state.alertNoteDrafts = {};
@@ -764,7 +849,11 @@ async function openCreatePanel(machine) {
   state.selectedAlert = null;
   state.selectedAlertUserId = null;
   state.selectedDepartment = null;
+  state.selectedDepartmentId = null;
   state.selectedProblem = null;
+  state.selectedProblemId = null;
+  state.selectedIssue = null;
+  state.selectedIssueId = null;
   state.createNoteDraft = "";
   state.alertNoteDraft = "";
   state.alertNoteDrafts = {};
@@ -781,7 +870,11 @@ function closeMachinePanel() {
   state.selectedAlert = null;
   state.selectedAlertUserId = null;
   state.selectedDepartment = null;
+  state.selectedDepartmentId = null;
   state.selectedProblem = null;
+  state.selectedProblemId = null;
+  state.selectedIssue = null;
+  state.selectedIssueId = null;
   state.createNoteDraft = "";
   state.alertNoteDraft = "";
   state.alertNoteDrafts = {};
@@ -823,18 +916,43 @@ function onDepartmentButtonClick(button) {
   const department = state.departments.find((row) => row.name === departmentName);
   if (!department) return;
   state.selectedMachine = machine || state.selectedMachine;
+  const departmentId = Number(department.id);
+  startOperatorIssuesTimer(departmentId);
+  console.log("[operator issues] department selected", {
+    departmentId,
+    departmentName: department.name,
+    sinceScriptMs: operatorSinceScriptMs(),
+  });
 
   const isSelected = state.selectedDepartment && Number(state.selectedDepartment.id) === Number(department.id);
   if (isSelected) {
     state.selectedDepartment = null;
+    state.selectedDepartmentId = null;
     state.selectedProblem = null;
+    state.selectedProblemId = null;
+    state.selectedIssue = null;
+    state.selectedIssueId = null;
     renderBoard();
     return;
   }
 
   state.selectedDepartment = department;
+  state.selectedDepartmentId = departmentId;
   state.selectedProblem = null;
+  state.selectedProblemId = null;
+  state.selectedIssue = null;
+  state.selectedIssueId = null;
   renderBoard();
+  if (state.detailMetadataLoaded) {
+    const cachedProblems = getProblemsForDepartment(departmentId);
+    console.log("[operator issues] issue load start", {
+      departmentId,
+      source: "state",
+      sinceScriptMs: operatorSinceScriptMs(),
+    });
+    completeOperatorIssuesTimer(cachedProblems.length);
+    return;
+  }
   if (!state.detailMetadataLoaded && !operatorMetadataLoadPromise) {
     void loadOperatorMetadata().then(renderBoard).catch(() => {});
   }
@@ -854,6 +972,9 @@ function onProblemClick(button) {
   if (!problem) return;
   state.selectedMachine = machine || state.selectedMachine;
   state.selectedProblem = problem;
+  state.selectedProblemId = Number(problem.id);
+  state.selectedIssue = problem;
+  state.selectedIssueId = Number(problem.id);
   renderBoard();
 }
 
@@ -984,6 +1105,7 @@ async function createAlertFromModal() {
     operator_name_text: null,
     note: state.createNoteDraft.trim() || null,
   };
+  console.log("[operator create] submitting alert", payload);
   try {
     const response = await fetch("/api/andon/alerts", {
       method: "POST",
@@ -1551,7 +1673,18 @@ function renderCreateInlinePanel(machine, detailed) {
   const canSubmit = Boolean(machine && hasDepartment && hasProblem) && !isSubmitting;
   const showCallAction = Boolean(machine && hasDepartment && hasProblem);
   const showHealthyBanner = !hasDepartment;
+  const isCombinedDepartment = _normalizeDepartmentNameForIssues(preferredDepartment?.name) === "quality and supervisor";
   const healthyTime = formatCurrentTime();
+  console.log("[operator issues] render create panel", {
+    hasDepartment,
+    hasProblem,
+    problemCount: problems.length,
+    selectedProblem: state.selectedProblem,
+    selectedProblemId: state.selectedProblemId,
+    selectedIssue: state.selectedIssue,
+    selectedIssueId: state.selectedIssueId,
+    detailMetadataLoaded: state.detailMetadataLoaded,
+  });
   console.log("[operator create] selection state", {
     selectedDepartment: state.selectedDepartment,
     selectedDepartmentId: state.selectedDepartmentId,
@@ -1561,6 +1694,18 @@ function renderCreateInlinePanel(machine, detailed) {
     selectedIssueId: state.selectedIssueId,
     showCallAction,
   });
+  if (showCallAction) {
+    console.log("[operator create] call button rendered", {
+      selectedDepartment: state.selectedDepartment,
+      selectedDepartmentId: state.selectedDepartmentId,
+      selectedProblem: state.selectedProblem,
+      selectedProblemId: state.selectedProblemId,
+      selectedIssue: state.selectedIssue,
+      selectedIssueId: state.selectedIssueId,
+      isCombinedDepartment,
+      showCallAction,
+    });
+  }
   return `
     <div class="machine-tile__inline-panel--create machine-modal--create machine-modal__create-stack ${detailed ? "machine-tile__inline-panel--detailed" : ""}" data-followup="${showFollowup ? "true" : "false"}">
       ${showHealthyBanner ? `
