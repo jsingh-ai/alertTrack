@@ -3403,18 +3403,62 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__note-input {
-  min-height: 3rem;
+  min-height: 2.25rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-tile {
+  min-height: 5.8rem;
+  padding: 0.5rem 0.55rem 0.55rem;
+  gap: 0.08rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-department,
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-issue {
+  padding: 0.5rem 0.55rem 0.55rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__response-label {
+  margin-bottom: 0.03rem;
+  font-size: 0.56rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__response-value {
+  font-size: clamp(0.88rem, 1.4vw, 1.2rem);
+  line-height: 1;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--timer-hero {
+  min-height: 7.4rem;
+  padding: 0.42rem 0.5rem 0.45rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-note-entry {
+  padding: 0.36rem 0.42rem;
+  gap: 0.08rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-tile__note-input {
+  min-height: 2.4rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__footer {
-  margin-top: 0.02rem;
-  padding-top: 0.05rem;
+  margin-top: 0.01rem;
+  padding-top: 0.02rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__footer-btn {
-  min-height: 2.2rem;
-  padding: 0.38rem 0.75rem;
-  font-size: 0.8rem;
+  min-height: 1.8rem;
+  padding: 0.28rem 0.58rem;
+  font-size: 0.72rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal--response-open .alert-note-bubble {
+  padding: 0.45rem 0.55rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal--response-open .alert-note-bubble__text {
+  font-size: clamp(0.82rem, 1.15vw, 1rem);
+  line-height: 1.1;
 }
 
 body.operator-shell.operator-single-machine-mode .operator-status-dock {
@@ -5478,9 +5522,9 @@ html[data-theme="light"] .operator-machine-group__count {
 .machine-modal__section--response-tile {
   display: grid;
   align-content: start;
-  gap: 0.18rem;
-  padding: 0.9rem 0.95rem 0.95rem;
-  height: 8.35rem;
+  gap: 0.12rem;
+  padding: 0.72rem 0.8rem 0.78rem;
+  min-height: 6.85rem;
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.92));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
@@ -5518,8 +5562,8 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal__response-label {
   margin: 0;
-  margin-bottom: 0.12rem;
-  font-size: 0.68rem;
+  margin-bottom: 0.05rem;
+  font-size: 0.64rem;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -5528,8 +5572,8 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal__response-value {
   margin: 0;
-  font-size: clamp(1.08rem, 1.8vw, 1.7rem);
-  line-height: 1.08;
+  font-size: clamp(0.96rem, 1.55vw, 1.5rem);
+  line-height: 1.02;
   font-weight: 900;
   letter-spacing: -0.02em;
   color: #143f86;
@@ -5547,8 +5591,8 @@ html[data-theme="light"] .operator-machine-group__count {
   align-content: center;
   justify-items: center;
   box-sizing: border-box;
-  min-height: 15.5rem;
-  padding: 1.2rem 1rem 1.15rem;
+  min-height: 12.5rem;
+  padding: 0.84rem 0.9rem 0.88rem;
   border: 1px solid rgba(61, 118, 219, 0.18);
   background: linear-gradient(180deg, #f8fbff 0%, #eaf1fb 100%);
   box-shadow: 0 12px 24px rgba(47, 96, 186, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.85);
@@ -5565,7 +5609,7 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal__timer-hero-label {
   margin-bottom: 0.12rem;
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -5573,7 +5617,7 @@ html[data-theme="light"] .operator-machine-group__count {
 }
 
 .machine-modal__timer-hero-value {
-  font-size: clamp(6.8rem, 16vw, 14rem);
+  font-size: clamp(5.6rem, 13vw, 11.5rem);
   line-height: 0.9;
   font-weight: 900;
   letter-spacing: -0.075em;
@@ -5654,28 +5698,34 @@ html[data-theme="light"] .operator-machine-group__count {
 }
 
 .machine-modal--response .machine-modal__section--reels {
-  padding-top: 0.7rem;
+  padding-top: 0.5rem;
 }
 
 .machine-modal--response .machine-modal__section--note {
-  padding-top: 0.7rem;
+  padding-top: 0.5rem;
 }
 
 .machine-modal--response .machine-modal__section--response-followup {
-  padding-top: 0.7rem;
+  padding-top: 0.45rem;
+}
+
+.machine-modal--response .machine-modal__section--response-note-entry {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.48rem 0.55rem;
 }
 
 .machine-modal--response .machine-modal__followup-group + .machine-modal__followup-group {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
+  margin-top: 0.36rem;
+  padding-top: 0.36rem;
   border-top: 1px solid rgba(61, 118, 219, 0.12);
 }
 
 .machine-modal--response .machine-tile__section-copy--responding,
 .machine-modal--response .machine-tile__section-copy--note {
   display: grid;
-  gap: 0.14rem;
-  margin-bottom: 0.48rem;
+  gap: 0.08rem;
+  margin-bottom: 0.24rem;
 }
 
 .machine-modal--response .machine-tile__section-title {
@@ -5695,16 +5745,21 @@ html[data-theme="light"] .operator-machine-group__count {
   min-height: 3rem;
 }
 
+.machine-modal--response .machine-tile__note-input {
+  min-height: 3rem;
+  resize: none;
+}
+
 .machine-modal--response .machine-modal__footer {
   justify-content: center;
-  padding-top: 0.15rem;
+  padding-top: 0.08rem;
 }
 
 .machine-modal--response .machine-modal__footer-btn {
   min-width: 12rem;
-  min-height: 2.65rem;
-  padding: 0.55rem 1rem;
-  font-size: 0.92rem;
+  min-height: 2.1rem;
+  padding: 0.34rem 0.8rem;
+  font-size: 0.84rem;
 }
 
 .machine-modal .modal-body {
@@ -6118,36 +6173,37 @@ body.board-screen-shell .machine-modal .btn-close:focus-visible {
 }
 
 .machine-modal--response .machine-modal__section {
-  padding: 0.6rem 0.65rem;
+  padding: 0.45rem 0.5rem;
   border-radius: 0.88rem;
 }
 
 .machine-modal--response .machine-modal__section + .machine-modal__section {
-  margin-top: 0.45rem;
+  margin-top: 0.24rem;
 }
 
 .machine-modal--response .machine-modal__section.machine-modal__section--response-department,
 .machine-modal--response .machine-modal__section.machine-modal__section--response-issue {
   margin-top: 0;
-  padding: 0.9rem 0.95rem 0.95rem;
+  padding: 0.5rem 0.58rem 0.58rem;
 }
 
 .machine-modal--response .machine-modal__section.machine-modal__section--timer-hero,
 .machine-modal--response .machine-modal__section.machine-modal__section--reels,
 .machine-modal--response .machine-modal__section.machine-modal__section--note,
 .machine-modal--response .machine-modal__section.machine-modal__section--response-followup,
+.machine-modal--response .machine-modal__section.machine-modal__section--response-note-entry,
 .machine-modal--response .machine-modal__footer {
-  margin-top: 0.45rem;
+  margin-top: 0.2rem;
 }
 
 .machine-modal--response .alert-issue-summary {
   margin-bottom: 0.45rem;
-  padding: 0.58rem 0.65rem;
+  padding: 0.5rem 0.55rem;
   border-radius: 0.82rem;
 }
 
 .machine-modal--response .machine-modal__request-banner {
-  margin-bottom: 0.55rem;
+  margin-bottom: 0.42rem;
 }
 
 .machine-modal--response .section-heading {
@@ -6170,15 +6226,15 @@ body.board-screen-shell .machine-modal .btn-close:focus-visible {
 }
 
 .machine-modal--response .alert-note-bubble {
-  padding: 0.65rem 0.8rem;
-  margin-top: 0.35rem;
-  margin-bottom: 0.4rem;
+  padding: 0.55rem 0.68rem;
+  margin-top: 0.24rem;
+  margin-bottom: 0.28rem;
   border-radius: 0.5rem;
   font-size: 0.82rem;
 }
 
 .machine-modal--response-open .alert-note-bubble {
-  padding: 0.9rem 1rem;
+  padding: 0.6rem 0.72rem;
 }
 
 .machine-modal--response .alert-note-bubble__label {
@@ -6195,8 +6251,8 @@ body.board-screen-shell .machine-modal .btn-close:focus-visible {
 }
 
 .machine-modal--response-open .alert-note-bubble__text {
-  font-size: 4.8rem;
-  line-height: 1.05;
+  font-size: clamp(0.92rem, 1.6vw, 1.45rem);
+  line-height: 1.12;
 }
 
 .machine-modal--response .user-chip-grid {
@@ -6270,7 +6326,7 @@ body.board-screen-shell .machine-modal .btn-close:focus-visible {
 
 .machine-modal--response .machine-modal__reel-card--chooser,
 .machine-modal--response .machine-modal__reel-card--assignee {
-  padding-top: 0.42rem;
+  padding-top: 0.3rem;
 }
 
 .machine-modal--response .machine-modal__reel-card--chooser .user-chip-grid,
@@ -6279,22 +6335,29 @@ body.board-screen-shell .machine-modal .btn-close:focus-visible {
 }
 
 .machine-modal--response .machine-modal__footer-btn {
-  min-width: 12rem;
-  min-height: 2.65rem;
-  padding: 0.55rem 1rem;
-  font-size: 0.92rem;
+  min-width: 10rem;
+  min-height: 2.1rem;
+  padding: 0.34rem 0.8rem;
+  font-size: 0.84rem;
 }
 
 .machine-modal--response .modal-footer .btn-lg {
-  min-height: 2.65rem;
-  padding: 0.55rem 1rem;
-  font-size: 0.92rem;
+  min-height: 2.1rem;
+  padding: 0.34rem 0.8rem;
+  font-size: 0.84rem;
   line-height: 1.1;
   border-radius: 0.75rem;
 }
 
 .machine-modal--response .modal-footer .btn:not(.btn-close) {
-  min-width: 12rem;
+  min-width: 10rem;
+}
+
+.machine-modal__section--response-waiting--closed {
+  border-style: dashed;
+  border-color: rgba(61, 118, 219, 0.18);
+  background: linear-gradient(180deg, rgba(248, 251, 255, 0.9), rgba(234, 241, 251, 0.95));
+  gap: 0.08rem;
 }
 
 .machine-modal__footer {

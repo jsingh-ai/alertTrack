@@ -728,9 +728,11 @@ async function actOnActiveAlert() {
   const activeAlert = state.selectedAlert || state.board.machines.find((machine) => Number(machine.id) === Number(state.selectedMachine?.id))?.active_alert;
   const alertId = activeAlert?.id;
   if (!alertId || !activeAlert) return;
-  const responderUserId = activeAlert.status === "OPEN"
-    ? state.selectedAlertUserId
-    : activeAlert.responder_user_id || state.selectedAlertUserId;
+  if (activeAlert.status === "OPEN") {
+    window.alert("This alert must be acknowledged from the board before it can be closed here.");
+    return;
+  }
+  const responderUserId = activeAlert.responder_user_id || state.selectedAlertUserId;
   const payload = new FormData();
   if (responderUserId) {
     payload.append("responder_user_id", String(responderUserId));
@@ -739,11 +741,7 @@ async function actOnActiveAlert() {
   if (state.alertNoteDraft.trim()) {
     payload.append("note", state.alertNoteDraft.trim());
   }
-  let endpoint = `/api/andon/alerts/${alertId}/acknowledge`;
-  if (activeAlert.status !== "OPEN") {
-    endpoint = `/api/andon/alerts/${alertId}/cancel`;
-    if (state.alertNoteDraft) payload.append("reason", state.alertNoteDraft);
-  }
+  const endpoint = `/api/andon/alerts/${alertId}/resolve`;
   const response = await fetch(endpoint, {
     method: "POST",
     body: payload,
@@ -987,7 +985,6 @@ function renderMachineTile(machine, detailed) {
         <div class="machine-tile__identity ${detailed ? "machine-tile__identity--detailed" : ""}">
           <div class="machine-tile__name">${escapeHtml(machine.name)}</div>
         </div>
-        ${renderRadiusEventBadge(machine)}
       </div>
       ${active ? renderAlertInlinePanel(machine, alert, detailed) : renderCreateInlinePanel(machine, detailed)}
     </article>`;
@@ -1270,6 +1267,8 @@ function renderAlertInlinePanel(machine, alert, detailed) {
   const noteMarkup = isOpen
     ? (operatorNoteMarkup ? `<div class="alert-note-summary">${operatorNoteMarkup}</div>` : '<div class="d-none" aria-hidden="true"></div>')
     : (threadMarkup ? `<div class="alert-note-summary">${threadMarkup}</div>` : '<div class="d-none" aria-hidden="true"></div>');
+  const actionLabel = "Close Alert";
+  const showFooterActions = !isOpen;
   return `
     <div class="machine-tile__inline-panel machine-tile__inline-panel--response machine-modal machine-modal--response ${isOpen ? "machine-modal--response-open" : "machine-modal--response-working"} ${detailed ? "machine-tile__inline-panel--detailed" : ""}">
       ${isOpen ? `
@@ -1318,10 +1317,28 @@ function renderAlertInlinePanel(machine, alert, detailed) {
             </div>
           </div>
         ` : ""}
+        <div class="machine-modal__section machine-modal__section--response-note-entry">
+          <div class="machine-tile__section-copy machine-tile__section-copy--note">
+            <div class="machine-modal__response-label">Add note</div>
+            <div class="machine-tile__section-description">Append context before you act.</div>
+          </div>
+          <textarea class="form-control machine-tile__note-input" data-note-kind="alert" rows="2" placeholder="Append note before acknowledge or close">${escapeHtml(state.alertNoteDraft)}</textarea>
+        </div>
         <div class="machine-modal__section machine-modal__section--timer-hero">
           <div class="machine-modal__timer-hero-label">Elapsed timer</div>
           <div class="machine-modal__timer-hero-value machine-tile__timer" data-live-timer="true" data-live-timer-format="alert-duration" data-elapsed-seconds="${Math.max(0, Math.floor(alert.elapsed_seconds || 0))}">${escapeHtml(liveTimerText)}</div>
         </div>
+        ${showFooterActions ? `
+          <div class="modal-footer machine-modal__footer machine-tile__inline-actions">
+            <button class="btn btn-danger btn-lg machine-modal__footer-btn" type="button" data-inline-action="act-on-alert">${actionLabel}</button>
+            <button class="btn btn-outline-secondary btn-lg machine-modal__footer-btn" type="button" data-inline-action="close-panel">Close Panel</button>
+          </div>
+        ` : `
+          <div class="machine-modal__section machine-modal__section--response-waiting machine-modal__section--response-waiting--closed">
+            <div class="machine-modal__response-waiting-title">Awaiting acknowledgement</div>
+            <div class="machine-modal__response-waiting-subtitle">Close Alert appears after the response is acknowledged.</div>
+          </div>
+        `}
       </div>
     </div>`;
 }
