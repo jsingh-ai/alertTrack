@@ -16,27 +16,32 @@ def register_socket_events(socketio):
         return
     socketio._andon_events_registered = True
 
+    def _socket_debug_enabled() -> bool:
+        return bool(current_app.config.get("ANDON_SOCKET_DEBUG_LOGS"))
+
     @socketio.on("connect")
     def on_connect():
         if not is_authenticated():
             disconnect()
             return
-        current_app.logger.debug(
-            "Socket.IO client connected sid=%s ip=%s namespace=%s",
-            getattr(request, "sid", None),
-            request.remote_addr,
-            getattr(request, "namespace", "/"),
-        )
+        if _socket_debug_enabled():
+            current_app.logger.debug(
+                "Socket.IO client connected sid=%s ip=%s namespace=%s",
+                getattr(request, "sid", None),
+                request.remote_addr,
+                getattr(request, "namespace", "/"),
+            )
         emit("connected", {"success": True})
 
     @socketio.on("disconnect")
     def on_disconnect():
-        current_app.logger.debug(
-            "Socket.IO client disconnected sid=%s ip=%s namespace=%s",
-            getattr(request, "sid", None),
-            request.remote_addr,
-            getattr(request, "namespace", "/"),
-        )
+        if _socket_debug_enabled():
+            current_app.logger.debug(
+                "Socket.IO client disconnected sid=%s ip=%s namespace=%s",
+                getattr(request, "sid", None),
+                request.remote_addr,
+                getattr(request, "namespace", "/"),
+            )
 
     @socketio.on("join_company_room")
     def on_join_company_room(payload=None):
@@ -66,13 +71,14 @@ def register_socket_events(socketio):
             )
             return
         duration_ms = (time.perf_counter() - started_at) * 1000
-        current_app.logger.debug(
-            "PERF socket_join sid=%s room=%s company_id=%s duration_ms=%.1f",
-            getattr(request, "sid", None),
-            room_type,
-            company_id,
-            duration_ms,
-        )
+        if _socket_debug_enabled():
+            current_app.logger.debug(
+                "PERF socket_join sid=%s room=%s company_id=%s duration_ms=%.1f",
+                getattr(request, "sid", None),
+                room_type,
+                company_id,
+                duration_ms,
+            )
         emit("joined_company_room", {"room": room, "company_id": company_id})
 
     @socketio.on("leave_company_room")
@@ -88,9 +94,10 @@ def register_socket_events(socketio):
         try:
             leave_room(room)
         except (ValueError, KeyError):
-            current_app.logger.debug(
-                "Socket.IO leave_room skipped for disconnected sid=%s namespace=%s room=%s",
-                getattr(request, "sid", None),
-                getattr(request, "namespace", "/"),
-                room,
-            )
+            if _socket_debug_enabled():
+                current_app.logger.debug(
+                    "Socket.IO leave_room skipped for disconnected sid=%s namespace=%s room=%s",
+                    getattr(request, "sid", None),
+                    getattr(request, "namespace", "/"),
+                    room,
+                )

@@ -47,6 +47,12 @@ class AlertServiceError(ValueError):
         self.data = data or {}
 
 
+def _deep_alert_debug_enabled() -> bool:
+    return bool(current_app.config.get("ANDON_PERF_LOGS")) and bool(
+        current_app.config.get("ANDON_DEEP_DEBUG_ALERT_LIFECYCLE")
+    )
+
+
 def utc_now():
     return datetime.now(timezone.utc)
 
@@ -166,7 +172,7 @@ def _perf_log_alert_mutation(action: str, metrics: dict) -> None:
 
 def _perf_alert_step(action: str, step: str, started_at: float, previous_at: float, *, alert_id=None, company_id=None, machine_id=None):
     now = time.perf_counter()
-    if current_app.config.get("ANDON_PERF_LOGS"):
+    if _deep_alert_debug_enabled():
         current_app.logger.debug(
             "PERF alert_%s_step step=%s elapsed_ms_from_start=%.1f delta_ms_from_previous_step=%.1f alert_id=%s company_id=%s machine_id=%s",
             action,
@@ -276,7 +282,7 @@ def _perf_step(
     now = time.perf_counter()
     elapsed_ms = (now - started_at) * 1000
     delta_ms = (now - previous_at) * 1000
-    if current_app.config.get("ANDON_PERF_LOGS"):
+    if _deep_alert_debug_enabled():
         current_app.logger.debug(
             "PERF alert_create_step step=%s elapsed_ms_from_start=%.1f delta_ms_from_previous_step=%.1f alert_id=%s machine_id=%s company_id=%s",
             step,
@@ -290,9 +296,7 @@ def _perf_step(
 
 
 def _perf_pg_diagnostics(tag: str) -> None:
-    if not current_app.config.get("ANDON_PERF_LOGS"):
-        return
-    if db.engine.dialect.name != "postgresql":
+    if not _deep_alert_debug_enabled() or db.engine.dialect.name != "postgresql":
         return
     try:
         backend_pid = db.session.execute(text("SELECT pg_backend_pid()")).scalar_one()
@@ -457,19 +461,19 @@ def create_alert(payload: dict, metrics: dict | None = None):
     gap_started_at = time.perf_counter()
     previous_step_at = _perf_step("gap_enter_after_duplicate", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     if not department_id and not issue_category:
-        if current_app.config.get("ANDON_PERF_LOGS"):
+        if _deep_alert_debug_enabled():
             current_app.logger.debug(
                 "PERF alert_create_category_fallback query_ms=0.0 used=false reason=missing_issue_category_id",
             )
         raise AlertServiceError("issue_category_id is required")
     previous_step_at = _perf_step("gap_after_department_required_check", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
     if issue_category:
-        if current_app.config.get("ANDON_PERF_LOGS"):
+        if _deep_alert_debug_enabled():
             current_app.logger.debug(
                 "PERF alert_create_category_fallback query_ms=0.0 used=false reason=category_id_provided",
             )
     else:
-        if current_app.config.get("ANDON_PERF_LOGS"):
+        if _deep_alert_debug_enabled():
             current_app.logger.debug(
                 "PERF alert_create_category_fallback query_ms=0.0 used=false reason=fallback_disabled",
             )
@@ -498,7 +502,7 @@ def create_alert(payload: dict, metrics: dict | None = None):
     department_id = issue_category.department_id
     gap_ms = (time.perf_counter() - gap_started_at) * 1000
     perf["after_duplicate_to_before_build_ms"] = gap_ms
-    if current_app.config.get("ANDON_PERF_LOGS"):
+    if _deep_alert_debug_enabled():
         current_app.logger.debug(
             "PERF alert_create_gap after_duplicate_to_before_build_ms=%.1f detail=category_fallback_ms:%s",
             gap_ms,
@@ -590,7 +594,7 @@ def create_alert(payload: dict, metrics: dict | None = None):
     previous_step_at = _perf_step("before_cache", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
     cache_started_at = time.perf_counter()
     perf["before_cache_call_ms"] = (cache_started_at - commit_done_at) * 1000
-    if current_app.config.get("ANDON_PERF_LOGS"):
+    if _deep_alert_debug_enabled():
         current_app.logger.debug(
             "PERF alert_create_checkpoint phase=before_cache after_commit_to_cache_start_ms=%.1f alert_id=%s company_id=%s machine_id=%s status=%s created_at=%s",
             perf["before_cache_call_ms"],
@@ -605,7 +609,7 @@ def create_alert(payload: dict, metrics: dict | None = None):
     perf["actual_invalidate_call_ms"] = (cache_call_done_at - cache_started_at) * 1000
     perf["after_cache_call_ms"] = (time.perf_counter() - cache_call_done_at) * 1000
     perf["cache_invalidate_ms"] = perf["before_cache_call_ms"] + perf["actual_invalidate_call_ms"] + perf["after_cache_call_ms"]
-    if current_app.config.get("ANDON_PERF_LOGS"):
+    if _deep_alert_debug_enabled():
         current_app.logger.debug(
             "PERF alert_create_checkpoint phase=after_cache after_commit_to_cache_start_ms=%.1f actual_cache_call_ms=%.1f after_cache_call_ms=%.1f alert_id=%s",
             perf["before_cache_call_ms"],
@@ -628,7 +632,7 @@ def create_alert(payload: dict, metrics: dict | None = None):
     perf["total_ms"] = (time.perf_counter() - started_at) * 1000
     summed_known = sum(float(value or 0.0) for value in known_segments.values())
     unexplained = max(0.0, perf["total_ms"] - summed_known)
-    if current_app.config.get("ANDON_PERF_LOGS"):
+    if _deep_alert_debug_enabled():
         current_app.logger.debug(
             "PERF alert_create_reconcile wall_clock_total_ms=%.1f summed_known_segments_ms=%.1f unexplained_gap_ms=%.1f",
             perf["total_ms"],
