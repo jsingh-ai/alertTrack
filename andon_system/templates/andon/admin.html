@@ -680,26 +680,20 @@
   function pendingToastMessage(kind, form) {
     const row = form?.closest("tr");
     if (kind === "department-create") return "Adding department...";
-    if (kind === "department-toggle") return "Updating department status...";
     if (kind === "department-pager-token-rotate") return "Generating pager token...";
     if (kind === "department-pager-token-toggle") return "Updating pager token status...";
     if (kind === "department-update") return "Updating department...";
     if (kind === "department-delete") return `Removing department ${row?.querySelector("[data-department-filter]")?.textContent?.trim() || ""}...`.trim();
     if (kind === "machine-group-create") return "Adding machine group...";
-    if (kind === "machine-group-toggle") return "Updating machine group status...";
     if (kind === "machine-group-update") return "Updating machine group...";
     if (kind === "machine-group-delete") return `Removing machine group ${row?.dataset.machineGroupName || ""}...`.trim();
     if (kind === "machine-create") return "Adding machine...";
-    if (kind === "machine-toggle") return "Updating machine status...";
     if (kind === "machine-delete") return "Removing machine...";
     if (kind === "issue-create") return "Adding issue...";
-    if (kind === "issue-toggle") return "Updating issue status...";
     if (kind === "issue-delete") return "Removing issue...";
     if (kind === "user-create") return "Adding user...";
-    if (kind === "user-toggle") return "Updating user status...";
     if (kind === "user-delete") return "Removing user...";
     if (kind === "escalation-update") return "Updating escalation rule...";
-    if (kind === "escalation-toggle") return "Updating escalation rule status...";
     return "";
   }
 

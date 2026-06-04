@@ -161,6 +161,79 @@ def _pager_device_payload(company_id: int, department_id: int) -> dict:
     }
 
 
+def _machine_payload(company_id: int, machine_id: int) -> dict | None:
+    row = (
+        db.session.query(
+            Machine.id,
+            Machine.name,
+            Machine.machine_type,
+            Machine.department_id,
+            Machine.is_active,
+            Department.name.label("department_name"),
+        )
+        .outerjoin(Department, Department.id == Machine.department_id)
+        .filter(Machine.company_id == company_id, Machine.id == machine_id)
+        .one_or_none()
+    )
+    if row is None:
+        return None
+    return {
+        "id": row.id,
+        "name": row.name,
+        "machine_type": row.machine_type,
+        "machine_group": row.machine_type,
+        "department_id": row.department_id,
+        "department_name": row.department_name,
+        "is_active": bool(row.is_active),
+    }
+
+
+def _issue_problem_payload(company_id: int, problem_id: int) -> dict | None:
+    row = (
+        db.session.query(
+            IssueProblem.id,
+            IssueProblem.name,
+            IssueProblem.is_active,
+            IssueCategory.department_id,
+            Department.name.label("department_name"),
+        )
+        .join(IssueCategory, IssueProblem.category_id == IssueCategory.id)
+        .join(Department, Department.id == IssueCategory.department_id)
+        .filter(IssueProblem.company_id == company_id, IssueProblem.id == problem_id)
+        .one_or_none()
+    )
+    if row is None:
+        return None
+    return {
+        "id": row.id,
+        "name": row.name,
+        "is_active": bool(row.is_active),
+        "department_id": row.department_id,
+        "department_name": row.department_name,
+    }
+
+
+def _escalation_rule_payload(company_id: int, rule_id: int) -> dict | None:
+    row = (
+        db.session.query(
+            EscalationRule.id,
+            EscalationRule.level,
+            EscalationRule.delay_seconds,
+            EscalationRule.is_active,
+        )
+        .filter(EscalationRule.company_id == company_id, EscalationRule.id == rule_id)
+        .one_or_none()
+    )
+    if row is None:
+        return None
+    return {
+        "id": row.id,
+        "level": row.level,
+        "delay_seconds": row.delay_seconds,
+        "is_active": bool(row.is_active),
+    }
+
+
 def _machine_code_from_name(name: str, company_id: int | None) -> str:
     base = "".join(ch if ch.isalnum() else "-" for ch in name.upper()).strip("-")
     base = base or "MACHINE"
@@ -667,26 +740,59 @@ def create_machine():
 
 @admin_bp.post("/machine/<int:machine_id>/toggle")
 def toggle_machine(machine_id):
+    started_at = time.perf_counter()
     company_id = _company_id()
-    machine = Machine.query.filter_by(id=machine_id, company_id=company_id).one_or_none()
-    if not machine:
-        return _error_or_404("Machine not found")
-    machine.is_active = not machine.is_active
-    db.session.commit()
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        row = db.session.execute(
+            update(Machine)
+            .where(Machine.id == machine_id, Machine.company_id == company_id)
+            .values(is_active=~Machine.is_active)
+            .returning(Machine.id, Machine.is_active),
+        ).first()
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if row is None:
+            db.session.rollback()
+            return _error_or_404("Machine not found")
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
+
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
+        payload_started_at = time.perf_counter()
+        machine_payload = _machine_payload(company_id, machine_id)
+        if machine_payload is None:
+            return _error_or_404("Machine not found")
+        payload_ms = (time.perf_counter() - payload_started_at) * 1000
+        _log_admin_mutation_perf(
+            "toggle_machine",
+            started_at,
+            company_id=company_id,
+            machine_id=machine_id,
+            lookup_ms=f"{lookup_ms:.1f}",
+            commit_ms=f"{commit_ms:.1f}",
+            invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+            payload_ms=f"{payload_ms:.1f}",
+        )
         return _json_response(
             "Machine updated",
-            machine={
-                "id": machine.id,
-                "name": machine.name,
-                "machine_type": machine.machine_type,
-                "machine_group": machine.machine_type,
-                "department_id": machine.department_id,
-                "department_name": machine.department.name if machine.department else None,
-                "is_active": machine.is_active,
-            },
+            machine=machine_payload,
         )
+    _log_admin_mutation_perf(
+        "toggle_machine",
+        started_at,
+        company_id=company_id,
+        machine_id=machine_id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("Machine updated", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -898,23 +1004,52 @@ def delete_machine_group(group_id):
 
 @admin_bp.post("/machine-type/<string:machine_type>/toggle")
 def toggle_machine_type(machine_type):
+    started_at = time.perf_counter()
     company_id = _company_id()
-    machines = Machine.query.filter(Machine.company_id == company_id, Machine.machine_type == machine_type).all()
-    if not machines:
-        flash("Machine group not found", "warning")
-        return redirect(url_for("pages.admin_page"))
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        target_state = request.form.get("is_active")
+        if target_state in [None, ""]:
+            current_state = db.session.query(func.bool_and(Machine.is_active)).filter(
+                Machine.company_id == company_id,
+                Machine.machine_type == machine_type,
+            ).scalar()
+            if current_state is None:
+                db.session.rollback()
+                flash("Machine group not found", "warning")
+                return redirect(url_for("pages.admin_page"))
+            target_value = not bool(current_state)
+        else:
+            target_value = target_state.lower() in {"1", "true", "yes", "on"}
+        result = db.session.execute(
+            update(Machine)
+            .where(Machine.company_id == company_id, Machine.machine_type == machine_type)
+            .values(is_active=target_value),
+        )
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if (result.rowcount or 0) == 0:
+            db.session.rollback()
+            flash("Machine group not found", "warning")
+            return redirect(url_for("pages.admin_page"))
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
 
-    target_state = request.form.get("is_active")
-    if target_state in [None, ""]:
-        target_value = not all(machine.is_active for machine in machines)
-    else:
-        target_value = target_state.lower() in {"1", "true", "yes", "on"}
-
-    for machine in machines:
-        machine.is_active = target_value
-
-    db.session.commit()
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
+    _log_admin_mutation_perf(
+        "toggle_machine_type",
+        started_at,
+        company_id=company_id,
+        machine_type=machine_type,
+        lookup_ms=f"{lookup_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash(f"{machine_type} group updated", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -1256,24 +1391,59 @@ def create_problem():
 
 @admin_bp.post("/problem/<int:problem_id>/toggle")
 def toggle_problem(problem_id):
+    started_at = time.perf_counter()
     company_id = _company_id()
-    problem = IssueProblem.query.filter_by(id=problem_id, company_id=company_id).one_or_none()
-    if not problem:
-        return _error_or_404("Issue problem not found")
-    problem.is_active = not problem.is_active
-    db.session.commit()
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        row = db.session.execute(
+            update(IssueProblem)
+            .where(IssueProblem.id == problem_id, IssueProblem.company_id == company_id)
+            .values(is_active=~IssueProblem.is_active)
+            .returning(IssueProblem.id, IssueProblem.is_active),
+        ).first()
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if row is None:
+            db.session.rollback()
+            return _error_or_404("Issue problem not found")
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
+
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
+        payload_started_at = time.perf_counter()
+        problem_payload = _issue_problem_payload(company_id, problem_id)
+        if problem_payload is None:
+            return _error_or_404("Issue problem not found")
+        payload_ms = (time.perf_counter() - payload_started_at) * 1000
+        _log_admin_mutation_perf(
+            "toggle_problem",
+            started_at,
+            company_id=company_id,
+            problem_id=problem_id,
+            lookup_ms=f"{lookup_ms:.1f}",
+            commit_ms=f"{commit_ms:.1f}",
+            invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+            payload_ms=f"{payload_ms:.1f}",
+        )
         return _json_response(
             "Issue problem updated",
-            problem={
-                "id": problem.id,
-                "name": problem.name,
-                "is_active": problem.is_active,
-                "department_id": problem.category.department_id if problem.category else None,
-                "department_name": problem.category.department.name if problem.category and problem.category.department else None,
-            },
+            problem=problem_payload,
         )
+    _log_admin_mutation_perf(
+        "toggle_problem",
+        started_at,
+        company_id=company_id,
+        problem_id=problem_id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("Issue problem updated", "success")
     return redirect(url_for("pages.admin_page"))
 
@@ -1343,22 +1513,55 @@ def update_escalation_rule(rule_id):
 
 @admin_bp.post("/escalation/<int:rule_id>/toggle")
 def toggle_escalation_rule(rule_id):
+    started_at = time.perf_counter()
     company_id = _company_id()
-    rule = EscalationRule.query.filter_by(id=rule_id, company_id=company_id).one_or_none()
-    if not rule:
-        return _error_or_404("Escalation rule not found")
-    rule.is_active = not rule.is_active
-    db.session.commit()
+    try:
+        lookup_started_at = time.perf_counter()
+        _configure_admin_pg_transaction()
+        row = db.session.execute(
+            update(EscalationRule)
+            .where(EscalationRule.id == rule_id, EscalationRule.company_id == company_id)
+            .values(is_active=~EscalationRule.is_active)
+            .returning(EscalationRule.id, EscalationRule.level, EscalationRule.delay_seconds, EscalationRule.is_active),
+        ).first()
+        lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+        if row is None:
+            db.session.rollback()
+            return _error_or_404("Escalation rule not found")
+        commit_started_at = time.perf_counter()
+        db.session.commit()
+        commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except OperationalError:
+        return _admin_mutation_busy_response()
+
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
+        rule_payload = _escalation_rule_payload(company_id, rule_id)
+        if rule_payload is None:
+          return _error_or_404("Escalation rule not found")
+        _log_admin_mutation_perf(
+            "toggle_escalation_rule",
+            started_at,
+            company_id=company_id,
+            rule_id=rule_id,
+            lookup_ms=f"{lookup_ms:.1f}",
+            commit_ms=f"{commit_ms:.1f}",
+            invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+        )
         return _json_response(
             "Escalation rule updated",
-            rule={
-                "id": rule.id,
-                "level": rule.level,
-                "delay_seconds": rule.delay_seconds,
-                "is_active": rule.is_active,
-            },
+            rule=rule_payload,
         )
+    _log_admin_mutation_perf(
+        "toggle_escalation_rule",
+        started_at,
+        company_id=company_id,
+        rule_id=rule_id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("Escalation rule updated", "success")
     return redirect(url_for("pages.admin_page"))
