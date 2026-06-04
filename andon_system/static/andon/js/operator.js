@@ -11,6 +11,7 @@ const operatorSnapshotCacheKey = `andon-operator-snapshot-cache-v1:${operatorMet
 const operatorMetadataCacheTtlMs = 5 * 60 * 1000;
 const operatorSnapshotCacheTtlMs = 15 * 1000;
 const defaultOperatorMachineGroup = "Press";
+const operatorScriptStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
 
 const machineBoard = document.getElementById("machineBoard");
 const operatorViewToggle = document.querySelector(".operator-page-header__badge");
@@ -86,6 +87,7 @@ let departmentButtonsMarkupCacheValue = "";
 let problemOptionsMarkupCacheKey = "";
 let problemOptionsMarkupCacheValue = "";
 let localMutationRefreshLockUntil = 0;
+let operatorFirstRenderCompleted = false;
 
 function normalizeDepartmentName(name) {
   return String(name || "").trim().toLowerCase();
@@ -124,6 +126,28 @@ async function fetchJson(url, options = {}) {
 function buildNoStoreUrl(url) {
   const separator = String(url).includes("?") ? "&" : "?";
   return `${url}${separator}t=${Date.now()}`;
+}
+
+function logOperatorTiming(stage, details = {}) {
+  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  console.info("[operator timing]", stage, {
+    sinceScriptMs: Math.round(now - operatorScriptStartedAt),
+    ...details,
+  });
+}
+
+function buildOperatorSnapshotUrl(options = {}) {
+  const includeRadius = options.includeRadius !== false;
+  const includeAlerts = options.includeAlerts !== false;
+  const params = new URLSearchParams();
+  if (!includeRadius) {
+    params.set("include_radius", "0");
+  }
+  if (!includeAlerts) {
+    params.set("include_alerts", "0");
+  }
+  const query = params.toString();
+  return query ? `${boardUrl}?${query}` : boardUrl;
 }
 
 function departmentNameIncludes(name, ...needles) {
@@ -180,6 +204,7 @@ function handleVisibilityChange() {
 }
 
 async function boot() {
+  logOperatorTiming("script start");
   hydrateOperatorMetadataFromCache();
   hydrateOperatorDepartmentsFromCache();
   hydrateOperatorSnapshotFromCache();
@@ -220,7 +245,12 @@ async function boot() {
   const restorePromise = restoreViewState().catch((_error) => {
     console.warn("Failed to restore operator view state.");
   });
-  const boardPromise = loadBoardState({ force: true }).catch((error) => {
+  const boardPromise = loadBoardState({
+    force: true,
+    includeRadius: false,
+    includeAlerts: false,
+    reason: "initial-shell",
+  }).catch((error) => {
     console.error("Unable to load operator board state.", error);
   });
   const departmentsPromise = loadOperatorDepartments().catch((_error) => {
@@ -230,12 +260,24 @@ async function boot() {
 
   await Promise.allSettled([restorePromise, boardPromise]);
   normalizeViewState();
+  logOperatorTiming("first render start", {
+    machineCount: Array.isArray(state.board.machines) ? state.board.machines.length : 0,
+  });
   renderViewControls();
   renderBoard();
+  operatorFirstRenderCompleted = true;
+  logOperatorTiming("first render complete", {
+    machineCount: Array.isArray(state.board.machines) ? state.board.machines.length : 0,
+  });
 
   void departmentsPromise.then(() => {
     normalizeViewState();
     renderBoard();
+  });
+  void refreshBoardState({
+    includeRadius: true,
+    includeAlerts: true,
+    reason: "initial-hydrate",
   });
   scheduleOperatorMetadataWarmup();
 }
@@ -317,7 +359,14 @@ function syncSelectedEntitiesFromBoard() {
 
 async function loadBoardState(options = {}) {
   const force = Boolean(options.force);
+  const includeRadius = options.includeRadius !== false;
+  const includeAlerts = options.includeAlerts !== false;
+  const reason = options.reason || "board-load";
   if (!force && !state.boardLoaded && hydrateOperatorSnapshotFromCache()) {
+    logOperatorTiming("snapshot cache hydrate", {
+      reason,
+      machineCount: Array.isArray(state.board.machines) ? state.board.machines.length : 0,
+    });
     return;
   }
   if (operatorBoardLoadPromise) {
@@ -328,17 +377,56 @@ async function loadBoardState(options = {}) {
   operatorBoardLoadPromise = (async () => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 10000);
+    const requestUrl = buildNoStoreUrl(buildOperatorSnapshotUrl({ includeRadius, includeAlerts }));
+    const fetchStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    logOperatorTiming("snapshot fetch start", {
+      reason,
+      includeRadius,
+      includeAlerts,
+    });
     try {
-      const data = await fetchJson(buildNoStoreUrl(boardUrl), {
+      const response = await fetch(requestUrl, {
         cache: "no-store",
+        credentials: "same-origin",
+        headers: csrfHeaders({}),
         signal: controller.signal,
       });
+      const fetchResponseAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+      logOperatorTiming("snapshot response received", {
+        reason,
+        includeRadius,
+        includeAlerts,
+        fetchMs: Math.round(fetchResponseAt - fetchStartedAt),
+        status: response.status,
+      });
+      let parsed = null;
+      try {
+        parsed = await response.json();
+      } catch (_error) {
+        parsed = null;
+      }
+      const jsonParsedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+      logOperatorTiming("snapshot json parsed", {
+        reason,
+        includeRadius,
+        includeAlerts,
+        parseMs: Math.round(jsonParsedAt - fetchResponseAt),
+      });
+      if (!response.ok) {
+        throw new Error(parsed?.error?.message || `Request failed (${response.status})`);
+      }
+      if (parsed?.success === false) {
+        throw new Error(parsed?.error?.message || "Request failed");
+      }
+      const data = parsed?.data ?? parsed;
       state.board = data || state.board;
       state.boardLoaded = true;
       state.boardLoadFailed = false;
       state.refreshedAt = Date.now();
       syncSelectedEntitiesFromBoard();
-      setCachedOperatorSnapshot(state.board);
+      if (includeRadius && includeAlerts) {
+        setCachedOperatorSnapshot(state.board);
+      }
     } catch (error) {
       state.boardLoadFailed = true;
       if (!state.boardLoaded) {
@@ -1601,7 +1689,7 @@ function renderAlertTimerBlocks(alert) {
     </div>`;
 }
 
-async function refreshBoardState() {
+async function refreshBoardState(options = {}) {
   if (operatorRefreshPromise) {
     operatorRefreshQueued = true;
     await operatorRefreshPromise;
@@ -1611,7 +1699,12 @@ async function refreshBoardState() {
   operatorRefreshInFlight = true;
   operatorRefreshPromise = (async () => {
     try {
-      await loadBoardState({ force: true });
+      await loadBoardState({
+        force: true,
+        includeRadius: options.includeRadius !== false,
+        includeAlerts: options.includeAlerts !== false,
+        reason: options.reason || "refresh",
+      });
       normalizeViewState();
       renderViewControls();
       renderBoard();

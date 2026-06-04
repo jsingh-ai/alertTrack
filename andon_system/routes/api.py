@@ -275,6 +275,9 @@ def operator_snapshot():
     scope = get_scope_filters(membership=membership)
     scope_ms = (time.perf_counter() - scope_started_at) * 1000
 
+    include_radius = str(request.args.get("include_radius") or "").strip().lower() not in {"0", "false", "no", "off"}
+    include_alerts = str(request.args.get("include_alerts") or "").strip().lower() not in {"0", "false", "no", "off"}
+
     service_metrics = {}
     service_started_at = time.perf_counter()
     payload = build_operator_snapshot(
@@ -283,6 +286,8 @@ def operator_snapshot():
         membership=membership,
         scope=scope,
         metrics=service_metrics,
+        include_radius=include_radius,
+        include_alerts=include_alerts,
     )
     service_ms = (time.perf_counter() - service_started_at) * 1000
 
@@ -297,7 +302,7 @@ def operator_snapshot():
         current_app.logger.debug(
             "PERF operator_snapshot access_ms=%.1f user_ms=%.1f company_ms=%.1f membership_ms=%.1f scope_ms=%.1f "
             "service_ms=%.1f alert_query_ms=%s machine_query_ms=%s board_query_ms=%s created_notes_query_ms=%s "
-            "serialize_ms=%s jsonify_ms=%.1f cache_lookup_ms=%s cache_store_ms=%s total_ms=%.1f cache=%s "
+            "serialize_ms=%s jsonify_ms=%.1f cache_lookup_ms=%s cache_store_ms=%s total_ms=%.1f cache=%s include_radius=%s include_alerts=%s "
             "active_alert_count=%s filtered_alert_count=%s visible_machine_count=%s company_id=%s user_id=%s",
             access_ms,
             user_ms,
@@ -315,6 +320,8 @@ def operator_snapshot():
             service_metrics.get("cache_store_ms"),
             (time.perf_counter() - started_at) * 1000,
             service_metrics.get("cache", "unknown"),
+            include_radius,
+            include_alerts,
             service_metrics.get("active_alert_count"),
             service_metrics.get("filtered_alert_count"),
             counts.get("machines"),

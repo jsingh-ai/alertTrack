@@ -111,13 +111,23 @@ def build_board_state(include_metadata: bool = True):
     return result
 
 
-def build_operator_snapshot(company_id=None, current_user=None, membership=None, scope=None, metrics: dict | None = None):
+def build_operator_snapshot(
+    company_id=None,
+    current_user=None,
+    membership=None,
+    scope=None,
+    metrics: dict | None = None,
+    *,
+    include_radius: bool = True,
+    include_alerts: bool = True,
+):
     started_at = time.perf_counter()
     company_id = company_id if company_id is not None else get_current_company_id()
     current_user = current_user or get_authenticated_user()
     membership = membership or get_current_membership(user=current_user)
     scope = scope or get_scope_filters(membership=membership)
     cache_key = _operator_snapshot_cache_key(company_id, current_user, membership, scope)
+    cache_key = (*cache_key, bool(include_radius), bool(include_alerts))
 
     cache_lookup_started_at = time.perf_counter()
     cached = get_cached(cache_key)
@@ -141,9 +151,9 @@ def build_operator_snapshot(company_id=None, current_user=None, membership=None,
     context_metrics = {}
     context = _load_board_context(
         company_id,
-        include_alerts=True,
+        include_alerts=include_alerts,
         include_metadata=False,
-        include_radius=True,
+        include_radius=include_radius,
         membership=membership,
         scope=scope,
         metrics=context_metrics,
@@ -172,6 +182,8 @@ def build_operator_snapshot(company_id=None, current_user=None, membership=None,
         metrics["cache_store_ms"] = round(cache_store_ms, 1)
         metrics["cache_ttl_seconds"] = ttl_seconds
         metrics["counts"] = {"machines": len(result["machines"])}
+        metrics["include_radius"] = bool(include_radius)
+        metrics["include_alerts"] = bool(include_alerts)
     _perf_log(
         "operator_snapshot(service)",
         started_at,
@@ -180,6 +192,8 @@ def build_operator_snapshot(company_id=None, current_user=None, membership=None,
         user_id=getattr(current_user, "id", None),
         role=getattr(membership, "role", None),
         machines=len(result["machines"]),
+        include_radius=bool(include_radius),
+        include_alerts=bool(include_alerts),
     )
     return result
 
