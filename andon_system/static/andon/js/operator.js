@@ -1373,11 +1373,11 @@ function renderAlertInlinePanel(machine, alert, detailed) {
             <div class="machine-modal__response-waiting-subtitle">Close Alert appears after the response is acknowledged.</div>
           </div>
         ` : `
-          <div class="machine-modal__close-note-panel machine-modal__close-note-panel--existing">
+          <div class="machine-modal__existing-note">
             <div class="machine-modal__response-label">Note</div>
             <div class="machine-modal__close-row-preview">${closeNotePreviewMarkup}</div>
           </div>
-          <div class="machine-modal__close-note-panel machine-modal__close-note-panel--append">
+          <div class="machine-modal__append-note">
             <div class="machine-modal__response-label">Add note</div>
             <textarea class="form-control machine-tile__note-input machine-modal__close-note" data-note-kind="alert" rows="2" placeholder="Append note before closing">${escapeHtml(state.alertNoteDraft)}</textarea>
           </div>
