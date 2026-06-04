@@ -92,6 +92,29 @@ function getDepartmentLabel(name) {
   return departmentLabelMap[normalizedName] || `Call ${rawName}`;
 }
 
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {
+    credentials: "same-origin",
+    ...options,
+    headers: csrfHeaders({
+      ...(options.headers || {}),
+    }),
+  });
+  let data = null;
+  try {
+    data = await response.json();
+  } catch (_error) {
+    data = null;
+  }
+  if (!response.ok) {
+    throw new Error(data?.error?.message || `Request failed (${response.status})`);
+  }
+  if (data?.success === false) {
+    throw new Error(data?.error?.message || "Request failed");
+  }
+  return data?.data ?? data;
+}
+
 function departmentNameIncludes(name, ...needles) {
   const normalized = normalizeDepartmentName(name);
   return needles.some((needle) => normalized.includes(String(needle || "").trim().toLowerCase()));
@@ -725,51 +748,39 @@ async function createAlertFromModal() {
 }
 
 async function actOnActiveAlert() {
-  const activeAlert = state.selectedAlert || state.board.machines.find((machine) => Number(machine.id) === Number(state.selectedMachine?.id))?.active_alert;
-  const alertId = activeAlert?.id;
-  if (!alertId || !activeAlert) return;
-  if (activeAlert.status === "OPEN") {
-    window.alert("This alert must be acknowledged from the board before it can be closed here.");
-    return;
-  }
-  const responderUserId = activeAlert.responder_user_id || state.selectedAlertUserId;
-  const payload = new FormData();
-  if (responderUserId) {
-    payload.append("responder_user_id", String(responderUserId));
-  }
-  payload.append("responder_name_text", "");
-  if (state.alertNoteDraft.trim()) {
-    payload.append("note", state.alertNoteDraft.trim());
-  }
-  const endpoint = `/api/andon/alerts/${alertId}/resolve`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    body: payload,
-    headers: csrfHeaders(),
-    credentials: "same-origin",
-  });
-  let data = null;
   try {
-    data = await response.json();
-  } catch (_error) {
-    data = null;
+    const activeAlert = state.selectedAlert || state.board.machines.find((machine) => Number(machine.id) === Number(state.selectedMachine?.id))?.active_alert;
+    const alertId = activeAlert?.id;
+    if (!alertId || !activeAlert) return;
+    if (activeAlert.status === "OPEN") {
+      window.alert("This alert must be acknowledged from the board before it can be closed here.");
+      return;
+    }
+    const responderUserId = activeAlert.responder_user_id || state.selectedAlertUserId;
+    const payload = {};
+    if (responderUserId) {
+      payload.responder_user_id = Number(responderUserId);
+    }
+    const note = state.alertNoteDraft.trim();
+    if (note) {
+      payload.note = note;
+    }
+    await fetchJson(`/api/andon/alerts/${alertId}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const machine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine?.id));
+    if (machine) {
+      machine.active_alert = null;
+    }
+    closeMachinePanel();
+    localMutationRefreshLockUntil = Date.now() + 700;
+    window.AndonRefreshBus?.notify();
+    renderBoard();
+  } catch (error) {
+    window.alert(error?.message || "Unable to close alert.");
   }
-  if (!response.ok) {
-    alert(data?.error?.message || "Unable to close alert.");
-    return;
-  }
-  if (!data?.success) {
-    alert(data?.error?.message || "Unable to close alert.");
-    return;
-  }
-  const machine = state.board.machines.find((row) => Number(row.id) === Number(state.selectedMachine?.id));
-  if (machine) {
-    machine.active_alert = null;
-  }
-  closeMachinePanel();
-  localMutationRefreshLockUntil = Date.now() + 700;
-  window.AndonRefreshBus?.notify();
-  renderBoard();
 }
 
 function renderBoard() {
