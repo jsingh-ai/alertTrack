@@ -7,7 +7,9 @@ const operatorMetadataCacheScope = [
 ].join(":");
 const operatorMetadataCacheKey = `andon-operator-metadata-cache-v1:${operatorMetadataCacheScope}`;
 const operatorDepartmentsCacheKey = `andon-operator-departments-cache-v1:${operatorMetadataCacheScope}`;
+const operatorSnapshotCacheKey = `andon-operator-snapshot-cache-v1:${operatorMetadataCacheScope}`;
 const operatorMetadataCacheTtlMs = 5 * 60 * 1000;
+const operatorSnapshotCacheTtlMs = 15 * 1000;
 const defaultOperatorMachineGroup = "Press";
 
 const machineBoard = document.getElementById("machineBoard");
@@ -51,6 +53,8 @@ const state = {
   createNoteDraft: "",
   alertNoteDraft: "",
   refreshedAt: null,
+  boardLoaded: false,
+  boardLoadFailed: false,
   metadataLoaded: false,
   departmentsLoaded: false,
   detailMetadataLoaded: false,
@@ -68,10 +72,12 @@ let operatorCreateTransitionFrameId = null;
 let operatorSingleMachineFitFrameId = null;
 let operatorRefreshInFlight = false;
 let operatorRefreshQueued = false;
+let operatorRefreshPromise = null;
 let operatorInteractionLockUntil = 0;
 let liveTimerNodes = [];
 let operatorMetadataLoadPromise = null;
 let operatorDepartmentsLoadPromise = null;
+let operatorBoardLoadPromise = null;
 let operatorLastPersistedViewKey = "";
 let createAlertInFlight = false;
 let createAlertMachineId = null;
@@ -113,6 +119,11 @@ async function fetchJson(url, options = {}) {
     throw new Error(data?.error?.message || "Request failed");
   }
   return data?.data ?? data;
+}
+
+function buildNoStoreUrl(url) {
+  const separator = String(url).includes("?") ? "&" : "?";
+  return `${url}${separator}t=${Date.now()}`;
 }
 
 function departmentNameIncludes(name, ...needles) {
@@ -171,27 +182,10 @@ function handleVisibilityChange() {
 async function boot() {
   hydrateOperatorMetadataFromCache();
   hydrateOperatorDepartmentsFromCache();
-  const metadataBootstrapPromise = loadOperatorDepartments({ force: true }).catch((_error) => {
-    console.warn("Unable to load operator departments during boot.");
-    return null;
-  });
-  void restoreViewState().then(() => {
-    normalizeViewState();
-    renderViewControls();
-    renderBoard();
-  }).catch((_error) => {
-    console.warn("Failed to restore operator view state.");
-  });
-  await loadBoardState();
-  normalizeViewState();
+  hydrateOperatorSnapshotFromCache();
   wireEvents();
   renderViewControls();
   renderBoard();
-  void metadataBootstrapPromise.then(() => {
-    normalizeViewState();
-    renderViewControls();
-    renderBoard();
-  });
   startElapsedTimers();
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("resize", scheduleSingleMachineFit, { passive: true });
@@ -208,9 +202,13 @@ async function boot() {
         window.sessionStorage.removeItem(operatorDepartmentsCacheKey);
         operatorDepartmentsLoadPromise = null;
         operatorMetadataLoadPromise = null;
-        if (state.selectedMachine || state.selectedAlert) {
-          void loadOperatorDepartments({ force: true }).then(renderBoard).catch(() => {});
-          void loadOperatorMetadata({ force: true }).then(renderBoard).catch(() => {});
+        void loadOperatorDepartments({ force: true }).then(() => {
+          renderBoard();
+        }).catch(() => {});
+        if (state.selectedMachine || state.selectedAlert || state.selectedDepartment) {
+          void loadOperatorMetadata({ force: true }).then(() => {
+            renderBoard();
+          }).catch(() => {});
         }
       }
       scheduleOperatorRefresh();
@@ -218,17 +216,142 @@ async function boot() {
   });
   window.AndonRealtime?.onStatus((status) => setOperatorFallbackPolling(!status.connected));
   setOperatorFallbackPolling(!window.AndonRealtime?.connected);
+
+  const restorePromise = restoreViewState().catch((_error) => {
+    console.warn("Failed to restore operator view state.");
+  });
+  const boardPromise = loadBoardState({ force: true }).catch((error) => {
+    console.error("Unable to load operator board state.", error);
+  });
+  const departmentsPromise = loadOperatorDepartments().catch((_error) => {
+    console.warn("Unable to load operator departments during boot.");
+    return null;
+  });
+
+  await Promise.allSettled([restorePromise, boardPromise]);
+  normalizeViewState();
+  renderViewControls();
+  renderBoard();
+
+  void departmentsPromise.then(() => {
+    normalizeViewState();
+    renderBoard();
+  });
   scheduleOperatorMetadataWarmup();
 }
 
-async function loadBoardState() {
-  const response = await fetch(`${boardUrl}?t=${Date.now()}`, {
-    cache: "no-store",
-    credentials: "same-origin",
-  });
-  const data = await response.json();
-  state.board = data.data || state.board;
+function getCachedOperatorSnapshot() {
+  try {
+    const raw = window.sessionStorage.getItem(operatorSnapshotCacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const cachedAt = Number(parsed.cachedAt || 0);
+    if (!cachedAt || (Date.now() - cachedAt) > operatorSnapshotCacheTtlMs) return null;
+    return parsed.data || null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function setCachedOperatorSnapshot(snapshot) {
+  try {
+    window.sessionStorage.setItem(
+      operatorSnapshotCacheKey,
+      JSON.stringify({ cachedAt: Date.now(), data: snapshot || {} }),
+    );
+  } catch (_error) {
+    // Ignore storage failures in locked-down kiosk environments.
+  }
+}
+
+function hydrateOperatorSnapshotFromCache() {
+  const cached = getCachedOperatorSnapshot();
+  if (!cached || !Array.isArray(cached.machines)) return false;
+  state.board = cached;
+  state.boardLoaded = true;
+  state.boardLoadFailed = false;
   state.refreshedAt = Date.now();
+  return true;
+}
+
+function syncSelectedEntitiesFromBoard() {
+  const machines = state.board.machines || [];
+  const selectedMachineId = Number(state.selectedMachine?.id || 0);
+  if (selectedMachineId) {
+    state.selectedMachine = machines.find((machine) => Number(machine.id) === selectedMachineId) || null;
+  }
+
+  const selectedAlertId = Number(state.selectedAlert?.id || 0);
+  if (!selectedAlertId) {
+    if (state.selectedMachine?.active_alert) {
+      state.selectedAlert = state.selectedMachine.active_alert;
+      state.selectedAlertUserId = state.selectedMachine.active_alert.responder_user_id || state.selectedAlertUserId;
+    }
+    return;
+  }
+
+  let matchedMachine = null;
+  let matchedAlert = null;
+  for (const machine of machines) {
+    if (Number(machine?.active_alert?.id || 0) === selectedAlertId) {
+      matchedMachine = machine;
+      matchedAlert = machine.active_alert;
+      break;
+    }
+  }
+
+  if (!matchedAlert) {
+    state.selectedAlert = null;
+    state.selectedAlertUserId = null;
+    if (state.selectedMachine && !state.selectedMachine.active_alert) {
+      state.alertNoteDraft = "";
+    }
+    return;
+  }
+
+  state.selectedMachine = matchedMachine || state.selectedMachine;
+  state.selectedAlert = matchedAlert;
+  state.selectedAlertUserId = matchedAlert.responder_user_id || state.selectedAlertUserId;
+}
+
+async function loadBoardState(options = {}) {
+  const force = Boolean(options.force);
+  if (!force && !state.boardLoaded && hydrateOperatorSnapshotFromCache()) {
+    return;
+  }
+  if (operatorBoardLoadPromise) {
+    await operatorBoardLoadPromise;
+    return;
+  }
+
+  operatorBoardLoadPromise = (async () => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 10000);
+    try {
+      const data = await fetchJson(buildNoStoreUrl(boardUrl), {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      state.board = data || state.board;
+      state.boardLoaded = true;
+      state.boardLoadFailed = false;
+      state.refreshedAt = Date.now();
+      syncSelectedEntitiesFromBoard();
+      setCachedOperatorSnapshot(state.board);
+    } catch (error) {
+      state.boardLoadFailed = true;
+      if (!state.boardLoaded) {
+        hydrateOperatorSnapshotFromCache();
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeoutId);
+      operatorBoardLoadPromise = null;
+    }
+  })();
+
+  await operatorBoardLoadPromise;
 }
 
 function getCachedOperatorMetadata() {
@@ -334,9 +457,9 @@ async function loadOperatorMetadata(options = {}) {
       if (!force && hydrateOperatorMetadataFromCache()) {
         return;
       }
-      const response = await fetch(operatorMetadataUrl);
-      const data = await response.json();
-      const metadata = data.data || {};
+      const metadata = await fetchJson(buildNoStoreUrl(operatorMetadataUrl), {
+        cache: "no-store",
+      });
       applyOperatorMetadata(metadata, { level: "full" });
       setCachedOperatorMetadata(metadata);
     })().finally(() => {
@@ -354,9 +477,9 @@ async function loadOperatorDepartments(options = {}) {
       if (!force && hydrateOperatorDepartmentsFromCache()) {
         return;
       }
-      const response = await fetch(`${operatorMetadataUrl}?departments_only=1`);
-      const data = await response.json();
-      const metadata = data.data || {};
+      const metadata = await fetchJson(buildNoStoreUrl(`${operatorMetadataUrl}?departments_only=1`), {
+        cache: "no-store",
+      });
       applyOperatorMetadata(metadata, { level: "departments" });
       setCachedOperatorDepartments(metadata);
     })().finally(() => {
@@ -426,11 +549,6 @@ function onBoardClick(event) {
   if (!actionButton) return;
   const action = actionButton.dataset.inlineAction;
   const actionMachineId = Number(actionButton.closest(".operator-machine-tile")?.dataset.machineId || 0);
-  console.log("[operator] inline action click", {
-    action,
-    machineId: actionMachineId || null,
-    alertId: state.selectedAlert?.id || state.board.machines.find((machine) => Number(machine.id) === Number(state.selectedMachine?.id))?.active_alert?.id || null,
-  });
   if (action === "send-message") {
     void createAlertFromModal();
   } else if (action === "act-on-alert") {
@@ -487,7 +605,11 @@ async function openActiveAlertModal(activeAlert, machine) {
   state.createNoteDraft = "";
   state.alertNoteDraft = "";
   renderBoard();
-  void loadOperatorMetadata().then(renderBoard).catch(() => {});
+  if (!state.detailMetadataLoaded) {
+    void loadOperatorMetadata().then(() => {
+      renderBoard();
+    }).catch(() => {});
+  }
 }
 
 async function openCreatePanel(machine) {
@@ -505,7 +627,11 @@ async function openCreatePanel(machine) {
   state.createNoteDraft = "";
   state.alertNoteDraft = "";
   renderBoard();
-  void loadOperatorMetadata().then(renderBoard).catch(() => {});
+  if (!state.detailMetadataLoaded) {
+    void loadOperatorMetadata().then(() => {
+      renderBoard();
+    }).catch(() => {});
+  }
 }
 
 function closeMachinePanel() {
@@ -566,7 +692,7 @@ function onDepartmentButtonClick(button) {
   state.selectedDepartment = department;
   state.selectedProblem = null;
   renderBoard();
-  if (!state.detailMetadataLoaded) {
+  if (!state.detailMetadataLoaded && !operatorMetadataLoadPromise) {
     void loadOperatorMetadata().then(renderBoard).catch(() => {});
   }
 }
@@ -762,31 +888,14 @@ async function actOnActiveAlert(machineId = 0) {
     let liveMachine = state.board.machines.find((machine) => Number(machine.id) === effectiveMachineId);
     let activeAlert = liveMachine?.active_alert || state.selectedAlert || null;
     let alertId = activeAlert?.id;
-    console.log("[operator] actOnActiveAlert start", {
-      machineId: effectiveMachineId || null,
-      selectedMachineId: state.selectedMachine?.id || null,
-      liveMachineId: liveMachine?.id || null,
-      alertId: alertId || null,
-      selectedAlertId: state.selectedAlert?.id || null,
-      activeStatus: activeAlert?.status || null,
-      responderUserId: activeAlert?.responder_user_id || null,
-    });
     if ((!alertId || !activeAlert || !liveMachine?.active_alert) && effectiveMachineId) {
-      console.log("[operator] refreshing board state before resolve", { machineId: effectiveMachineId });
       await refreshBoardState();
       liveMachine = state.board.machines.find((machine) => Number(machine.id) === effectiveMachineId);
       activeAlert = liveMachine?.active_alert || state.selectedAlert || null;
       alertId = activeAlert?.id;
-      console.log("[operator] post-refresh alert lookup", {
-        machineId: effectiveMachineId,
-        liveMachineId: liveMachine?.id || null,
-        alertId: alertId || null,
-        activeStatus: activeAlert?.status || null,
-      });
     }
     if (!alertId || !activeAlert) return;
     if (activeAlert.status === "OPEN") {
-      console.warn("[operator] close blocked because alert is still OPEN", { alertId });
       window.alert("This alert must be acknowledged from the board before it can be closed here.");
       return;
     }
@@ -799,13 +908,11 @@ async function actOnActiveAlert(machineId = 0) {
     if (note) {
       payload.note = note;
     }
-    console.log("[operator] resolve payload", { alertId, payload });
     await fetchJson(`/api/andon/alerts/${alertId}/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    console.log("[operator] resolve succeeded", { alertId });
     if (liveMachine) {
       liveMachine.active_alert = null;
     }
@@ -817,12 +924,25 @@ async function actOnActiveAlert(machineId = 0) {
     window.AndonRefreshBus?.notify();
     renderBoard();
   } catch (error) {
-    console.error("[operator] resolve failed", error);
     window.alert(error?.message || "Unable to close alert.");
   }
 }
 
 function renderBoard() {
+  if (!state.boardLoaded && !state.boardLoadFailed) {
+    machineBoard.innerHTML = renderLoadingBoard();
+    syncLiveTimerNodes();
+    renderStatusDock([], false);
+    return;
+  }
+
+  if (state.boardLoadFailed && !(state.board.machines || []).length) {
+    machineBoard.innerHTML = renderBoardErrorState();
+    syncLiveTimerNodes();
+    renderStatusDock([], false);
+    return;
+  }
+
   const visibleMachines = getVisibleMachines();
   const detailed = isDetailedOperatorView();
   const singleMachineMode = visibleMachines.length === 1;
@@ -1477,29 +1597,31 @@ function renderAlertTimerBlocks(alert) {
 }
 
 async function refreshBoardState() {
-  if (operatorRefreshInFlight) {
+  if (operatorRefreshPromise) {
     operatorRefreshQueued = true;
+    await operatorRefreshPromise;
     return;
   }
 
   operatorRefreshInFlight = true;
-  try {
-    await loadBoardState();
-    normalizeViewState();
-    renderViewControls();
-    renderBoard();
-    void loadOperatorMetadata().then(() => {
+  operatorRefreshPromise = (async () => {
+    try {
+      await loadBoardState({ force: true });
       normalizeViewState();
       renderViewControls();
       renderBoard();
-    }).catch((_error) => {
-      console.warn("Failed to refresh operator metadata.");
-    });
+    } finally {
+      operatorRefreshInFlight = false;
+    }
+  })();
+
+  try {
+    await operatorRefreshPromise;
   } finally {
-    operatorRefreshInFlight = false;
+    operatorRefreshPromise = null;
     if (operatorRefreshQueued) {
       operatorRefreshQueued = false;
-      scheduleOperatorRefresh();
+      void refreshBoardState();
     }
   }
 }
@@ -1554,6 +1676,22 @@ function renderEmptyBoard() {
     <div class="board-empty text-center p-4 p-md-5">
       <div class="h4 mb-2">No machines match this view.</div>
       <div class="small text-secondary">Open Screen View or unlock it to show more machines.</div>
+    </div>`;
+}
+
+function renderLoadingBoard() {
+  return `
+    <div class="board-empty text-center p-4 p-md-5">
+      <div class="h4 mb-2">Loading machines...</div>
+      <div class="small text-secondary">Fetching the latest operator snapshot.</div>
+    </div>`;
+}
+
+function renderBoardErrorState() {
+  return `
+    <div class="board-empty text-center p-4 p-md-5">
+      <div class="h4 mb-2">Operator page unavailable</div>
+      <div class="small text-secondary">The latest machine snapshot could not be loaded. Refresh to retry.</div>
     </div>`;
 }
 

@@ -3457,11 +3457,6 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
   gap: 0.06rem;
 }
 
-body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-close-row {
-  padding: 0;
-  gap: 0.5rem;
-}
-
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__existing-note,
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__append-note {
   gap: 0.18rem;
@@ -3477,11 +3472,6 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
   max-width: none;
   justify-self: stretch;
   padding-inline: 1rem;
-}
-
-body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__close-row-controls {
-  gap: 0.28rem;
-  align-items: center;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__close-note {
@@ -5803,19 +5793,19 @@ body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__id
   padding: 0.48rem 0.55rem;
 }
 
-.machine-modal--response .machine-modal__section--response-close-row {
-  grid-column: 1 / -1;
+.machine-modal--response .machine-modal__existing-note {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.85rem;
-  align-items: stretch;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  box-shadow: none;
+  gap: 0.34rem;
+  align-content: start;
+  min-width: 0;
+  padding: 0.42rem 0.48rem 0.5rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(61, 118, 219, 0.14);
+  background: linear-gradient(180deg, rgba(248, 251, 255, 0.98), rgba(238, 244, 252, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  grid-column: 1 / 3;
 }
 
-.machine-modal--response .machine-modal__existing-note,
 .machine-modal--response .machine-modal__append-note {
   display: grid;
   gap: 0.34rem;
@@ -5826,13 +5816,6 @@ body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__id
   border: 1px solid rgba(61, 118, 219, 0.14);
   background: linear-gradient(180deg, rgba(248, 251, 255, 0.98), rgba(238, 244, 252, 0.96));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
-}
-
-.machine-modal--response .machine-modal__existing-note {
-  grid-column: 1 / 3;
-}
-
-.machine-modal--response .machine-modal__append-note {
   grid-column: 3 / 5;
 }
 
@@ -5850,19 +5833,6 @@ body.operator-shell .machine-modal--response .machine-modal__section--response-c
   max-width: none;
   justify-self: stretch;
   padding-inline: 1.15rem;
-}
-
-.machine-modal--response .machine-modal__close-row-copy {
-  display: grid;
-  gap: 0.32rem;
-  align-content: start;
-  justify-items: stretch;
-  min-height: 2.35rem;
-  padding: 0 0.1rem;
-}
-
-.machine-modal--response .machine-modal__close-row-controls {
-  display: contents;
 }
 
 .machine-modal--response .machine-modal__close-note {
@@ -5927,10 +5897,6 @@ body.operator-shell .machine-modal--response .machine-modal__section--response-c
 .machine-modal--response .machine-tile__note-input {
   min-height: 3rem;
   resize: none;
-}
-
-.machine-modal--response .machine-modal__close-row-controls .machine-modal__footer-btn {
-  min-width: 8.5rem;
 }
 
 .machine-modal--response .machine-modal__footer {
@@ -6410,7 +6376,6 @@ body.board-screen-shell .machine-modal .btn-close:focus-visible {
 .machine-modal--response .machine-modal__section.machine-modal__section--reels,
 .machine-modal--response .machine-modal__section.machine-modal__section--note,
 .machine-modal--response .machine-modal__section.machine-modal__section--response-followup,
-.machine-modal--response .machine-modal__section.machine-modal__section--response-close-row,
 .machine-modal--response .machine-modal__section.machine-modal__section--response-note-entry,
 .machine-modal--response .machine-modal__footer {
   margin-top: 0.2rem;

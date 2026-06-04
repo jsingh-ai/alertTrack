@@ -288,6 +288,8 @@ def operator_snapshot():
 
     jsonify_started_at = time.perf_counter()
     response = jsonify({"success": True, "data": payload})
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     jsonify_ms = (time.perf_counter() - jsonify_started_at) * 1000
 
     if current_app.config.get("ANDON_PERF_LOGS"):
@@ -361,6 +363,8 @@ def operator_metadata():
 
     jsonify_started_at = time.perf_counter()
     response = jsonify({"success": True, "data": payload})
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     jsonify_ms = (time.perf_counter() - jsonify_started_at) * 1000
 
     if current_app.config.get("ANDON_PERF_LOGS"):
