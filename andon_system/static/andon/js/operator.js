@@ -1267,6 +1267,7 @@ function renderAlertInlinePanel(machine, alert, detailed) {
   const noteMarkup = isOpen
     ? (operatorNoteMarkup ? `<div class="alert-note-summary">${operatorNoteMarkup}</div>` : '<div class="d-none" aria-hidden="true"></div>')
     : (threadMarkup ? `<div class="alert-note-summary">${threadMarkup}</div>` : '<div class="d-none" aria-hidden="true"></div>');
+  const closeNotePreviewMarkup = threadMarkup || operatorNoteMarkup || '<div class="machine-modal__close-note-empty">No existing note</div>';
   const actionLabel = "Close Alert";
   return `
     <div class="machine-tile__inline-panel machine-tile__inline-panel--response machine-modal machine-modal--response ${isOpen ? "machine-modal--response-open" : "machine-modal--response-working"} ${detailed ? "machine-tile__inline-panel--detailed" : ""}">
@@ -1311,6 +1312,7 @@ function renderAlertInlinePanel(machine, alert, detailed) {
           <div class="machine-modal__section machine-modal__section--response-close-row">
             <div class="machine-modal__close-row-copy">
               <div class="machine-modal__response-label">Note</div>
+              <div class="machine-modal__close-row-preview">${closeNotePreviewMarkup}</div>
             </div>
             <textarea class="form-control machine-tile__note-input machine-modal__close-note" data-note-kind="alert" rows="2" placeholder="Append note before closing">${escapeHtml(state.alertNoteDraft)}</textarea>
           </div>

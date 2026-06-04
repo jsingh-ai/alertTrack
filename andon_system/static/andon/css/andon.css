@@ -3434,7 +3434,7 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__response-label {
-  margin-bottom: 0.01rem;
+  margin-bottom: 0.14rem;
   font-size: 0.58rem;
 }
 
@@ -3446,6 +3446,10 @@ body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-coun
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--timer-hero {
   min-height: 7.4rem;
   padding: 0.42rem 0.5rem 0.45rem;
+}
+
+body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__timer-hero-value {
+  padding-bottom: 0.32rem;
 }
 
 body.operator-shell.operator-single-machine-mode #machineBoard[data-machine-count="1"] .operator-machine-tile .machine-modal__section--response-note-entry {
@@ -5593,7 +5597,7 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal__response-label {
   margin: 0;
-  margin-bottom: 0.02rem;
+  margin-bottom: 0.18rem;
   font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.09em;
@@ -5649,7 +5653,7 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal__timer-hero-value {
   font-size: clamp(5.6rem, 13vw, 11.5rem);
-  line-height: 0.9;
+  line-height: 0.96;
   font-weight: 900;
   letter-spacing: -0.075em;
   color: #c92a2a;
@@ -5657,6 +5661,7 @@ html[data-theme="light"] .operator-machine-group__count {
   max-width: 100%;
   overflow: hidden;
   font-variant-numeric: tabular-nums;
+  padding-bottom: 0.22rem;
 }
 
 .button-board-shell .operator-machine-tile .machine-modal__timer-hero-value.machine-tile__timer {
@@ -5755,8 +5760,10 @@ html[data-theme="light"] .operator-machine-group__count {
 }
 
 .machine-modal--response .machine-modal__close-row-copy {
-  display: flex;
-  align-items: center;
+  display: grid;
+  gap: 0.2rem;
+  align-content: start;
+  justify-items: stretch;
   min-height: 2.35rem;
   padding: 0 0.1rem;
 }
@@ -5775,6 +5782,28 @@ html[data-theme="light"] .operator-machine-group__count {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.92));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
   resize: none;
+}
+
+.machine-modal--response .machine-modal__close-row-preview {
+  display: flex;
+  align-items: stretch;
+  min-height: 2.35rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(61, 118, 219, 0.16);
+  background: linear-gradient(180deg, rgba(248, 251, 255, 0.96), rgba(238, 244, 252, 0.95));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.machine-modal--response .machine-modal__close-row-preview .machine-tile__thread {
+  margin: 0;
+  width: 100%;
+}
+
+.machine-modal--response .machine-modal__close-row-preview .alert-note-bubble {
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  width: 100%;
 }
 
 .machine-modal--response .machine-modal__followup-group + .machine-modal__followup-group {
@@ -5830,10 +5859,11 @@ html[data-theme="light"] .operator-machine-group__count {
 
 .machine-modal--response .machine-modal__footer-btn--full {
   width: 100%;
-  min-height: 3.6rem;
-  padding: 0.9rem 1rem;
-  font-size: 1.22rem;
-  line-height: 1.05;
+  min-height: 4.2rem !important;
+  padding: 1rem 1.05rem !important;
+  font-size: 1.34rem !important;
+  line-height: 1.08;
+  display: block;
 }
 
 .machine-modal--response .btn.btn-primary.machine-modal__footer-btn--full {
@@ -5851,9 +5881,9 @@ html[data-theme="light"] .operator-machine-group__count {
 
 @media (max-width: 767.98px) {
   .machine-modal--response .machine-modal__footer-btn--full {
-    min-height: 3.3rem;
-    padding: 0.82rem 0.9rem;
-    font-size: 1.08rem;
+    min-height: 3.9rem !important;
+    padding: 0.92rem 0.95rem !important;
+    font-size: 1.2rem !important;
   }
 }
 
