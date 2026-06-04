@@ -131,11 +131,10 @@ def _is_postgresql() -> bool:
 def _configure_admin_pg_transaction(*, lock_timeout_ms: int = 1500, statement_timeout_ms: int = 5000) -> None:
     if not _is_postgresql():
         return
-    db.session.execute(text("SET LOCAL lock_timeout = :lock_timeout"), {"lock_timeout": f"{int(lock_timeout_ms)}ms"})
-    db.session.execute(
-        text("SET LOCAL statement_timeout = :statement_timeout"),
-        {"statement_timeout": f"{int(statement_timeout_ms)}ms"},
-    )
+    safe_lock_timeout_ms = max(1, int(lock_timeout_ms))
+    safe_statement_timeout_ms = max(1, int(statement_timeout_ms))
+    db.session.execute(text(f"SET LOCAL lock_timeout = '{safe_lock_timeout_ms}ms'"))
+    db.session.execute(text(f"SET LOCAL statement_timeout = '{safe_statement_timeout_ms}ms'"))
 
 
 def _admin_mutation_busy_response(message: str = "This record is busy. Please try again.") -> tuple:
