@@ -362,12 +362,12 @@ function scheduleOperatorMetadataWarmup() {
 }
 
 function wireEvents() {
-  machineBoard.addEventListener("click", onBoardClick);
-  machineBoard.addEventListener("input", onBoardInput);
-  operatorMachineGroupSelect.addEventListener("change", onMachineGroupChange);
-  operatorMachineSelect.addEventListener("change", onMachineChange);
-  operatorLockView.addEventListener("click", toggleOperatorViewLock);
-  operatorClearView.addEventListener("click", clearOperatorView);
+  machineBoard?.addEventListener("click", onBoardClick);
+  machineBoard?.addEventListener("input", onBoardInput);
+  operatorMachineGroupSelect?.addEventListener("change", onMachineGroupChange);
+  operatorMachineSelect?.addEventListener("change", onMachineChange);
+  operatorLockView?.addEventListener("click", toggleOperatorViewLock);
+  operatorClearView?.addEventListener("click", clearOperatorView);
   document.addEventListener("click", onDocumentClick);
 }
 
@@ -1557,6 +1557,7 @@ function renderStatusDock(visibleMachines, detailed) {
 }
 
 function renderViewControls() {
+  if (!operatorMachineGroupSelect || !operatorMachineSelect || !operatorLockView) return;
   const machines = [...(state.board.machines || [])].sort((left, right) => left.name.localeCompare(right.name));
   const groups = [...new Set(machines.map((machine) => machine.machine_type).filter(Boolean))].sort((left, right) =>
     left.localeCompare(right),
@@ -1603,6 +1604,7 @@ function buildViewSummary() {
 }
 
 function onMachineGroupChange() {
+  if (!operatorMachineGroupSelect) return;
   if (state.view.locked) return;
   state.view.machineGroup = operatorMachineGroupSelect.value;
   state.view.machineId = "";
@@ -1612,6 +1614,7 @@ function onMachineGroupChange() {
 }
 
 function onMachineChange() {
+  if (!operatorMachineSelect) return;
   if (state.view.locked) return;
   const machineId = operatorMachineSelect.value;
   state.view.machineId = machineId;
@@ -1629,6 +1632,7 @@ function onMachineChange() {
 }
 
 function toggleOperatorViewLock() {
+  if (!operatorLockView) return;
   state.view.locked = !state.view.locked;
   normalizeViewState();
   persistOperatorViewState();
@@ -1637,6 +1641,7 @@ function toggleOperatorViewLock() {
 }
 
 function clearOperatorView() {
+  if (!operatorMachineGroupSelect || !operatorMachineSelect) return;
   state.view.machineGroup = "";
   state.view.machineId = "";
   state.view.locked = false;
