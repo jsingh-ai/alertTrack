@@ -1024,31 +1024,11 @@ def create_alert(payload: dict, metrics: dict | None = None):
     perf["after_cache_call_ms"] = 0.0
     perf["cache_invalidate_ms"] = 0.0
     perf["socket_emit_ms"] = 0.0
-    known_segments["socket_emit_ms"] = perf["socket_emit_ms"]
-    previous_step_at = _perf_step("after_background_side_effects", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
-    previous_step_at = _perf_step("before_return", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
     perf.setdefault("payload_fetch_ms", 0.0)
     perf.setdefault("escalation_check_ms", 0.0)
     perf.setdefault("email_send_ms", 0.0)
     perf.setdefault("notification_ms", 0.0)
     perf["total_ms"] = (time.perf_counter() - started_at) * 1000
-    summed_known = sum(float(value or 0.0) for value in known_segments.values())
-    unexplained = max(0.0, perf["total_ms"] - summed_known)
-    if _deep_alert_debug_enabled():
-        current_app.logger.debug(
-            "PERF alert_create_reconcile wall_clock_total_ms=%.1f summed_known_segments_ms=%.1f unexplained_gap_ms=%.1f",
-            perf["total_ms"],
-            summed_known,
-            unexplained,
-        )
-    _perf_log_create_alert(perf)
-    _perf_step("final_return", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
-    current_app.logger.debug(
-        "SERVICE alert_create returning created_alert_ids=%s existing_alert_count=%s source_department_id=%s",
-        created_alert_ids,
-        len(existing_alert_payloads),
-        getattr(source_department, "id", None),
-    )
     return {
         "created_alerts": created_alert_payloads,
         "existing_alerts": existing_alert_payloads,
