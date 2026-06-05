@@ -429,24 +429,33 @@ def api_create_alert():
     try:
         service_metrics = {}
         write_started_at = time.perf_counter()
-        alert = create_alert(body, metrics=service_metrics)
+        result = create_alert(body, metrics=service_metrics)
         insert_or_update_ms = (time.perf_counter() - write_started_at) * 1000
         current_app.logger.debug(
-            "API alert_create service returned type=%s created_count=%s payload=%s",
-            type(alert).__name__,
-            len(alert) if isinstance(alert, list) else 1,
+            "API alert_create service returned type=%s payload=%s",
+            type(result).__name__,
             body,
         )
-        serialize_started_at = time.perf_counter()
-        created_alerts = alert if isinstance(alert, list) else [alert]
-        alert_payload = [
-            fetch_alert_payload_by_id(item.id, company_id=item.company_id) or {"id": item.id, "status": item.status}
-            for item in created_alerts
-        ]
-        serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+        if isinstance(result, dict) and "created_alerts" in result:
+            response_data = result
+            created_alerts = result.get("created_alerts") or []
+            existing_alerts = result.get("existing_alerts") or []
+        else:
+            created_alerts = result if isinstance(result, list) else [result]
+            existing_alerts = []
+            response_data = {
+                "created_alerts": [
+                    {"id": item.id, "company_id": item.company_id, "machine_id": item.machine_id, "status": item.status}
+                    for item in created_alerts
+                ],
+                "existing_alerts": [],
+                "warnings": [],
+            }
+        serialize_ms = 0.0
         current_app.logger.debug(
-            "API alert_create serialized created_ids=%s serialize_ms=%.1f",
-            [item.id for item in created_alerts],
+            "API alert_create prepared response created_ids=%s existing_ids=%s serialize_ms=%.1f",
+            [item.get("id") if isinstance(item, dict) else item.id for item in created_alerts],
+            [item.get("id") if isinstance(item, dict) else item.id for item in existing_alerts],
             serialize_ms,
         )
         service_metrics["payload_fetch_ms"] = serialize_ms
@@ -458,10 +467,15 @@ def api_create_alert():
                 insert_or_update_ms,
                 serialize_ms,
                 (time.perf_counter() - started_at) * 1000,
-                created_alerts[0].id if created_alerts else None,
+                (created_alerts[0].get("id") if created_alerts and isinstance(created_alerts[0], dict) else created_alerts[0].id) if created_alerts else None,
             )
-        current_app.logger.debug("API alert_create returning success created_ids=%s", [item.id for item in created_alerts])
-        return jsonify({"success": True, "data": alert_payload if len(alert_payload) != 1 else alert_payload[0]}), 201
+        current_app.logger.debug(
+            "API alert_create returning success created_ids=%s existing_ids=%s",
+            [item.get("id") if isinstance(item, dict) else item.id for item in created_alerts],
+            [item.get("id") if isinstance(item, dict) else item.id for item in existing_alerts],
+        )
+        status_code = 201 if created_alerts else 200
+        return jsonify({"success": True, "data": response_data}), status_code
     except AlertServiceError as exc:
         return _error(str(exc), getattr(exc, "status_code", 400), getattr(exc, "data", None))
     except Exception:

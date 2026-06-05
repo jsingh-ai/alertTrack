@@ -22,10 +22,92 @@ from .radius_service import build_radius_status_map
 BOARD_STATE_CACHE_TTL_SECONDS = 10
 DEFAULT_OPERATOR_METADATA_CACHE_TTL_SECONDS = 60
 DEFAULT_OPERATOR_SNAPSHOT_CACHE_TTL_SECONDS = 3
+COMBINED_OPERATOR_DEPARTMENT_TARGETS = {
+    "quality and supervisor": ("Quality", "Supervisor"),
+}
 
 
 def utc_now():
     return datetime.now(timezone.utc)
+
+
+def _normalize_department_name(value) -> str:
+    return str(value or "").strip().lower()
+
+
+def _resolve_combined_operator_department_override(company_id, metadata_department_ids_override: list[int] | None):
+    override_ids = [int(value) for value in (metadata_department_ids_override or []) if value is not None]
+    if company_id is None or len(override_ids) != 1:
+        return None
+
+    source_department = (
+        Department.query.options(
+            load_only(Department.id, Department.company_id, Department.name, Department.is_active),
+            noload("*"),
+        )
+        .filter(
+            Department.company_id == company_id,
+            Department.id == override_ids[0],
+        )
+        .one_or_none()
+    )
+    if not source_department:
+        return None
+
+    target_names = COMBINED_OPERATOR_DEPARTMENT_TARGETS.get(_normalize_department_name(source_department.name))
+    if not target_names:
+        return None
+
+    target_departments = (
+        Department.query.options(
+            load_only(Department.id, Department.company_id, Department.name, Department.is_active),
+            noload("*"),
+        )
+        .filter(
+            Department.company_id == company_id,
+            Department.name.in_(list(target_names)),
+            Department.is_active.is_(True),
+        )
+        .order_by(Department.name.asc())
+        .all()
+    )
+    if not target_departments:
+        return None
+
+    return {
+        "source_department_id": int(source_department.id),
+        "source_department_name": source_department.name,
+        "target_department_ids": [int(department.id) for department in target_departments],
+        "query_department_ids": sorted({int(source_department.id), *[int(department.id) for department in target_departments]}),
+    }
+
+
+def _remap_combined_operator_issue_groups(issue_groups: list[dict], combined_override):
+    if not combined_override:
+        return issue_groups
+
+    source_department_id = int(combined_override["source_department_id"])
+    source_department_name = combined_override["source_department_name"]
+    target_department_ids = {int(value) for value in combined_override.get("target_department_ids") or []}
+    if not target_department_ids:
+        return issue_groups
+
+    source_groups = [group for group in issue_groups if int(group.get("department_id") or 0) == source_department_id]
+    if source_groups:
+        return issue_groups
+
+    remapped_groups = []
+    for group in issue_groups:
+        group_department_id = int(group.get("department_id") or 0)
+        if group_department_id in target_department_ids:
+            remapped_groups.append(
+                {
+                    **group,
+                    "department_id": source_department_id,
+                    "department_name": source_department_name,
+                }
+            )
+    return remapped_groups
 
 
 def _perf_enabled() -> bool:
@@ -341,6 +423,12 @@ def _load_operator_metadata_context(
         if metadata_department_ids_override
         else list(department_ids)
     )
+    issue_group_department_ids = list(metadata_department_ids)
+    user_department_ids = list(metadata_department_ids)
+    combined_department_override = _resolve_combined_operator_department_override(company_id, metadata_department_ids_override)
+    if combined_department_override:
+        issue_group_department_ids = combined_department_override["query_department_ids"]
+        user_department_ids = combined_department_override["query_department_ids"]
 
     # For broad roles (Admin/Manager/etc), prevent first-load metadata from
     # pulling every company issue category/problem by default. Scope metadata
@@ -387,7 +475,8 @@ def _load_operator_metadata_context(
         user_query = user_query.filter(UserCompanyAccess.company_id == company_id)
     if metadata_department_ids:
         department_query = department_query.filter(Department.id.in_(metadata_department_ids))
-        user_query = user_query.filter(UserCompanyAccess.department_id.in_(metadata_department_ids))
+    if user_department_ids:
+        user_query = user_query.filter(UserCompanyAccess.department_id.in_(user_department_ids))
     if machine_group_names:
         user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
 
@@ -402,8 +491,9 @@ def _load_operator_metadata_context(
     if include_issue_groups:
         issue_groups, issue_metrics = _load_operator_issue_groups(
             company_id=company_id,
-            metadata_department_ids=metadata_department_ids,
+            metadata_department_ids=issue_group_department_ids,
         )
+        issue_groups = _remap_combined_operator_issue_groups(issue_groups, combined_department_override)
     else:
         issue_groups = []
         issue_metrics = {

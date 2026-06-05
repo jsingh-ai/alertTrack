@@ -433,6 +433,126 @@ def test_create_alert_requires_issue_category_id(client, app):
     assert "issue_category_id is required" in payload["error"]["message"]
 
 
+def test_create_alert_combined_quality_and_supervisor_uses_department_specific_issue_ids(tmp_path, monkeypatch):
+    database_path = tmp_path / "combined-alert-create.sqlite3"
+    monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")
+
+    original_database_uri = TestingConfig.SQLALCHEMY_DATABASE_URI
+    TestingConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{database_path}"
+
+    app = create_app("testing")
+    with app.app_context():
+        db.create_all()
+        suffix = uuid4().hex[:8]
+        company = Company(name=f"Combined Alert {suffix}", slug=f"combined-alert-{suffix}", is_active=True)
+        db.session.add(company)
+        db.session.flush()
+
+        combined_department = Department(company_id=company.id, name="Quality and Supervisor", is_active=True)
+        quality_department = Department(company_id=company.id, name="Quality", is_active=True)
+        supervisor_department = Department(company_id=company.id, name="Supervisor", is_active=True)
+        group = MachineGroup(company_id=company.id, name=f"Combined Group {suffix}", is_active=True)
+        db.session.add_all([combined_department, quality_department, supervisor_department, group])
+        db.session.flush()
+
+        quality_category = IssueCategory(
+            company_id=company.id,
+            department_id=quality_department.id,
+            name=f"Quality Joint Escalation {suffix}",
+            color="#fd7e14",
+            priority_default=2,
+            is_active=True,
+        )
+        supervisor_default_category = IssueCategory(
+            company_id=company.id,
+            department_id=supervisor_department.id,
+            name=f"Supervisor Default {suffix}",
+            color="#6f42c1",
+            priority_default=1,
+            is_active=True,
+        )
+        supervisor_joint_category = IssueCategory(
+            company_id=company.id,
+            department_id=supervisor_department.id,
+            name=f"Supervisor Joint Escalation {suffix}",
+            color="#6f42c1",
+            priority_default=1,
+            is_active=True,
+        )
+        db.session.add_all([quality_category, supervisor_default_category, supervisor_joint_category])
+        db.session.flush()
+
+        quality_problem = IssueProblem(
+            company_id=company.id,
+            category_id=quality_category.id,
+            name=f"Shared Review {suffix}",
+            severity_default=3,
+            is_active=True,
+        )
+        supervisor_default_problem = IssueProblem(
+            company_id=company.id,
+            category_id=supervisor_default_category.id,
+            name=f"Default Supervisor Problem {suffix}",
+            severity_default=2,
+            is_active=True,
+        )
+        supervisor_joint_problem = IssueProblem(
+            company_id=company.id,
+            category_id=supervisor_joint_category.id,
+            name=f"Shared Review {suffix}",
+            severity_default=1,
+            is_active=True,
+        )
+        machine = Machine(
+            company_id=company.id,
+            machine_code=f"MC-{suffix}",
+            name=f"Combined Machine {suffix}",
+            machine_type=group.name,
+            department_id=quality_department.id,
+            is_active=True,
+        )
+        db.session.add_all([quality_problem, supervisor_default_problem, supervisor_joint_problem, machine])
+        db.session.commit()
+
+        from andon_system.services import alert_service as alert_service_module
+
+        monkeypatch.setattr(alert_service_module, "get_current_company_id", lambda: company.id)
+        monkeypatch.setattr(
+            alert_service_module,
+            "get_scope_filters",
+            lambda: {"machine_ids": [], "department_ids": [], "machine_group_names": [], "department_id": None, "machine_group_name": None},
+        )
+        monkeypatch.setattr(alert_service_module, "_launch_create_post_commit_side_effects", lambda **_kwargs: None)
+
+        result = alert_service_module.create_alert(
+            {
+                "machine_id": machine.id,
+                "department_id": combined_department.id,
+                "issue_category_id": quality_category.id,
+                "issue_problem_id": quality_problem.id,
+            }
+        )
+
+        created_alerts = result["created_alerts"]
+        assert len(created_alerts) == 2
+
+        alerts_by_department = {item["department_id"]: item for item in created_alerts}
+
+        quality_alert = alerts_by_department[quality_department.id]
+        assert quality_alert["issue_category_id"] == quality_category.id
+        assert quality_alert["issue_problem_id"] == quality_problem.id
+
+        supervisor_alert = alerts_by_department[supervisor_department.id]
+        assert supervisor_alert["issue_category_id"] == supervisor_joint_category.id
+        assert supervisor_alert["issue_problem_id"] == supervisor_joint_problem.id
+        assert supervisor_alert["issue_category_id"] != supervisor_default_category.id
+        assert supervisor_alert["issue_problem_id"] != supervisor_default_problem.id
+
+        db.session.remove()
+        db.drop_all()
+    TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
+
+
 def _create_alert_for_mutation(client, fixtures, csrf_token):
     response = client.post(
         "/api/andon/alerts",
@@ -1130,6 +1250,83 @@ def test_operator_metadata_issue_groups_are_company_and_scope_filtered(tmp_path,
         assert [group["category_name"] for group in payload["issue_groups"]] == ["Scoped Cat"]
         assert payload["issue_groups"][0]["department_name"] == "Dept A1"
         assert [problem["name"] for problem in payload["issue_groups"][0]["problems"]] == ["Scoped Problem"]
+
+        db.session.remove()
+        db.drop_all()
+    TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
+
+
+def test_operator_metadata_combined_department_falls_back_to_quality_and_supervisor_issues(tmp_path, monkeypatch):
+    database_path = tmp_path / "operator-metadata-combined.sqlite3"
+    monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")
+
+    original_database_uri = TestingConfig.SQLALCHEMY_DATABASE_URI
+    TestingConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{database_path}"
+
+    app = create_app("testing")
+    with app.app_context():
+        db.create_all()
+        company = Company(name="Combined Company", slug="combined-company", is_active=True)
+        db.session.add(company)
+        db.session.flush()
+
+        combined_department = Department(company_id=company.id, name="Quality and Supervisor", is_active=True)
+        quality_department = Department(company_id=company.id, name="Quality", is_active=True)
+        supervisor_department = Department(company_id=company.id, name="Supervisor", is_active=True)
+        db.session.add_all([combined_department, quality_department, supervisor_department])
+        db.session.flush()
+
+        quality_category = IssueCategory(
+            company_id=company.id,
+            department_id=quality_department.id,
+            name="Quality Cat",
+            is_active=True,
+        )
+        supervisor_category = IssueCategory(
+            company_id=company.id,
+            department_id=supervisor_department.id,
+            name="Supervisor Cat",
+            is_active=True,
+        )
+        db.session.add_all([quality_category, supervisor_category])
+        db.session.flush()
+
+        db.session.add_all(
+            [
+                IssueProblem(company_id=company.id, category_id=quality_category.id, name="Quality Problem", is_active=True),
+                IssueProblem(company_id=company.id, category_id=supervisor_category.id, name="Supervisor Problem", is_active=True),
+            ]
+        )
+        db.session.commit()
+
+        payload = build_operator_metadata(
+            company_id=company.id,
+            current_user=SimpleNamespace(id=101),
+            membership=SimpleNamespace(
+                id=654,
+                role="Operator",
+                scope_mode="restricted",
+                department_id=combined_department.id,
+                machine_group_id=None,
+            ),
+            scope={
+                "company_id": company.id,
+                "department_id": combined_department.id,
+                "department_ids": [combined_department.id],
+                "machine_group_name": None,
+                "machine_group_names": [],
+                "machine_ids": [],
+                "restricted": True,
+            },
+            metadata_department_ids_override=[combined_department.id],
+        )
+
+        assert payload["departments"] == [{"id": combined_department.id, "name": "Quality and Supervisor"}]
+        assert [group["category_name"] for group in payload["issue_groups"]] == ["Quality Cat", "Supervisor Cat"]
+        assert all(group["department_id"] == combined_department.id for group in payload["issue_groups"])
+        assert all(group["department_name"] == "Quality and Supervisor" for group in payload["issue_groups"])
+        assert [problem["name"] for problem in payload["issue_groups"][0]["problems"]] == ["Quality Problem"]
+        assert [problem["name"] for problem in payload["issue_groups"][1]["problems"]] == ["Supervisor Problem"]
 
         db.session.remove()
         db.drop_all()

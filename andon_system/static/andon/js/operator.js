@@ -597,13 +597,29 @@ function setCachedOperatorDepartments(metadata) {
   }
 }
 
+function mergeIssueGroupsByDepartment(existingGroups, incomingGroups, departmentIds) {
+  const scopedDepartmentIds = new Set((departmentIds || []).map((value) => Number(value || 0)).filter(Boolean));
+  const preserved = scopedDepartmentIds.size
+    ? (existingGroups || []).filter((group) => !scopedDepartmentIds.has(Number(group?.department_id || 0)))
+    : [];
+  return [...preserved, ...(incomingGroups || [])];
+}
+
 function applyOperatorMetadata(metadata, options = {}) {
   const level = options.level || "full";
-  state.departments = metadata?.departments || [];
+  const nextDepartments = metadata?.departments || [];
+  if (!(options.preserveDepartments && state.departmentsLoaded)) {
+    state.departments = nextDepartments;
+  }
   state.departmentsLoaded = Array.isArray(state.departments) && state.departments.length > 0;
   if (level === "full") {
-    state.issueGroups = metadata?.issue_groups || [];
-    state.users = metadata?.users || [];
+    const nextIssueGroups = metadata?.issue_groups || [];
+    state.issueGroups = options.mergeIssueGroups
+      ? mergeIssueGroupsByDepartment(state.issueGroups, nextIssueGroups, options.issueGroupDepartmentIds)
+      : nextIssueGroups;
+    if (!(options.preserveUsers && Array.isArray(state.users) && state.users.length > 0)) {
+      state.users = metadata?.users || [];
+    }
     state.detailMetadataLoaded = true;
     state.metadataLoaded = true;
     if (state.selectedDepartmentId) {
@@ -699,7 +715,13 @@ async function loadOperatorMetadata(options = {}) {
         elapsedMs: Math.round(responseAt - startedAt),
         sinceScriptMs: operatorSinceScriptMs(),
       });
-      applyOperatorMetadata(metadata, { level: "full" });
+      applyOperatorMetadata(metadata, {
+        level: "full",
+        preserveDepartments: Boolean(departmentId),
+        preserveUsers: !includeUsers,
+        mergeIssueGroups: Boolean(departmentId),
+        issueGroupDepartmentIds: departmentId ? [departmentId] : [],
+      });
       if (!departmentId) {
         setCachedOperatorMetadata(metadata);
       }

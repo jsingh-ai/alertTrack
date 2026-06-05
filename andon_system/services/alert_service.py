@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import threading
 import time
 from types import SimpleNamespace
 from uuid import uuid4
@@ -360,6 +361,211 @@ def _normalize_department_name(value: str | None) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
+def _normalize_issue_key(value: str | None) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _resolve_issue_bundle_for_target_department(
+    *,
+    company_id: int | None,
+    target_department,
+    selected_issue_category,
+    selected_issue_problem,
+):
+    target_department_id = int(target_department.id)
+    selected_category_name = _normalize_issue_key(getattr(selected_issue_category, "name", None))
+    selected_problem_name = _normalize_issue_key(getattr(selected_issue_problem, "name", None))
+
+    if int(getattr(selected_issue_category, "department_id", 0) or 0) == target_department_id:
+        return selected_issue_category, selected_issue_problem
+
+    category_rows = (
+        IssueCategory.query.options(
+            load_only(
+                IssueCategory.id,
+                IssueCategory.company_id,
+                IssueCategory.department_id,
+                IssueCategory.name,
+                IssueCategory.priority_default,
+                IssueCategory.is_active,
+            ),
+            noload("*"),
+        )
+        .filter(
+            IssueCategory.department_id == target_department_id,
+            IssueCategory.is_active.is_(True),
+        )
+        .filter(IssueCategory.company_id == company_id if company_id is not None else True)
+        .order_by(IssueCategory.id.asc())
+        .all()
+    )
+    if not category_rows:
+        raise AlertServiceError(f"No active issue categories are configured for {getattr(target_department, 'name', 'department')}")
+
+    matched_category = None
+    if selected_category_name:
+        matched_category = next(
+            (category for category in category_rows if _normalize_issue_key(category.name) == selected_category_name),
+            None,
+        )
+    target_category = matched_category or category_rows[0]
+
+    problem_rows = (
+        IssueProblem.query.options(
+            load_only(
+                IssueProblem.id,
+                IssueProblem.company_id,
+                IssueProblem.category_id,
+                IssueProblem.name,
+                IssueProblem.severity_default,
+                IssueProblem.is_active,
+            ),
+            noload("*"),
+        )
+        .filter(
+            IssueProblem.category_id == target_category.id,
+            IssueProblem.is_active.is_(True),
+        )
+        .filter(IssueProblem.company_id == company_id if company_id is not None else True)
+        .order_by(IssueProblem.id.asc())
+        .all()
+    )
+    matching_problem_rows = (
+        IssueProblem.query.options(
+            load_only(
+                IssueProblem.id,
+                IssueProblem.company_id,
+                IssueProblem.category_id,
+                IssueProblem.name,
+                IssueProblem.severity_default,
+                IssueProblem.is_active,
+            ),
+            noload("*"),
+        )
+        .filter(
+            IssueProblem.category_id.in_([category.id for category in category_rows]),
+            IssueProblem.is_active.is_(True),
+        )
+        .filter(IssueProblem.company_id == company_id if company_id is not None else True)
+        .order_by(IssueProblem.category_id.asc(), IssueProblem.id.asc())
+        .all()
+    )
+    if not matching_problem_rows:
+        raise AlertServiceError(
+            f"No active issue problems are configured for {getattr(target_department, 'name', 'department')}"
+        )
+
+    matched_problem = None
+    if selected_problem_name:
+        matched_problem = next(
+            (problem for problem in matching_problem_rows if _normalize_issue_key(problem.name) == selected_problem_name),
+            None,
+        )
+    target_problem = matched_problem or (problem_rows[0] if problem_rows else matching_problem_rows[0])
+    if matched_problem:
+        target_category = next(
+            (category for category in category_rows if int(category.id) == int(matched_problem.category_id)),
+            target_category,
+        )
+    elif not problem_rows:
+        target_category = next(
+            (category for category in category_rows if int(category.id) == int(target_problem.category_id)),
+            target_category,
+        )
+    return target_category, target_problem
+
+
+def _configure_alert_create_pg_transaction(*, lock_timeout_ms: int = 1500, statement_timeout_ms: int = 5000) -> None:
+    if db.engine.dialect.name != "postgresql":
+        return
+    safe_lock_timeout_ms = max(1, int(lock_timeout_ms))
+    safe_statement_timeout_ms = max(1, int(statement_timeout_ms))
+    db.session.execute(text(f"SET LOCAL lock_timeout = '{safe_lock_timeout_ms}ms'"))
+    db.session.execute(text(f"SET LOCAL statement_timeout = '{safe_statement_timeout_ms}ms'"))
+
+
+def _serialize_created_alert(alert, department_name: str | None, issue_category, issue_problem) -> dict:
+    return {
+        "id": alert.id,
+        "company_id": alert.company_id,
+        "machine_id": alert.machine_id,
+        "department_id": alert.department_id,
+        "department_name": department_name,
+        "issue_category_id": alert.issue_category_id,
+        "issue_problem_id": alert.issue_problem_id,
+        "category_name": getattr(issue_category, "name", None),
+        "problem_name": getattr(issue_problem, "name", None),
+        "status": alert.status,
+    }
+
+
+def _run_create_post_commit_side_effects(app, *, company_id: int | None, alert_ids: list[int], machine_id: int | None, status: str | None):
+    with app.app_context():
+        if not company_id:
+            return
+        try:
+            current_app.logger.debug(
+                "SERVICE alert_create side_effects start company_id=%s alert_ids=%s machine_id=%s",
+                company_id,
+                alert_ids,
+                machine_id,
+            )
+            cache_started_at = time.perf_counter()
+            current_app.logger.debug("SERVICE alert_create before cache invalidate company_id=%s", company_id)
+            invalidate_live_alert_caches(company_id)
+            current_app.logger.debug(
+                "SERVICE alert_create after cache invalidate company_id=%s elapsed_ms=%.1f",
+                company_id,
+                (time.perf_counter() - cache_started_at) * 1000,
+            )
+        except Exception:
+            current_app.logger.exception(
+                "Alert created but cache invalidation failed alert_ids=%s company_id=%s",
+                alert_ids,
+                company_id,
+            )
+        try:
+            emit_started_at = time.perf_counter()
+            current_app.logger.debug(
+                "SERVICE alert_create before realtime emit company_id=%s alert_ids=%s machine_id=%s",
+                company_id,
+                alert_ids,
+                machine_id,
+            )
+            for emitted_alert_id in alert_ids:
+                emit_alert_created(company_id, emitted_alert_id, machine_id=machine_id, status=status)
+            current_app.logger.debug(
+                "SERVICE alert_create after realtime emit company_id=%s alert_ids=%s elapsed_ms=%.1f",
+                company_id,
+                alert_ids,
+                (time.perf_counter() - emit_started_at) * 1000,
+            )
+        except Exception:
+            current_app.logger.exception(
+                "Alert created but realtime emit failed alert_ids=%s company_id=%s",
+                alert_ids,
+                company_id,
+            )
+
+
+def _launch_create_post_commit_side_effects(*, company_id: int | None, alert_ids: list[int], machine_id: int | None, status: str | None) -> None:
+    if not company_id or not alert_ids:
+        return
+    app = current_app._get_current_object()
+    thread = threading.Thread(
+        target=_run_create_post_commit_side_effects,
+        kwargs={
+            "app": app,
+            "company_id": company_id,
+            "alert_ids": list(alert_ids),
+            "machine_id": machine_id,
+            "status": status,
+        },
+        daemon=True,
+    )
+    thread.start()
+
+
 def create_alert(payload: dict, metrics: dict | None = None):
     started_at = time.perf_counter()
     previous_step_at = started_at
@@ -373,6 +579,8 @@ def create_alert(payload: dict, metrics: dict | None = None):
     created_at_iso = None
     commit_done_at = started_at
     company_id = get_current_company_id()
+    warnings: list[str] = []
+    existing_alert_payloads: list[dict] = []
     current_app.logger.debug(
         "SERVICE alert_create start machine_id=%s department_id=%s issue_category_id=%s issue_problem_id=%s",
         payload.get("machine_id"),
@@ -380,6 +588,7 @@ def create_alert(payload: dict, metrics: dict | None = None):
         payload.get("issue_category_id"),
         payload.get("issue_problem_id"),
     )
+    _configure_alert_create_pg_transaction()
     previous_step_at = _perf_step("start", started_at, previous_step_at, machine_id=payload.get("machine_id"), company_id=company_id)
     scope = get_scope_filters()
     machine_ids = scope.get("machine_ids") or []
@@ -526,8 +735,13 @@ def create_alert(payload: dict, metrics: dict | None = None):
             source_department = source_department.filter(Department.company_id == company_id)
         source_department = source_department.one_or_none()
 
-    target_departments = []
     selected_department_name = _normalize_department_name(getattr(source_department, "name", None))
+    if payload.get("department_id") and not source_department:
+        raise AlertServiceError("Valid department_id is required")
+    if source_department and selected_department_name != "quality and supervisor" and issue_category.department_id != source_department.id:
+        raise AlertServiceError("Issue category must belong to the selected department")
+
+    target_departments = []
     if selected_department_name == "quality and supervisor":
         current_app.logger.debug(
             "SERVICE alert_create combined department detected source_department_id=%s source_department_name=%s",
@@ -567,22 +781,55 @@ def create_alert(payload: dict, metrics: dict | None = None):
         issue_problem.id if issue_problem else None,
     )
 
+    target_requests = []
+    for target_department in target_departments:
+        target_issue_category, target_issue_problem = _resolve_issue_bundle_for_target_department(
+            company_id=company_id,
+            target_department=target_department,
+            selected_issue_category=issue_category,
+            selected_issue_problem=issue_problem,
+        )
+        target_requests.append(
+            SimpleNamespace(
+                department=target_department,
+                issue_category=target_issue_category,
+                issue_problem=target_issue_problem,
+            )
+        )
+
     duplicate_check_started_at = time.perf_counter()
     existing_alert_id = None
-    for target_department in target_departments:
+    requests_to_create = []
+    for target_request in target_requests:
+        target_department = target_request.department
         existing_alert_id = _find_active_alert_id_for_machine_department(machine.id, int(target_department.id), company_id)
+        current_app.logger.debug(
+            "SERVICE alert_create pre_insert_check target_department_id=%s target_department_name=%s existing_active_alert=%s",
+            int(target_department.id),
+            getattr(target_department, "name", None),
+            bool(existing_alert_id),
+        )
         if existing_alert_id:
-            break
+            existing_payload = fetch_alert_payload_by_id(existing_alert_id, company_id=company_id)
+            existing_alert_payloads.append(existing_payload or {"id": existing_alert_id, "department_id": int(target_department.id)})
+            warnings.append(f"Active alert already exists for {getattr(target_department, 'name', 'department')}.")
+            continue
+        requests_to_create.append(target_request)
     perf["duplicate_active_check_ms"] = (time.perf_counter() - duplicate_check_started_at) * 1000
     known_segments["duplicate_active_check_ms"] = perf["duplicate_active_check_ms"]
     previous_step_at = _perf_step("after_duplicate_check", started_at, previous_step_at, machine_id=machine.id, company_id=company_id)
-    if existing_alert_id:
-        existing_payload = fetch_alert_payload_by_id(existing_alert_id, company_id=company_id)
-        raise AlertServiceError(
-            "An active alert already exists for this machine and department",
-            status_code=409,
-            data={"existing_alert": existing_payload or {"id": existing_alert_id}},
-        )
+    if not requests_to_create:
+        perf.setdefault("payload_fetch_ms", 0.0)
+        perf.setdefault("escalation_check_ms", 0.0)
+        perf.setdefault("email_send_ms", 0.0)
+        perf.setdefault("notification_ms", 0.0)
+        perf["total_ms"] = (time.perf_counter() - started_at) * 1000
+        _perf_log_create_alert(perf)
+        return {
+            "created_alerts": [],
+            "existing_alerts": existing_alert_payloads,
+            "warnings": warnings,
+        }
 
     gap_ms = (time.perf_counter() - gap_started_at) * 1000
     perf["after_duplicate_to_before_build_ms"] = gap_ms
@@ -597,14 +844,19 @@ def create_alert(payload: dict, metrics: dict | None = None):
     alert_build_started_at = time.perf_counter()
     resolved_company_id = company_id or machine.company_id
     alerts = []
-    for target_department in target_departments:
+    created_target_requests = []
+    for target_request in requests_to_create:
+        target_department = target_request.department
+        target_issue_category = target_request.issue_category
+        target_issue_problem = target_request.issue_problem
         alert_number = f"AL-{utc_now():%Y%m%d%H%M%S}-{uuid4().hex[:6].upper()}"
         current_app.logger.debug(
-            "SERVICE alert_create building alert target_department_id=%s target_department_name=%s machine_id=%s issue_problem_id=%s",
+            "SERVICE alert_create building alert target_department_id=%s target_department_name=%s machine_id=%s issue_category_id=%s issue_problem_id=%s",
             int(target_department.id),
             getattr(target_department, "name", None),
             machine.id,
-            issue_problem.id if issue_problem else None,
+            target_issue_category.id if target_issue_category else None,
+            target_issue_problem.id if target_issue_problem else None,
         )
         alerts.append(
             AndonAlert(
@@ -612,15 +864,16 @@ def create_alert(payload: dict, metrics: dict | None = None):
                 alert_number=alert_number,
                 machine_id=machine.id,
                 department_id=int(target_department.id),
-                issue_category_id=issue_category.id,
-                issue_problem_id=issue_problem.id,
+                issue_category_id=target_issue_category.id,
+                issue_problem_id=target_issue_problem.id,
                 status=ALERT_STATUS_OPEN,
-                priority=payload.get("priority") or issue_category.priority_default or issue_problem.severity_default or 3,
+                priority=payload.get("priority") or target_issue_category.priority_default or target_issue_problem.severity_default or 3,
                 operator_user_id=operator_user.id if operator_user else None,
                 operator_name_text=payload.get("operator_name_text"),
                 note=payload.get("note"),
             )
         )
+        created_target_requests.append(target_request)
     perf["alert_object_build_ms"] = (time.perf_counter() - alert_build_started_at) * 1000
     known_segments["alert_object_build_ms"] = perf["alert_object_build_ms"]
     previous_step_at = _perf_step("after_alert_build", started_at, previous_step_at, machine_id=machine.id, company_id=resolved_company_id)
@@ -635,6 +888,11 @@ def create_alert(payload: dict, metrics: dict | None = None):
         previous_step_at = _perf_step("before_flush", started_at, previous_step_at, machine_id=machine.id, company_id=resolved_company_id)
         _perf_pg_diagnostics("before_flush")
         flush_started_at = time.perf_counter()
+        current_app.logger.debug(
+            "SERVICE alert_create before flush create_target_department_ids=%s machine_id=%s",
+            [int(target_request.department.id) for target_request in created_target_requests],
+            machine.id,
+        )
         db.session.flush()
         perf["db_flush_ms"] = (time.perf_counter() - flush_started_at) * 1000
         known_segments["db_flush_ms"] = perf["db_flush_ms"]
@@ -643,7 +901,10 @@ def create_alert(payload: dict, metrics: dict | None = None):
         current_app.logger.debug(
             "SERVICE alert_create flush complete created_alert_ids=%s target_departments=%s",
             [alert.id for alert in alerts],
-            [{"id": int(target.id), "name": getattr(target, "name", None)} for target in target_departments],
+            [
+                {"id": int(target_request.department.id), "name": getattr(target_request.department, "name", None)}
+                for target_request in created_target_requests
+            ],
         )
 
         previous_step_at = _perf_step("before_event_insert", started_at, previous_step_at, alert_id=alerts[0].id if alerts else None, machine_id=machine.id, company_id=resolved_company_id)
@@ -688,86 +949,67 @@ def create_alert(payload: dict, metrics: dict | None = None):
             "SERVICE alert_create integrity failure machine_id=%s source_department_id=%s targets=%s",
             machine.id if machine else None,
             getattr(source_department, "id", None),
-            [{"id": int(target.id), "name": getattr(target, "name", None)} for target in target_departments],
+            [
+                {"id": int(target_request.department.id), "name": getattr(target_request.department, "name", None)}
+                for target_request in created_target_requests
+            ],
         )
+        raced_existing_payloads = []
         existing_alert_id = None
-        for target_department in target_departments:
+        for target_request in created_target_requests:
+            target_department = target_request.department
             existing_alert_id = _find_active_alert_id_for_machine_department(machine.id, int(target_department.id), resolved_company_id)
             if existing_alert_id:
-                break
-        if existing_alert_id:
-            existing_payload = fetch_alert_payload_by_id(existing_alert_id, company_id=resolved_company_id)
-            raise AlertServiceError(
-                "An active alert already exists for this machine and department",
-                status_code=409,
-                data={"existing_alert": existing_payload or {"id": existing_alert_id}},
-            ) from exc
+                existing_payload = fetch_alert_payload_by_id(existing_alert_id, company_id=resolved_company_id)
+                raced_existing_payloads.append(existing_payload or {"id": existing_alert_id, "department_id": int(target_department.id)})
+        if raced_existing_payloads:
+            warnings.extend(
+                f"Active alert already exists for {payload_item.get('department_name') or 'department'}."
+                for payload_item in raced_existing_payloads
+            )
+            perf.setdefault("payload_fetch_ms", 0.0)
+            perf.setdefault("escalation_check_ms", 0.0)
+            perf.setdefault("email_send_ms", 0.0)
+            perf.setdefault("notification_ms", 0.0)
+            perf["total_ms"] = (time.perf_counter() - started_at) * 1000
+            _perf_log_create_alert(perf)
+            return {
+                "created_alerts": [],
+                "existing_alerts": existing_alert_payloads + raced_existing_payloads,
+                "warnings": warnings,
+            }
         existing_any = _get_latest_alert_for_machine(machine.id, resolved_company_id)
         if existing_any:
-            raise AlertServiceError(
-                "A machine-level alert uniqueness rule blocked this alert. Close or cancel the existing alert for this machine and try again.",
-                status_code=409,
-                data={"existing_alert": existing_any.to_dict()},
-            ) from exc
-        raise AlertServiceError("Unable to create alert due to a database constraint", status_code=409) from exc
-    previous_step_at = _perf_step("before_cache", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
-    cache_started_at = time.perf_counter()
-    perf["before_cache_call_ms"] = (cache_started_at - commit_done_at) * 1000
-    if _deep_alert_debug_enabled():
-        current_app.logger.debug(
-            "PERF alert_create_checkpoint phase=before_cache after_commit_to_cache_start_ms=%.1f alert_id=%s alert_ids=%s company_id=%s machine_id=%s status=%s created_at=%s",
-            perf["before_cache_call_ms"],
-            created_alert_id,
-            created_alert_ids,
-            created_company_id,
-            created_machine_id,
-            created_status,
-            created_at_iso,
-        )
-    try:
-        _invalidate_live_caches(created_company_id)
-    except Exception:
-        current_app.logger.exception(
-            "Alert created but cache invalidation failed alert_id=%s alert_ids=%s company_id=%s",
-            created_alert_id,
-            created_alert_ids,
-            created_company_id,
-        )
-    cache_call_done_at = time.perf_counter()
-    perf["actual_invalidate_call_ms"] = (cache_call_done_at - cache_started_at) * 1000
-    perf["after_cache_call_ms"] = (time.perf_counter() - cache_call_done_at) * 1000
-    perf["cache_invalidate_ms"] = perf["before_cache_call_ms"] + perf["actual_invalidate_call_ms"] + perf["after_cache_call_ms"]
-    if _deep_alert_debug_enabled():
-        current_app.logger.debug(
-            "PERF alert_create_checkpoint phase=after_cache after_commit_to_cache_start_ms=%.1f actual_cache_call_ms=%.1f after_cache_call_ms=%.1f alert_id=%s alert_ids=%s",
-            perf["before_cache_call_ms"],
-            perf["actual_invalidate_call_ms"],
-            perf["after_cache_call_ms"],
-            created_alert_id,
-            created_alert_ids,
-        )
-    previous_step_at = _perf_step("after_cache", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
-    previous_step_at = _perf_step("before_socket_emit", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
-    emit_started_at = time.perf_counter()
-    try:
-        for emitted_alert_id in created_alert_ids:
-            current_app.logger.debug(
-                "SERVICE alert_create emitting realtime alert_id=%s machine_id=%s company_id=%s",
-                emitted_alert_id,
-                created_machine_id,
-                created_company_id,
+            warnings.append(
+                "Machine-level active alert uniqueness blocked creating an additional department alert. "
+                "Restart the app so the department-scoped alert index is applied."
             )
-            emit_alert_created(created_company_id, emitted_alert_id, machine_id=created_machine_id, status=created_status)
-    except Exception:
-        current_app.logger.exception(
-            "Alert created but realtime emit failed alert_id=%s alert_ids=%s company_id=%s",
-            created_alert_id,
-            created_alert_ids,
-            created_company_id,
-        )
-    perf["socket_emit_ms"] = (time.perf_counter() - emit_started_at) * 1000
+            perf.setdefault("payload_fetch_ms", 0.0)
+            perf.setdefault("escalation_check_ms", 0.0)
+            perf.setdefault("email_send_ms", 0.0)
+            perf.setdefault("notification_ms", 0.0)
+            perf["total_ms"] = (time.perf_counter() - started_at) * 1000
+            _perf_log_create_alert(perf)
+            return {
+                "created_alerts": [],
+                "existing_alerts": existing_alert_payloads + [existing_any.to_dict()],
+                "warnings": warnings,
+            }
+        raise AlertServiceError("Unable to create alert due to a database constraint", status_code=409) from exc
+    previous_step_at = _perf_step("before_background_side_effects", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
+    _launch_create_post_commit_side_effects(
+        company_id=created_company_id,
+        alert_ids=created_alert_ids,
+        machine_id=created_machine_id,
+        status=created_status,
+    )
+    perf["before_cache_call_ms"] = 0.0
+    perf["actual_invalidate_call_ms"] = 0.0
+    perf["after_cache_call_ms"] = 0.0
+    perf["cache_invalidate_ms"] = 0.0
+    perf["socket_emit_ms"] = 0.0
     known_segments["socket_emit_ms"] = perf["socket_emit_ms"]
-    previous_step_at = _perf_step("after_socket_emit", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
+    previous_step_at = _perf_step("after_background_side_effects", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
     previous_step_at = _perf_step("before_return", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
     perf.setdefault("payload_fetch_ms", 0.0)
     perf.setdefault("escalation_check_ms", 0.0)
@@ -785,17 +1027,26 @@ def create_alert(payload: dict, metrics: dict | None = None):
         )
     _perf_log_create_alert(perf)
     _perf_step("final_return", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
+    created_alert_payloads = [
+        _serialize_created_alert(
+            alert,
+            getattr(target_request.department, "name", None),
+            target_request.issue_category,
+            target_request.issue_problem,
+        )
+        for alert, target_request in zip(alerts, created_target_requests)
+    ]
     current_app.logger.debug(
-        "SERVICE alert_create returning created_alert_ids=%s source_department_id=%s",
+        "SERVICE alert_create returning created_alert_ids=%s existing_alert_count=%s source_department_id=%s",
         created_alert_ids,
+        len(existing_alert_payloads),
         getattr(source_department, "id", None),
     )
-    if len(created_alert_ids) == 1:
-        return SimpleNamespace(id=created_alert_ids[0], company_id=created_company_id, machine_id=created_machine_id, status=created_status)
-    return [
-        SimpleNamespace(id=alert.id, company_id=alert.company_id, machine_id=alert.machine_id, status=alert.status)
-        for alert in alerts
-    ]
+    return {
+        "created_alerts": created_alert_payloads,
+        "existing_alerts": existing_alert_payloads,
+        "warnings": warnings,
+    }
 
 
 def acknowledge_alert(alert_id: int, payload: dict, metrics: dict | None = None):
