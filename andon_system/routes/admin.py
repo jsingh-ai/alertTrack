@@ -339,6 +339,10 @@ def _int_list_from_form(field_name: str) -> list[int]:
     return _int_list_from_csv(request.form.get(field_name))
 
 
+def _normalized_machine_group_names(values: set[str] | list[str] | tuple[str, ...]) -> set[str]:
+    return {str(value or "").strip().lower() for value in (values or []) if str(value or "").strip()}
+
+
 def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], machine_group_ids: list[int], department_ids: list[int]):
     valid_machine_ids = set()
     valid_group_ids = set()
@@ -365,6 +369,8 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
         valid_department_ids = {row.id for row in rows}
 
     selected_group_names = {name for name in group_names_by_id.values() if name}
+    normalized_active_group_names = _normalized_machine_group_names(active_group_names)
+    normalized_selected_group_names = _normalized_machine_group_names(selected_group_names)
     if machine_ids and active_group_names:
         rows = (
             Machine.query.with_entities(Machine.id, Machine.department_id, Machine.machine_type)
@@ -374,12 +380,12 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
                 Machine.id.in_(machine_ids),
                 Machine.is_active.is_(True),
                 Department.is_active.is_(True),
-                Machine.machine_type.in_(list(active_group_names)),
+                func.lower(func.trim(Machine.machine_type)).in_(list(normalized_active_group_names)),
             )
             .all()
         )
-        if role == "Operator" and selected_group_names:
-            rows = [row for row in rows if row.machine_type in selected_group_names]
+        if role == "Operator" and normalized_selected_group_names:
+            rows = [row for row in rows if str(row.machine_type or "").strip().lower() in normalized_selected_group_names]
         valid_machine_ids = {row.id for row in rows}
         machine_department_ids = {row.department_id for row in rows if row.department_id is not None}
 
@@ -411,7 +417,7 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
                 .join(Department, Department.id == Machine.department_id)
                 .filter(
                     Machine.company_id == company_id,
-                    Machine.machine_type.in_(list(group_names_by_id.values())),
+                    func.lower(func.trim(Machine.machine_type)).in_(list(_normalized_machine_group_names(group_names_by_id.values()))),
                     Machine.is_active.is_(True),
                     Department.is_active.is_(True),
                 )
@@ -428,7 +434,7 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
                     .join(Department, Department.id == Machine.department_id)
                     .filter(
                         Machine.company_id == company_id,
-                        Machine.machine_type.in_(list(group_names_by_id.values())),
+                        func.lower(func.trim(Machine.machine_type)).in_(list(_normalized_machine_group_names(group_names_by_id.values()))),
                         Machine.is_active.is_(True),
                         Department.is_active.is_(True),
                     )

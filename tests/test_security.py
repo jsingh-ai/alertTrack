@@ -20,6 +20,7 @@ from andon_system.models.machine import Machine
 from andon_system.models.machine_group import MachineGroup
 from andon_system.models.pager_device import PagerDevice
 from andon_system.models.user import User, UserCompanyAccess
+from andon_system.routes.admin import _resolve_scope_config
 from andon_system.routes.pages import _session_cookie_domain_matches_request
 from andon_system.security import ADMIN_SESSION_KEY, CSRF_SESSION_KEY, USER_SESSION_KEY, get_scope_filters
 from andon_system.services.board_service import _operator_metadata_cache_key, build_operator_metadata
@@ -1543,6 +1544,56 @@ def test_manager_scope_filters_only_include_active_group_and_department_machines
         assert scope["machine_ids"] == [active_machine.id]
         assert scope["department_ids"] == [active_department.id]
         assert scope["machine_group_names"] == [active_group.name]
+
+        db.session.remove()
+        db.drop_all()
+    TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
+
+
+def test_operator_scope_config_matches_machine_group_names_after_normalization(tmp_path, monkeypatch):
+    database_path = tmp_path / "operator-scope-config-normalized.sqlite3"
+    monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")
+
+    original_database_uri = TestingConfig.SQLALCHEMY_DATABASE_URI
+    TestingConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{database_path}"
+
+    app = create_app("testing")
+    with app.app_context():
+        db.create_all()
+        company = Company(name="Normalized Scope Company", slug="normalized-scope-company", is_active=True)
+        db.session.add(company)
+        db.session.flush()
+
+        department = Department(company_id=company.id, name="Quality", is_active=True)
+        group = MachineGroup(company_id=company.id, name="Press", is_active=True)
+        db.session.add_all([department, group])
+        db.session.flush()
+
+        machine = Machine(
+            company_id=company.id,
+            machine_code="PRESS-01",
+            name="Press 01",
+            machine_type="  press  ",
+            department_id=department.id,
+            is_active=True,
+        )
+        db.session.add(machine)
+        db.session.commit()
+
+        scope_config, error_response = _resolve_scope_config(
+            company_id=company.id,
+            role="Operator",
+            machine_ids=[machine.id],
+            machine_group_ids=[group.id],
+            department_ids=[department.id],
+        )
+
+        assert error_response is None
+        assert scope_config == {
+            "machine_ids": [machine.id],
+            "machine_group_ids": [group.id],
+            "department_ids": [department.id],
+        }
 
         db.session.remove()
         db.drop_all()

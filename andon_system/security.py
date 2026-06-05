@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from flask import abort, current_app, g, has_request_context, request, session
-from sqlalchemy import inspect, or_, select, update
+from sqlalchemy import func, inspect, or_, select, update
 from sqlalchemy.orm import joinedload, load_only, noload
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -58,6 +58,10 @@ _PAGER_TOKEN_DEVICE_CACHE = {}
 _PAGER_LAST_SEEN_TRACKER = {}
 _PAGER_CACHE_LOCK = threading.RLock()
 _PAGER_FINGERPRINT_COLUMN_SUPPORTED: bool | None = None
+
+
+def _normalize_machine_group_name(value: str | None) -> str:
+    return str(value or "").strip().lower()
 
 
 def _perf_enabled() -> bool:
@@ -948,8 +952,10 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
             .all()
         )
         group_names = sorted({row.name for row in group_name_rows if row.name})
+        normalized_group_names = sorted({_normalize_machine_group_name(row.name) for row in group_name_rows if row.name})
     else:
         group_names = []
+        normalized_group_names = []
 
     if effective_membership.role == "Viewer":
         resolved_department_ids = sorted(set(all_department_ids))
@@ -978,8 +984,8 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
                 Department.is_active.is_(True),
             )
         )
-        if group_names:
-            scoped_query = scoped_query.filter(Machine.machine_type.in_(group_names))
+        if normalized_group_names:
+            scoped_query = scoped_query.filter(func.lower(func.trim(Machine.machine_type)).in_(normalized_group_names))
         elif all_group_ids:
             scoped_query = scoped_query.filter(Machine.id == -1)
         scoped_rows = scoped_query.all()
@@ -1024,8 +1030,8 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
         scoped_query = machine_query
         if all_department_ids:
             scoped_query = scoped_query.filter(Machine.department_id.in_(all_department_ids))
-        if group_names:
-            scoped_query = scoped_query.filter(Machine.machine_type.in_(group_names))
+        if normalized_group_names:
+            scoped_query = scoped_query.filter(func.lower(func.trim(Machine.machine_type)).in_(normalized_group_names))
         scoped_machines = scoped_query.all()
         candidate_machine_ids.update({row.id for row in scoped_machines if row.id is not None})
 
@@ -1034,8 +1040,8 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
         fallback_query = machine_query
         if legacy_department_ids:
             fallback_query = fallback_query.filter(Machine.department_id.in_(legacy_department_ids))
-        if group_names:
-            fallback_query = fallback_query.filter(Machine.machine_type.in_(group_names))
+        if normalized_group_names:
+            fallback_query = fallback_query.filter(func.lower(func.trim(Machine.machine_type)).in_(normalized_group_names))
         fallback_rows = fallback_query.all()
         candidate_machine_ids.update({row.id for row in fallback_rows if row.id is not None})
         if not all_department_ids:

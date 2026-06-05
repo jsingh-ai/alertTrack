@@ -54,6 +54,10 @@ _LOGIN_RATE_LIMIT_LOCK = threading.Lock()
 _LOGIN_RATE_LIMIT = {}
 
 
+def _normalize_machine_group_name(value: str | None) -> str:
+    return str(value or "").strip().lower()
+
+
 def _management_shift_window(now: datetime | None = None):
     if now is None:
         current = datetime.now(MANAGEMENT_TIMEZONE)
@@ -685,7 +689,11 @@ def admin_page():
         if company_id and (needs_machine_data or needs_user_data or needs_department_data)
         else []
     )
-    machine_group_id_by_name = {group.name: group.id for group in machine_group_rows}
+    machine_group_id_by_name = {
+        _normalize_machine_group_name(group.name): group.id
+        for group in machine_group_rows
+        if group.name
+    }
     departments = (
         Department.query.options(
             noload("*"),
@@ -718,14 +726,18 @@ def admin_page():
             }
         )
     active_department_id_set = {department.id for department in departments if department.is_active}
-    active_machine_group_name_set = {group["name"] for group in machine_groups if group.get("is_active") and group.get("name")}
+    active_machine_group_name_set = {
+        _normalize_machine_group_name(group.get("name"))
+        for group in machine_groups
+        if group.get("is_active") and group.get("name")
+    }
     machine_scope_catalog = [
         {
             "id": machine.id,
             "name": machine.name,
             "machine_code": machine.machine_code,
             "machine_group_name": machine.machine_type,
-            "machine_group_id": machine_group_id_by_name.get(machine.machine_type),
+            "machine_group_id": machine_group_id_by_name.get(_normalize_machine_group_name(machine.machine_type)),
             "department_id": machine.department_id,
             "department_name": department_name_by_id.get(machine.department_id),
             "is_active": machine.is_active,
@@ -733,7 +745,7 @@ def admin_page():
         for machine in machines
         if machine.is_active
         and machine.department_id in active_department_id_set
-        and machine.machine_type in active_machine_group_name_set
+        and _normalize_machine_group_name(machine.machine_type) in active_machine_group_name_set
     ]
     departments_catalog = [
         {
