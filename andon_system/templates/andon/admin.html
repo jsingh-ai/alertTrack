@@ -1269,13 +1269,19 @@
     userScopeMachineList.innerHTML = filteredMachines
       .map((machine) => buildScopeMachineRow(machine, selectedMachineIds))
       .join("");
+    const machineInputs = Array.from(userScopeMachineList.querySelectorAll(".js-user-scope-machine"));
+    if (!disableMachineSelection && !selectedMachineIds.size && machineInputs.length) {
+      machineInputs.forEach((checkbox) => {
+        checkbox.checked = true;
+      });
+    }
     if (userScopeAllMachines.checked) {
-      userScopeMachineList.querySelectorAll(".js-user-scope-machine").forEach((checkbox) => {
+      machineInputs.forEach((checkbox) => {
         checkbox.checked = true;
       });
     }
     if (disableMachineSelection) {
-      userScopeMachineList.querySelectorAll(".js-user-scope-machine").forEach((checkbox) => {
+      machineInputs.forEach((checkbox) => {
         checkbox.checked = false;
         checkbox.disabled = true;
       });
@@ -2693,7 +2699,7 @@
     }
     if (role === "Operator" && machineIds.length === 0) {
       event.preventDefault();
-      showToast("Operator must have at least one machine selected.");
+      showToast("Operator must have at least one machine selected in the Machines list.");
       return;
     }
     if (role === "Viewer" && departmentIds.length === 0) {
