@@ -1334,6 +1334,53 @@ def test_operator_metadata_combined_department_falls_back_to_quality_and_supervi
     TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
 
 
+def test_operator_metadata_departments_exclude_inactive_departments(tmp_path, monkeypatch):
+    database_path = tmp_path / "operator-metadata-departments-active.sqlite3"
+    monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")
+
+    original_database_uri = TestingConfig.SQLALCHEMY_DATABASE_URI
+    TestingConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{database_path}"
+
+    app = create_app("testing")
+    with app.app_context():
+        db.create_all()
+        company = Company(name="Operator Department Company", slug="operator-dept-company", is_active=True)
+        db.session.add(company)
+        db.session.flush()
+
+        active_department = Department(company_id=company.id, name="Quality", is_active=True)
+        inactive_department = Department(company_id=company.id, name="Call Safety", is_active=False)
+        db.session.add_all([active_department, inactive_department])
+        db.session.commit()
+
+        payload = build_operator_metadata(
+            company_id=company.id,
+            current_user=SimpleNamespace(id=777),
+            membership=SimpleNamespace(
+                id=778,
+                role="Operator",
+                scope_mode="restricted",
+                department_id=None,
+                machine_group_id=None,
+            ),
+            scope={
+                "company_id": company.id,
+                "department_id": None,
+                "department_ids": [active_department.id, inactive_department.id],
+                "machine_group_name": None,
+                "machine_group_names": [],
+                "machine_ids": [],
+                "restricted": True,
+            },
+        )
+
+        assert payload["departments"] == [{"id": active_department.id, "name": "Quality"}]
+
+        db.session.remove()
+        db.drop_all()
+    TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
+
+
 def test_operator_scope_filters_exclude_inactive_groups_departments_and_machines(tmp_path, monkeypatch):
     database_path = tmp_path / "operator-scope-filters.sqlite3"
     monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")

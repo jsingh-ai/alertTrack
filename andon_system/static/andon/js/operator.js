@@ -5,8 +5,8 @@ const operatorMetadataCacheScope = [
   String(window.AndonRealtimeConfig?.companyId ?? "none"),
   String((document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "").slice(0, 16) || "anon"),
 ].join(":");
-const operatorMetadataCacheKey = `andon-operator-metadata-cache-v1:${operatorMetadataCacheScope}`;
-const operatorDepartmentsCacheKey = `andon-operator-departments-cache-v1:${operatorMetadataCacheScope}`;
+const operatorMetadataCacheKey = `andon-operator-metadata-cache-v2:${operatorMetadataCacheScope}`;
+const operatorDepartmentsCacheKey = `andon-operator-departments-cache-v2:${operatorMetadataCacheScope}`;
 const operatorSnapshotCacheKey = `andon-operator-snapshot-cache-v1:${operatorMetadataCacheScope}`;
 const operatorMetadataCacheTtlMs = 5 * 60 * 1000;
 const operatorSnapshotCacheTtlMs = 15 * 1000;

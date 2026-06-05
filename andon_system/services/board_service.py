@@ -481,10 +481,7 @@ def _load_operator_metadata_context(
         user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
 
     departments_started_at = time.perf_counter()
-    if role == "Operator":
-        departments = department_query.order_by(Department.name.asc()).all()
-    else:
-        departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all()
+    departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all()
     departments_ms = (time.perf_counter() - departments_started_at) * 1000
 
     issue_started_at = time.perf_counter()
@@ -507,7 +504,7 @@ def _load_operator_metadata_context(
         }
     issue_ms = (time.perf_counter() - issue_started_at) * 1000
 
-    visible_departments = [department for department in departments if role == "Operator" or department.is_active]
+    visible_departments = [department for department in departments if department.is_active]
 
     users_started_at = time.perf_counter()
     if include_users:
