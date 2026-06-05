@@ -577,6 +577,7 @@ def create_alert(payload: dict, metrics: dict | None = None):
     created_company_id = None
     created_status = None
     created_at_iso = None
+    created_alert_payloads: list[dict] = []
     commit_done_at = started_at
     company_id = get_current_company_id()
     warnings: list[str] = []
@@ -928,6 +929,21 @@ def create_alert(payload: dict, metrics: dict | None = None):
         created_machine_id = alerts[0].machine_id
         created_status = alerts[0].status
         created_at_iso = alerts[0].created_at.isoformat() if alerts[0].created_at else None
+        created_alert_payloads = [
+            {
+                "id": int(alert.id),
+                "company_id": int(alert.company_id),
+                "machine_id": int(alert.machine_id),
+                "department_id": int(target_request.department.id),
+                "department_name": getattr(target_request.department, "name", None),
+                "issue_category_id": int(target_request.issue_category.id),
+                "issue_problem_id": int(target_request.issue_problem.id),
+                "category_name": getattr(target_request.issue_category, "name", None),
+                "problem_name": getattr(target_request.issue_problem, "name", None),
+                "status": str(alert.status),
+            }
+            for alert, target_request in zip(alerts, created_target_requests)
+        ]
         previous_step_at = _perf_step("before_commit", started_at, previous_step_at, alert_id=created_alert_id, machine_id=created_machine_id, company_id=created_company_id)
         _perf_pg_diagnostics("before_commit")
         commit_started_at = time.perf_counter()
@@ -1027,15 +1043,6 @@ def create_alert(payload: dict, metrics: dict | None = None):
         )
     _perf_log_create_alert(perf)
     _perf_step("final_return", started_at, previous_step_at, alert_id=created_alert_ids[0] if created_alert_ids else None, machine_id=created_machine_id, company_id=created_company_id)
-    created_alert_payloads = [
-        _serialize_created_alert(
-            alert,
-            getattr(target_request.department, "name", None),
-            target_request.issue_category,
-            target_request.issue_problem,
-        )
-        for alert, target_request in zip(alerts, created_target_requests)
-    ]
     current_app.logger.debug(
         "SERVICE alert_create returning created_alert_ids=%s existing_alert_count=%s source_department_id=%s",
         created_alert_ids,
