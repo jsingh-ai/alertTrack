@@ -273,15 +273,8 @@ def _ensure_auth_schema() -> None:
 def _ensure_postgres_performance_indexes(allow_alter: bool = False) -> None:
     if db.engine.dialect.name != "postgresql":
         return
-    if allow_alter:
-        db.session.execute(text("DROP INDEX IF EXISTS uq_andon_alerts_active_machine"))
-        db.session.execute(
-            text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_andon_alerts_active_machine "
-                "ON andon_alerts (machine_id, department_id) "
-                "WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')"
-            )
-        )
+    if allow_alter or _postgres_active_alert_unique_index_needs_repair():
+        _repair_postgres_active_alert_unique_index()
     # Pager polls and operator snapshot reads.
     db.session.execute(
         text(
@@ -357,6 +350,43 @@ def _ensure_postgres_performance_indexes(allow_alter: bool = False) -> None:
         text(
             "CREATE INDEX IF NOT EXISTS ix_issue_problems_category_active_id "
             "ON issue_problems (category_id, is_active, id)"
+        )
+    )
+
+
+def _postgres_active_alert_unique_index_needs_repair() -> bool:
+    index_definition = db.session.execute(
+        text(
+            """
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE schemaname = ANY (current_schemas(false))
+              AND tablename = 'andon_alerts'
+              AND indexname = 'uq_andon_alerts_active_machine'
+            ORDER BY CASE WHEN schemaname = current_schema() THEN 0 ELSE 1 END
+            LIMIT 1
+            """
+        )
+    ).scalar_one_or_none()
+    if not index_definition:
+        return True
+
+    normalized = " ".join(str(index_definition).lower().split())
+    if "(machine_id, department_id)" not in normalized:
+        return True
+    if "where status in ('open', 'acknowledged', 'arrived')" not in normalized:
+        return True
+    return False
+
+
+def _repair_postgres_active_alert_unique_index() -> None:
+    db.session.execute(text("ALTER TABLE andon_alerts DROP CONSTRAINT IF EXISTS uq_andon_alerts_active_machine"))
+    db.session.execute(text("DROP INDEX IF EXISTS uq_andon_alerts_active_machine"))
+    db.session.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_andon_alerts_active_machine "
+            "ON andon_alerts (machine_id, department_id) "
+            "WHERE status IN ('OPEN', 'ACKNOWLEDGED', 'ARRIVED')"
         )
     )
 
