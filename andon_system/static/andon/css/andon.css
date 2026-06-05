@@ -5636,6 +5636,11 @@ body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__id
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.button-board-shell .operator-machine-tile .machine-modal--response-open > .machine-modal__section--response-department,
+.button-board-shell .operator-machine-tile .machine-modal--response-open > .machine-modal__section--response-issue {
+  grid-column: span 2;
+}
+
 .button-board-shell .operator-machine-tile .machine-modal--response > .machine-modal__section--response-waiting,
 .button-board-shell .operator-machine-tile .machine-modal--response > .machine-tile__radius-panel--response,
 .button-board-shell .operator-machine-tile .machine-modal--response > .machine-modal__section--timer-hero,
@@ -5655,6 +5660,7 @@ body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__id
   gap: 0.08rem;
   padding: 0.46rem 0.5rem 0.48rem;
   min-height: 4.8rem;
+  height: 100%;
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.92));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
