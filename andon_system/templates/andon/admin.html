@@ -336,7 +336,7 @@
                   <label class="form-label">Department</label>
                   <select class="form-select" name="department_id" id="userDepartmentSelect">
                     <option value="">Select a department</option>
-                    {% for department in departments %}
+                    {% for department in departments if department.is_active %}
                       <option value="{{ department.id }}">{{ department.name }}</option>
                     {% endfor %}
                   </select>
@@ -349,7 +349,7 @@
                 <div id="userScopeGroupBlock">
                   <label class="form-label">Machine Groups</label>
                   <div class="admin-scope-group-list" id="userScopeGroupList">
-                    {% for group in machine_groups %}
+                    {% for group in machine_groups if group.is_active %}
                     <label class="admin-scope-pill">
                       <input type="checkbox" class="js-user-scope-group" value="{{ group.id }}" data-group-name="{{ group.name }}">
                       <span>{{ group.name }}</span>
@@ -949,6 +949,7 @@
     document.body.classList.remove("modal-open");
     userScopeModalFallbackOpen = false;
     activeUserScopeRow = null;
+    delete userScopeModalElement.dataset.userId;
     modalScopeSelectedGroupIds = new Set();
     modalScopeSelectedMachineIds = new Set();
     userScopeModalGroupList.innerHTML = "";
@@ -1129,6 +1130,7 @@
   function buildDepartmentSelectOptions(selectedValue) {
     const baseOption = '<option value="">Select a department</option>';
     const options = [...departmentsCatalog]
+      .filter((department) => department && department.is_active !== false)
       .sort((left, right) => String(left?.name || "").localeCompare(String(right?.name || "")))
       .map((department) => {
         const selected = String(department.id) === String(selectedValue || "") ? " selected" : "";
@@ -1154,6 +1156,10 @@
     return Array.from(userScopeGroupList.querySelectorAll(".js-user-scope-group:checked"))
       .map((input) => Number(input.value))
       .filter((value) => Number.isInteger(value) && value > 0);
+  }
+
+  function activeMachineGroupsCatalog() {
+    return (machineGroupsCatalog || []).filter((group) => group && group.id && group.is_active !== false);
   }
 
   function roleScopeHint(role) {
@@ -1217,8 +1223,7 @@
 
   function allActiveMachineGroupIds() {
     return uniqueSortedIds(
-      (machineGroupsCatalog || [])
-        .filter((group) => group && group.id && group.is_active !== false)
+      activeMachineGroupsCatalog()
         .map((group) => Number(group.id))
     );
   }
@@ -1323,7 +1328,7 @@
   }
 
   function renderUserScopeModalGroups() {
-    const orderedGroups = [...machineGroupsCatalog].sort((left, right) =>
+    const orderedGroups = [...activeMachineGroupsCatalog()].sort((left, right) =>
       String(left?.name || "").localeCompare(String(right?.name || ""))
     );
     userScopeModalGroupList.innerHTML = orderedGroups
@@ -1352,6 +1357,7 @@
   function openUserScopeEditor(row) {
     if (!row || !userScopeModalElement) return;
     activeUserScopeRow = row;
+    userScopeModalElement.dataset.userId = row.dataset.userId || "";
     const displayName = row.querySelector('[name="display_name"]')?.value?.trim() || row.dataset.userDisplayName || "User";
     const role = scopeRoleFromRow(row);
     userScopeModalUserName.textContent = displayName;
@@ -1428,6 +1434,15 @@
     row.dataset.userScopeMachineGroupIds = selectedGroupIds.join(",");
     row.dataset.userScopeMachineIds = selectedMachineIds.join(",");
     row.dataset.userScopeDepartmentIds = selectedDepartmentIds.join(",");
+  }
+
+  function resolveUserScopeModalRow() {
+    if (activeUserScopeRow?.dataset?.userId) {
+      return activeUserScopeRow;
+    }
+    const userId = userScopeModalElement?.dataset?.userId || "";
+    if (!userId) return null;
+    return document.getElementById(`user-row-${userId}`) || userRowStore.get(String(userId)) || null;
   }
 
   function scopeGroupNameById(groupId) {
@@ -2578,15 +2593,15 @@
   });
 
   userScopeModalSave?.addEventListener("click", async () => {
-    if (!activeUserScopeRow) return;
-    const role = scopeRoleFromRow(activeUserScopeRow);
+    const rowToUpdate = resolveUserScopeModalRow();
+    if (!rowToUpdate) {
+      showToast("Unable to resolve the selected user scope.");
+      return;
+    }
+    const role = scopeRoleFromRow(rowToUpdate);
     const groupCount = modalScopeGroupIdsFromDom().length;
-    const departmentValue = (userScopeModalDepartmentSelect?.value || activeUserScopeRow.querySelector('[name="department_id"]')?.value || "");
+    const departmentValue = (userScopeModalDepartmentSelect?.value || rowToUpdate.querySelector('[name="department_id"]')?.value || "");
     const machineCount = Array.from(userScopeModalMachineList.querySelectorAll(".js-user-modal-scope-machine:checked")).length;
-    const selectedModalMachineIds = uniqueSortedIds(
-      Array.from(userScopeModalMachineList.querySelectorAll(".js-user-modal-scope-machine:checked"))
-        .map((input) => Number(input.value))
-    );
     if (role === "Operator" && groupCount === 0) {
       showToast(`${roleLabel(role)} role must have at least one machine group selected.`);
       return;
@@ -2599,13 +2614,12 @@
       showToast("Department is required.");
       return;
     }
-    const rowToUpdate = activeUserScopeRow;
     try {
       applyUserScopeToRow(rowToUpdate);
-      closeUserScopeModalDialog();
       showToast("Saving scope...", "info", "Admin");
-      await submitUserUpdate(rowToUpdate);
-      showToast("Scope saved.", "success", "Admin");
+      const changed = await submitUserUpdate(rowToUpdate);
+      showToast(changed ? "Scope saved." : "Scope unchanged.", changed ? "success" : "info", "Admin");
+      closeUserScopeModalDialog();
       notifyAndonRefresh();
     } catch (error) {
       showToast(error.message || "Request failed");
@@ -2614,6 +2628,7 @@
 
   userScopeModalElement?.addEventListener("hidden.bs.modal", () => {
     activeUserScopeRow = null;
+    delete userScopeModalElement.dataset.userId;
     modalScopeSelectedGroupIds = new Set();
     modalScopeSelectedMachineIds = new Set();
     userScopeModalGroupList.innerHTML = "";

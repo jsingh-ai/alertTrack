@@ -346,23 +346,16 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
     group_names_by_id = {}
     machine_department_ids = set()
     group_department_ids = set()
+    active_group_rows = MachineGroup.query.with_entities(MachineGroup.id, MachineGroup.name).filter(
+        MachineGroup.company_id == company_id,
+        MachineGroup.is_active.is_(True),
+    ).all()
+    active_group_name_by_id = {row.id: row.name for row in active_group_rows if row.name}
+    active_group_names = {row.name for row in active_group_rows if row.name}
 
-    if machine_ids:
-        rows = Machine.query.with_entities(Machine.id, Machine.department_id).filter(
-            Machine.company_id == company_id,
-            Machine.id.in_(machine_ids),
-            Machine.is_active.is_(True),
-        ).all()
-        valid_machine_ids = {row.id for row in rows}
-        machine_department_ids = {row.department_id for row in rows if row.department_id is not None}
     if machine_group_ids:
-        rows = MachineGroup.query.with_entities(MachineGroup.id, MachineGroup.name).filter(
-            MachineGroup.company_id == company_id,
-            MachineGroup.id.in_(machine_group_ids),
-            MachineGroup.is_active.is_(True),
-        ).all()
-        valid_group_ids = {row.id for row in rows}
-        group_names_by_id = {row.id: row.name for row in rows if row.name}
+        valid_group_ids = {group_id for group_id in machine_group_ids if group_id in active_group_name_by_id}
+        group_names_by_id = {group_id: active_group_name_by_id[group_id] for group_id in valid_group_ids}
     if department_ids:
         rows = Department.query.with_entities(Department.id).filter(
             Department.company_id == company_id,
@@ -371,6 +364,25 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
         ).all()
         valid_department_ids = {row.id for row in rows}
 
+    selected_group_names = {name for name in group_names_by_id.values() if name}
+    if machine_ids and active_group_names:
+        rows = (
+            Machine.query.with_entities(Machine.id, Machine.department_id, Machine.machine_type)
+            .join(Department, Department.id == Machine.department_id)
+            .filter(
+                Machine.company_id == company_id,
+                Machine.id.in_(machine_ids),
+                Machine.is_active.is_(True),
+                Department.is_active.is_(True),
+                Machine.machine_type.in_(list(active_group_names)),
+            )
+            .all()
+        )
+        if role == "Operator" and selected_group_names:
+            rows = [row for row in rows if row.machine_type in selected_group_names]
+        valid_machine_ids = {row.id for row in rows}
+        machine_department_ids = {row.department_id for row in rows if row.department_id is not None}
+
     group_machine_ids = set()
 
     if role == "Operator":
@@ -378,7 +390,7 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
             return None, _validation_error("Operator requires at least one machine group in scope")
         if not valid_machine_ids:
             return None, _validation_error("Operator requires at least one machine ID in scope")
-        resolved_department_ids = sorted(machine_department_ids | valid_department_ids)
+        resolved_department_ids = sorted(machine_department_ids)
         return {
             "machine_ids": sorted(valid_machine_ids),
             "machine_group_ids": sorted(valid_group_ids),
@@ -394,26 +406,34 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
         }, None
     if role == "Manager":
         if group_names_by_id:
-            rows = Machine.query.with_entities(Machine.id, Machine.department_id).filter(
-                Machine.company_id == company_id,
-                Machine.machine_type.in_(list(group_names_by_id.values())),
-                Machine.is_active.is_(True),
-            ).all()
-            group_machine_ids = {row.id for row in rows}
-            group_department_ids = {row.department_id for row in rows if row.department_id is not None}
-        if not valid_group_ids:
-            rows = MachineGroup.query.with_entities(MachineGroup.id, MachineGroup.name).filter(
-                MachineGroup.company_id == company_id,
-                MachineGroup.is_active.is_(True),
-            ).all()
-            valid_group_ids = {row.id for row in rows}
-            group_names_by_id = {row.id: row.name for row in rows if row.name}
-            if valid_group_ids:
-                rows = Machine.query.with_entities(Machine.id, Machine.department_id).filter(
+            rows = (
+                Machine.query.with_entities(Machine.id, Machine.department_id)
+                .join(Department, Department.id == Machine.department_id)
+                .filter(
                     Machine.company_id == company_id,
                     Machine.machine_type.in_(list(group_names_by_id.values())),
                     Machine.is_active.is_(True),
-                ).all()
+                    Department.is_active.is_(True),
+                )
+                .all()
+            )
+            group_machine_ids = {row.id for row in rows}
+            group_department_ids = {row.department_id for row in rows if row.department_id is not None}
+        if not valid_group_ids:
+            valid_group_ids = {row.id for row in active_group_rows}
+            group_names_by_id = {row.id: row.name for row in active_group_rows if row.name}
+            if valid_group_ids:
+                rows = (
+                    Machine.query.with_entities(Machine.id, Machine.department_id)
+                    .join(Department, Department.id == Machine.department_id)
+                    .filter(
+                        Machine.company_id == company_id,
+                        Machine.machine_type.in_(list(group_names_by_id.values())),
+                        Machine.is_active.is_(True),
+                        Department.is_active.is_(True),
+                    )
+                    .all()
+                )
                 group_machine_ids = {row.id for row in rows}
                 group_department_ids = {row.department_id for row in rows if row.department_id is not None}
         resolved_machine_ids = set(valid_machine_ids)

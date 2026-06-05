@@ -717,6 +717,8 @@ def admin_page():
                 "machine_count": machine_count_by_group_name.get(group.name, 0),
             }
         )
+    active_department_id_set = {department.id for department in departments if department.is_active}
+    active_machine_group_name_set = {group.name for group in machine_groups if group.get("is_active") and group.get("name")}
     machine_scope_catalog = [
         {
             "id": machine.id,
@@ -729,6 +731,9 @@ def admin_page():
             "is_active": machine.is_active,
         }
         for machine in machines
+        if machine.is_active
+        and machine.department_id in active_department_id_set
+        and machine.machine_type in active_machine_group_name_set
     ]
     departments_catalog = [
         {

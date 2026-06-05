@@ -923,11 +923,9 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
     legacy_group_ids = [effective_membership.machine_group_id] if effective_membership.machine_group_id is not None else []
     all_department_ids = sorted(set(legacy_department_ids + config_department_ids))
     all_group_ids = sorted(set(legacy_group_ids + config_group_ids))
-
-    if effective_membership.role == "Viewer":
-        valid_department_ids = []
-        if all_department_ids:
-            valid_department_ids = [
+    if all_department_ids:
+        all_department_ids = sorted(
+            {
                 row.id
                 for row in Department.query.options(noload("*")).with_entities(Department.id).filter(
                     Department.company_id == company_id,
@@ -935,8 +933,26 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
                     Department.is_active.is_(True),
                 ).all()
                 if row.id is not None
-            ]
-        resolved_department_ids = sorted(set(valid_department_ids))
+            }
+        )
+
+    if all_group_ids:
+        group_name_rows = (
+            MachineGroup.query.options(noload("*"))
+            .with_entities(MachineGroup.name)
+            .filter(
+                MachineGroup.company_id == company_id,
+                MachineGroup.id.in_(all_group_ids),
+                MachineGroup.is_active.is_(True),
+            )
+            .all()
+        )
+        group_names = sorted({row.name for row in group_name_rows if row.name})
+    else:
+        group_names = []
+
+    if effective_membership.role == "Viewer":
+        resolved_department_ids = sorted(set(all_department_ids))
         result = {
             "company_id": company_id,
             "department_id": resolved_department_ids[0] if len(resolved_department_ids) == 1 else None,
@@ -951,16 +967,22 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
         return result
 
     if effective_membership.role == "Operator" and config_machine_ids:
-        scoped_rows = (
+        scoped_query = (
             Machine.query.options(noload("*"))
             .with_entities(Machine.id, Machine.department_id, Machine.machine_type)
+            .join(Department, Department.id == Machine.department_id)
             .filter(
                 Machine.company_id == company_id,
                 Machine.id.in_(config_machine_ids),
                 Machine.is_active.is_(True),
+                Department.is_active.is_(True),
             )
-            .all()
         )
+        if group_names:
+            scoped_query = scoped_query.filter(Machine.machine_type.in_(group_names))
+        elif all_group_ids:
+            scoped_query = scoped_query.filter(Machine.id == -1)
+        scoped_rows = scoped_query.all()
         machine_ids = sorted({row.id for row in scoped_rows if row.id is not None})
         resolved_department_ids = sorted({row.department_id for row in scoped_rows if row.department_id is not None})
         machine_group_names = sorted({row.machine_type for row in scoped_rows if row.machine_type})
@@ -977,27 +999,25 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
             g.scope_filters_cache = result
         return result
 
-    machine_query = Machine.query.options(noload("*")).with_entities(
-        Machine.id,
-        Machine.department_id,
-        Machine.machine_type,
-    ).filter(Machine.company_id == company_id, Machine.is_active.is_(True))
-
-    candidate_machine_ids = set(config_machine_ids)
-    if all_group_ids:
-        group_name_rows = (
-            MachineGroup.query.options(noload("*"))
-            .with_entities(MachineGroup.name)
-            .filter(
-                MachineGroup.company_id == company_id,
-                MachineGroup.id.in_(all_group_ids),
-                MachineGroup.is_active.is_(True),
-            )
-            .all()
+    machine_query = (
+        Machine.query.options(noload("*"))
+        .with_entities(
+            Machine.id,
+            Machine.department_id,
+            Machine.machine_type,
         )
-        group_names = sorted({row.name for row in group_name_rows if row.name})
-    else:
-        group_names = []
+        .join(Department, Department.id == Machine.department_id)
+        .filter(
+            Machine.company_id == company_id,
+            Machine.is_active.is_(True),
+            Department.is_active.is_(True),
+        )
+    )
+
+    candidate_machine_ids = set()
+    if config_machine_ids:
+        configured_machine_rows = machine_query.filter(Machine.id.in_(config_machine_ids)).all()
+        candidate_machine_ids.update({row.id for row in configured_machine_rows if row.id is not None})
 
     scoped_machines = []
     if all_department_ids or group_names:
@@ -1026,7 +1046,13 @@ def get_scope_filters(membership: UserCompanyAccess | None = None) -> dict:
         dept_rows = (
             Machine.query.options(noload("*"))
             .with_entities(Machine.department_id, Machine.machine_type)
-            .filter(Machine.company_id == company_id, Machine.id.in_(machine_ids))
+            .join(Department, Department.id == Machine.department_id)
+            .filter(
+                Machine.company_id == company_id,
+                Machine.id.in_(machine_ids),
+                Machine.is_active.is_(True),
+                Department.is_active.is_(True),
+            )
             .all()
         )
         machine_group_names = sorted({row.machine_type for row in dept_rows if row.machine_type})

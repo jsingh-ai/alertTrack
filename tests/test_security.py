@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from types import SimpleNamespace
 from uuid import uuid4
@@ -20,7 +21,7 @@ from andon_system.models.machine_group import MachineGroup
 from andon_system.models.pager_device import PagerDevice
 from andon_system.models.user import User, UserCompanyAccess
 from andon_system.routes.pages import _session_cookie_domain_matches_request
-from andon_system.security import ADMIN_SESSION_KEY, CSRF_SESSION_KEY, USER_SESSION_KEY
+from andon_system.security import ADMIN_SESSION_KEY, CSRF_SESSION_KEY, USER_SESSION_KEY, get_scope_filters
 from andon_system.services.board_service import _operator_metadata_cache_key, build_operator_metadata
 
 
@@ -1327,6 +1328,174 @@ def test_operator_metadata_combined_department_falls_back_to_quality_and_supervi
         assert all(group["department_name"] == "Quality and Supervisor" for group in payload["issue_groups"])
         assert [problem["name"] for problem in payload["issue_groups"][0]["problems"]] == ["Quality Problem"]
         assert [problem["name"] for problem in payload["issue_groups"][1]["problems"]] == ["Supervisor Problem"]
+
+        db.session.remove()
+        db.drop_all()
+    TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
+
+
+def test_operator_scope_filters_exclude_inactive_groups_departments_and_machines(tmp_path, monkeypatch):
+    database_path = tmp_path / "operator-scope-filters.sqlite3"
+    monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")
+
+    original_database_uri = TestingConfig.SQLALCHEMY_DATABASE_URI
+    TestingConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{database_path}"
+
+    app = create_app("testing")
+    with app.app_context():
+        db.create_all()
+        company = Company(name="Scope Company", slug="scope-company", is_active=True)
+        db.session.add(company)
+        db.session.flush()
+
+        active_department = Department(company_id=company.id, name="Active Dept", is_active=True)
+        inactive_department = Department(company_id=company.id, name="Inactive Dept", is_active=False)
+        db.session.add_all([active_department, inactive_department])
+        db.session.flush()
+
+        active_group = MachineGroup(company_id=company.id, name="Press", is_active=True)
+        inactive_group = MachineGroup(company_id=company.id, name="Weld", is_active=False)
+        db.session.add_all([active_group, inactive_group])
+        db.session.flush()
+
+        valid_machine = Machine(
+            company_id=company.id,
+            machine_code="M-ACTIVE",
+            name="Valid Machine",
+            machine_type=active_group.name,
+            department_id=active_department.id,
+            is_active=True,
+        )
+        inactive_department_machine = Machine(
+            company_id=company.id,
+            machine_code="M-INACTIVE-DEPT",
+            name="Inactive Department Machine",
+            machine_type=active_group.name,
+            department_id=inactive_department.id,
+            is_active=True,
+        )
+        inactive_group_machine = Machine(
+            company_id=company.id,
+            machine_code="M-INACTIVE-GROUP",
+            name="Inactive Group Machine",
+            machine_type=inactive_group.name,
+            department_id=active_department.id,
+            is_active=True,
+        )
+        inactive_machine = Machine(
+            company_id=company.id,
+            machine_code="M-OFF",
+            name="Inactive Machine",
+            machine_type=active_group.name,
+            department_id=active_department.id,
+            is_active=False,
+        )
+        db.session.add_all([valid_machine, inactive_department_machine, inactive_group_machine, inactive_machine])
+        db.session.commit()
+
+        scope = get_scope_filters(
+            membership=SimpleNamespace(
+                company_id=company.id,
+                role="Operator",
+                scope_mode="restricted",
+                department_id=None,
+                machine_group_id=None,
+                scope_config_json=json.dumps(
+                    {
+                        "machine_ids": [
+                            valid_machine.id,
+                            inactive_department_machine.id,
+                            inactive_group_machine.id,
+                            inactive_machine.id,
+                        ],
+                        "machine_group_ids": [active_group.id],
+                        "department_ids": [active_department.id, inactive_department.id],
+                    }
+                ),
+                is_restricted=True,
+            )
+        )
+
+        assert scope["machine_ids"] == [valid_machine.id]
+        assert scope["department_ids"] == [active_department.id]
+        assert scope["machine_group_names"] == [active_group.name]
+
+        db.session.remove()
+        db.drop_all()
+    TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
+
+
+def test_manager_scope_filters_only_include_active_group_and_department_machines(tmp_path, monkeypatch):
+    database_path = tmp_path / "manager-scope-filters.sqlite3"
+    monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")
+
+    original_database_uri = TestingConfig.SQLALCHEMY_DATABASE_URI
+    TestingConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{database_path}"
+
+    app = create_app("testing")
+    with app.app_context():
+        db.create_all()
+        company = Company(name="Manager Scope Company", slug="manager-scope-company", is_active=True)
+        db.session.add(company)
+        db.session.flush()
+
+        active_department = Department(company_id=company.id, name="Assembly", is_active=True)
+        inactive_department = Department(company_id=company.id, name="Retired Dept", is_active=False)
+        db.session.add_all([active_department, inactive_department])
+        db.session.flush()
+
+        active_group = MachineGroup(company_id=company.id, name="Line 1", is_active=True)
+        inactive_group = MachineGroup(company_id=company.id, name="Line 2", is_active=False)
+        db.session.add_all([active_group, inactive_group])
+        db.session.flush()
+
+        active_machine = Machine(
+            company_id=company.id,
+            machine_code="M-L1",
+            name="Line 1 Machine",
+            machine_type=active_group.name,
+            department_id=active_department.id,
+            is_active=True,
+        )
+        inactive_group_machine = Machine(
+            company_id=company.id,
+            machine_code="M-L2",
+            name="Line 2 Machine",
+            machine_type=inactive_group.name,
+            department_id=active_department.id,
+            is_active=True,
+        )
+        inactive_department_machine = Machine(
+            company_id=company.id,
+            machine_code="M-OLD",
+            name="Old Department Machine",
+            machine_type=active_group.name,
+            department_id=inactive_department.id,
+            is_active=True,
+        )
+        db.session.add_all([active_machine, inactive_group_machine, inactive_department_machine])
+        db.session.commit()
+
+        scope = get_scope_filters(
+            membership=SimpleNamespace(
+                company_id=company.id,
+                role="Manager",
+                scope_mode="restricted",
+                department_id=None,
+                machine_group_id=None,
+                scope_config_json=json.dumps(
+                    {
+                        "machine_group_ids": [active_group.id, inactive_group.id],
+                        "department_ids": [active_department.id, inactive_department.id],
+                    }
+                ),
+                is_restricted=True,
+            )
+        )
+
+        assert scope["machine_ids"] == [active_machine.id]
+        assert scope["department_ids"] == [active_department.id]
+        assert scope["machine_group_names"] == [active_group.name]
 
         db.session.remove()
         db.drop_all()
