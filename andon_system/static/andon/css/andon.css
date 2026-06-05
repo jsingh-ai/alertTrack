@@ -4414,6 +4414,34 @@ html[data-theme="light"] .operator-machine-group__count {
   margin-bottom: 0.7rem;
 }
 
+.button-board-shell .operator-machine-tile .machine-tile__radius-panel--grouped {
+  margin-top: 0.35rem;
+  margin-bottom: 0;
+}
+
+.machine-modal__grouped-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.05rem;
+  padding: 0.05rem 0.1rem 0.2rem;
+}
+
+.machine-modal__grouped-label {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #18324f;
+}
+
+.machine-modal__grouped-state {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(24, 50, 79, 0.62);
+}
+
 @media (max-width: 720px) {
   .button-board-shell .operator-machine-tile .machine-tile__radius-panel .radius-panel__grid--operator {
     grid-template-columns: 1fr;
@@ -5584,10 +5612,16 @@ body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__id
 
 .button-board-shell .operator-machine-tile .machine-modal__multi-alert-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 12px;
   width: 100%;
-  margin-top: 0.35rem;
+  margin-top: 0;
+}
+
+.button-board-shell .operator-machine-tile .machine-modal__multi-alert-stack {
+  display: grid;
+  gap: 0.5rem;
+  width: 100%;
 }
 
 .button-board-shell .operator-machine-tile .machine-modal__multi-alert-grid > .machine-modal__alert-card {
@@ -5606,7 +5640,8 @@ body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__id
 .button-board-shell .operator-machine-tile .machine-modal--response > .machine-tile__radius-panel--response,
 .button-board-shell .operator-machine-tile .machine-modal--response > .machine-modal__section--timer-hero,
 .button-board-shell .operator-machine-tile .machine-modal--response > .machine-modal__note-row,
-.button-board-shell .operator-machine-tile .machine-modal--response > .machine-modal__alert-action-row {
+.button-board-shell .operator-machine-tile .machine-modal--response > .machine-modal__alert-action-row,
+.button-board-shell .operator-machine-tile .machine-modal--response > .machine-modal__grouped-header {
   grid-column: 1 / -1;
 }
 
@@ -5846,6 +5881,7 @@ body.operator-shell .button-board-shell .operator-machine-tile .machine-tile__id
 
 .machine-modal__alert-card--multi {
   align-self: stretch;
+  padding-top: 0.45rem;
 }
 
 .machine-modal__alert-card--quality {

@@ -826,7 +826,12 @@ function onBoardClick(event) {
   if (!actionButton) return;
   const action = actionButton.dataset.inlineAction;
   const actionMachineId = Number(actionButton.closest(".operator-machine-tile")?.dataset.machineId || 0);
-  const actionAlertId = Number(actionButton.closest(".operator-machine-tile")?.dataset.alertId || actionButton.dataset.alertId || 0);
+  const actionAlertId = Number(
+    actionButton.closest(".machine-modal__alert-card")?.dataset.alertId
+    || actionButton.dataset.alertId
+    || actionButton.closest(".operator-machine-tile")?.dataset.alertId
+    || 0,
+  );
   if (action === "send-message") {
     void createAlertFromModal();
   } else if (action === "act-on-alert") {
@@ -1270,19 +1275,26 @@ async function actOnActiveAlert(machineId = 0, alertIdHint = 0) {
     const effectiveMachineId = Number(machineId || state.selectedMachine?.id || 0);
     let liveMachine = state.board.machines.find((machine) => Number(machine.id) === effectiveMachineId);
     let activeAlerts = getMachineActiveAlerts(liveMachine);
-    let activeAlert = activeAlerts.find((alert) => Number(alert.id) === Number(alertIdHint))
-      || state.selectedAlert
-      || getPrimaryActiveAlert(liveMachine)
-      || null;
+    const specificAlertRequested = Number(alertIdHint || 0) > 0;
+    let activeAlert = specificAlertRequested
+      ? (activeAlerts.find((alert) => Number(alert.id) === Number(alertIdHint)) || null)
+      : (
+        state.selectedAlert
+        || getPrimaryActiveAlert(liveMachine)
+        || null
+      );
     let alertId = activeAlert?.id;
     if ((!alertId || !activeAlert || !activeAlerts.length) && effectiveMachineId) {
       await refreshBoardState();
       liveMachine = state.board.machines.find((machine) => Number(machine.id) === effectiveMachineId);
       activeAlerts = getMachineActiveAlerts(liveMachine);
-      activeAlert = activeAlerts.find((alert) => Number(alert.id) === Number(alertIdHint))
-        || state.selectedAlert
-        || getPrimaryActiveAlert(liveMachine)
-        || null;
+      activeAlert = specificAlertRequested
+        ? (activeAlerts.find((alert) => Number(alert.id) === Number(alertIdHint)) || null)
+        : (
+          state.selectedAlert
+          || getPrimaryActiveAlert(liveMachine)
+          || null
+        );
       alertId = activeAlert?.id;
     }
     if (!alertId || !activeAlert) return;
@@ -1570,8 +1582,15 @@ function renderMachineTile(machine, detailed) {
       ${active
         ? (activeAlerts.length > 1
           ? `
-            <div class="machine-modal__multi-alert-grid">
-              ${activeAlerts.map((entry) => renderAlertInlinePanel(machine, entry, detailed, { cardModifier: " machine-modal__alert-card--multi" })).join("")}
+            <div class="machine-modal__multi-alert-stack">
+              ${renderRadiusPanel(machine, "machine-tile__radius-panel machine-tile__radius-panel--grouped")}
+              <div class="machine-modal__multi-alert-grid">
+                ${activeAlerts.map((entry) => renderAlertInlinePanel(machine, entry, detailed, {
+                  cardModifier: " machine-modal__alert-card--multi",
+                  hideRadius: true,
+                  grouped: true,
+                })).join("")}
+              </div>
             </div>`
           : renderAlertInlinePanel(machine, alert, detailed))
         : renderCreateInlinePanel(machine, detailed)}
@@ -1894,6 +1913,8 @@ function formatCurrentTime() {
 
 function renderAlertInlinePanel(machine, alert, detailed, options = {}) {
   const cardModifier = options.cardModifier ? ` ${options.cardModifier}` : "";
+  const hideRadius = Boolean(options.hideRadius);
+  const grouped = Boolean(options.grouped);
   const isOpen = alert.status === "OPEN";
   const threadMarkup = renderAlertMessageThread(alert);
   const operatorNoteMarkup = renderOperatorCreatedNote(alert);
@@ -1908,15 +1929,22 @@ function renderAlertInlinePanel(machine, alert, detailed, options = {}) {
   const actionLabel = "Close Alert";
   const alertDraftValue = getAlertDraftValue(alert.id);
   const alertToneClass = `machine-modal__alert-card--${normalizeDepartmentName(alert.department_name || "general").replace(/\s+/g, "-")}`;
+  const groupedLabel = alert.department_name || machine.department_name || "Unknown";
   return `
     <article class="machine-tile__inline-panel machine-tile__inline-panel--response machine-modal machine-modal--response machine-modal__alert-card ${alertToneClass}${cardModifier} ${isOpen ? "machine-modal--response-open" : "machine-modal--response-working"} ${detailed ? "machine-tile__inline-panel--detailed" : ""}" data-alert-id="${alert.id}">
+      ${grouped ? `
+        <div class="machine-modal__grouped-header">
+          <div class="machine-modal__grouped-label">${escapeHtml(groupedLabel)}</div>
+          <div class="machine-modal__grouped-state">${escapeHtml(isOpen ? "Open" : "Working")}</div>
+        </div>
+      ` : ""}
       ${isOpen ? `
         <div class="machine-modal__section machine-modal__section--response-waiting">
           <div class="machine-modal__response-waiting-title">Waiting on Response</div>
           <div class="machine-modal__response-waiting-subtitle">En espera de respuesta</div>
         </div>
       ` : ""}
-      ${renderRadiusPanel(machine, "machine-tile__radius-panel machine-tile__radius-panel--response")}
+      ${hideRadius ? "" : renderRadiusPanel(machine, "machine-tile__radius-panel machine-tile__radius-panel--response")}
       ${isOpen ? "" : `
         <div class="machine-modal__section machine-modal__section--response-tile machine-modal__section--response-responder">
           <div class="machine-modal__response-label">Who is responding</div>
