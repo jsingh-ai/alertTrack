@@ -564,9 +564,8 @@ def api_acknowledge_alert(alert_id):
         service_metrics = {}
         alert = acknowledge_alert(alert_id, body, metrics=service_metrics)
         insert_or_update_ms = (time.perf_counter() - update_started_at) * 1000
-        serialize_started_at = time.perf_counter()
-        alert_payload = fetch_alert_payload_by_id(alert.id, company_id=alert.company_id) or {"id": alert.id, "status": alert.status}
-        serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+        serialize_ms = 0.0
+        alert_payload = {"id": alert.id, "status": alert.status, "company_id": alert.company_id, "machine_id": alert.machine_id}
         if current_app.config.get("ANDON_PERF_LOGS"):
             current_app.logger.debug(
                 "PERF alert_acknowledge auth_ms=%.1f payload_ms=%.1f insert_or_update_ms=%.1f serialize_ms=%.1f "
@@ -586,6 +585,9 @@ def api_acknowledge_alert(alert_id):
         return jsonify({"success": True, "data": alert_payload})
     except AlertServiceError as exc:
         return _error(str(exc), 400)
+    except Exception:
+        current_app.logger.exception("API alert_acknowledge unexpected failure alert_id=%s payload=%s", alert_id, body)
+        return _error("Unable to acknowledge alert", 500)
 
 
 @api_bp.get("/pager/alerts/active")
@@ -759,9 +761,8 @@ def api_resolve_alert(alert_id):
         service_metrics = {}
         alert = resolve_alert(alert_id, body, metrics=service_metrics)
         insert_or_update_ms = (time.perf_counter() - update_started_at) * 1000
-        serialize_started_at = time.perf_counter()
-        alert_payload = fetch_alert_payload_by_id(alert.id, company_id=alert.company_id) or {"id": alert.id, "status": alert.status}
-        serialize_ms = (time.perf_counter() - serialize_started_at) * 1000
+        serialize_ms = 0.0
+        alert_payload = {"id": alert.id, "status": alert.status, "company_id": alert.company_id, "machine_id": alert.machine_id}
         if current_app.config.get("ANDON_PERF_LOGS"):
             current_app.logger.debug(
                 "PERF alert_resolve auth_ms=%.1f payload_ms=%.1f insert_or_update_ms=%.1f serialize_ms=%.1f "
@@ -781,6 +782,9 @@ def api_resolve_alert(alert_id):
         return jsonify({"success": True, "data": alert_payload})
     except AlertServiceError as exc:
         return _error(str(exc), 400)
+    except Exception:
+        current_app.logger.exception("API alert_resolve unexpected failure alert_id=%s payload=%s", alert_id, body)
+        return _error("Unable to close alert", 500)
 
 
 @api_bp.post("/alerts/<int:alert_id>/cancel")

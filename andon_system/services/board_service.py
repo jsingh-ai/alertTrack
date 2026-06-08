@@ -954,6 +954,12 @@ def _load_board_context(
             )
         ]
         filtered_alert_count = len(active_alerts)
+        created_notes_started_at = time.perf_counter()
+        created_notes_by_alert_id = _created_notes_by_alert_id(
+            [SimpleNamespace(id=alert.get("id")) for alert in active_alerts if alert.get("id")],
+            company_id,
+        )
+        created_notes_query_ms = (time.perf_counter() - created_notes_started_at) * 1000
         for alert in active_alerts:
             alerts_by_machine.setdefault(alert["machine_id"], []).append(alert)
             alert_by_machine.setdefault(alert["machine_id"], alert)

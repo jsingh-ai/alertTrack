@@ -644,6 +644,55 @@ def test_resolve_uses_lightweight_response_and_live_cache_invalidation_only(clie
     assert calls["live"] == 1
 
 
+def test_resolve_does_not_depend_on_post_commit_payload_refetch(client, app, monkeypatch):
+    fixtures = _create_alert_api_fixtures(app)
+    csrf_token = _seed_csrf(client)
+    with client.session_transaction() as session:
+        session["andon_company_slug"] = fixtures["company_slug"]
+
+    alert_id = _create_alert_for_mutation(client, fixtures, csrf_token)
+
+    acknowledge_response = client.post(
+        f"/api/andon/alerts/{alert_id}/acknowledge",
+        json={"note": "ack note"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert acknowledge_response.status_code == 200
+
+    from andon_system.routes import api as api_module
+
+    monkeypatch.setattr(api_module, "fetch_alert_payload_by_id", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("post-commit payload refetch should not run")))
+
+    response = client.post(
+        f"/api/andon/alerts/{alert_id}/resolve",
+        json={"note": "resolved"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["data"]["id"] == alert_id
+    assert payload["data"]["status"] == "RESOLVED"
+
+
+def test_operator_snapshot_includes_created_note_for_active_alerts(client, app):
+    fixtures = _create_alert_api_fixtures(app)
+    csrf_token = _seed_csrf(client)
+    with client.session_transaction() as session:
+        session["andon_company_slug"] = fixtures["company_slug"]
+
+    alert_id = _create_alert_for_mutation(client, fixtures, csrf_token)
+
+    response = client.get("/api/andon/operator-snapshot")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    machines = payload["data"]["machines"]
+    machine = next(item for item in machines if item["id"] == fixtures["machine_id"])
+    active_alert = next(item for item in machine["active_alerts"] if item["id"] == alert_id)
+    assert active_alert["created_note"] == "initial note"
+
+
 def test_database_unique_index_rejects_duplicate_active_alerts(app):
     fixtures = _create_alert_api_fixtures(app)
     with app.app_context():
