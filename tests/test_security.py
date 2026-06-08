@@ -876,6 +876,20 @@ def admin_login_client(tmp_path, monkeypatch):
     TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
 
 
+def _seed_admin_session_for_company(client, app):
+    client.get("/andon/home")
+    with app.app_context():
+        admin_user = User.query.filter_by(username="admin.user").one()
+        company = Company.query.filter_by(slug="admin-test").one()
+    with client.session_transaction() as session:
+        csrf_token = session[CSRF_SESSION_KEY]
+        session[USER_SESSION_KEY] = admin_user.id
+        session["andon_company_slug"] = company.slug
+        session["andon_company_id"] = company.id
+        session[ADMIN_SESSION_KEY] = True
+    return csrf_token
+
+
 def test_login_blocks_plain_http_when_secure_cookie_required(login_client):
     login_client.get("/andon/home", base_url="http://localhost")
     with login_client.session_transaction() as session:
@@ -948,6 +962,86 @@ def test_operator_login_redirects_to_operator_without_rendering_page(proxied_log
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/andon/operator")
+
+
+def test_admin_create_department_role_user_accepts_form_csrf(admin_login_client):
+    client, app = admin_login_client
+    csrf_token = _seed_admin_session_for_company(client, app)
+
+    with app.app_context():
+        company = Company.query.filter_by(slug="admin-test").one()
+        department = Department.query.filter_by(company_id=company.id, name="Pagerless Department").one()
+
+    response = client.post(
+        "/andon/admin/user/create",
+        data={
+            "csrf_token": csrf_token,
+            "display_name": "Dept User",
+            "username": "dept.user",
+            "password": "DeptPass!2026",
+            "role": "Viewer",
+            "department_id": str(department.id),
+            "scope_department_ids": str(department.id),
+        },
+        headers={
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["user"]["role"] == "Viewer"
+    assert payload["user"]["scope_department_ids"] == [department.id]
+
+
+def test_admin_create_operator_user_accepts_normalized_group_machine_scope(admin_login_client):
+    client, app = admin_login_client
+    csrf_token = _seed_admin_session_for_company(client, app)
+
+    with app.app_context():
+        company = Company.query.filter_by(slug="admin-test").one()
+        department = Department.query.filter_by(company_id=company.id, name="Pagerless Department").one()
+        group = MachineGroup(company_id=company.id, name="Press", is_active=True)
+        db.session.add(group)
+        db.session.flush()
+        machine = Machine(
+            company_id=company.id,
+            machine_code="PRESS-01",
+            name="Press 01",
+            machine_type=" Press ",
+            department_id=department.id,
+            is_active=True,
+        )
+        db.session.add(machine)
+        db.session.commit()
+        group_id = group.id
+        machine_id = machine.id
+
+    response = client.post(
+        "/andon/admin/user/create",
+        data={
+            "csrf_token": csrf_token,
+            "display_name": "Operator User",
+            "username": "operator.user",
+            "password": "OperatorPass!2026",
+            "role": "Operator",
+            "scope_machine_group_ids": str(group_id),
+            "scope_machine_ids": str(machine_id),
+        },
+        headers={
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["user"]["role"] == "Operator"
+    assert payload["user"]["scope_machine_group_ids"] == [group_id]
+    assert payload["user"]["scope_machine_ids"] == [machine_id]
 
 
 def test_health_endpoint_returns_safe_json_without_auth(login_client):

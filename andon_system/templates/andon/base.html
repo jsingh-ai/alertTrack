@@ -162,7 +162,6 @@
       const sidebarMobileOpen = document.getElementById("sidebarMobileOpen");
       const sidebarMobileClose = document.getElementById("sidebarMobileClose");
       const appSidebarOverlay = document.getElementById("appSidebarOverlay");
-      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
 
       function getTheme() {
         return document.documentElement.dataset.theme || "dark";
@@ -203,7 +202,7 @@
       }
 
       function getCsrfToken() {
-        return csrfToken;
+        return document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
       }
 
       function ensureCsrfField(form) {
