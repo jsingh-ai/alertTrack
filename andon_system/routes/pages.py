@@ -8,7 +8,7 @@ from collections import defaultdict
 from zoneinfo import ZoneInfo
 
 from flask import Blueprint, current_app, flash, g, redirect, render_template, request, session, url_for
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..company_context import (
@@ -17,7 +17,7 @@ from ..company_context import (
     get_current_company,
     set_current_company_slug,
 )
-from ..extensions import db
+from ..extensions import db, socketio
 from ..models.department import Department
 from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
@@ -38,10 +38,12 @@ from ..security import (
     get_default_landing_endpoint,
     get_scope_filters,
     get_user_memberships,
+    hash_user_password,
     is_authenticated,
     is_safe_redirect_target,
     login_user,
     logout_user,
+    password_hash_needs_rehash,
     require_admin_authentication,
     require_page_access,
 )
@@ -115,6 +117,38 @@ def _session_cookie_domain_matches_request() -> bool:
 def _render_home_with_flash(message: str, category: str = "warning", status_code: int = 200):
     flash(message, category)
     return render_template("andon/home.html"), status_code
+
+
+def _queue_post_login_user_updates(user_id: int, password: str | None, existing_password_hash: str | None) -> None:
+    if not user_id:
+        return
+    app = current_app._get_current_object()
+    should_rehash = bool(password and password_hash_needs_rehash(existing_password_hash))
+
+    def _run_updates():
+        with app.app_context():
+            try:
+                values = {"last_login_at": datetime.now(timezone.utc)}
+                if should_rehash and password:
+                    values["password_hash"] = hash_user_password(password)
+                db.session.execute(
+                    update(User)
+                    .where(User.id == user_id)
+                    .values(**values)
+                )
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("Unable to persist post-login user updates user_id=%s", user_id)
+
+    try:
+        if socketio is not None:
+            socketio.start_background_task(_run_updates)
+            return
+    except Exception:
+        current_app.logger.exception("Unable to queue post-login user updates user_id=%s", user_id)
+
+    _run_updates()
 
 
 def _scope_summary_text(company_id: int | None) -> str:
@@ -386,9 +420,8 @@ def login_page():
         status_code = 403
         _log_login_perf()
         return _render_home_with_flash("This account does not have any active company access.", "warning", 403)
-    user.last_login_at = datetime.now(timezone.utc)
     commit_started_at = time.perf_counter()
-    db.session.commit()
+    _queue_post_login_user_updates(user.id, password, user.password_hash)
     commit_ms = (time.perf_counter() - commit_started_at) * 1000
     membership = get_default_membership(user)
     redirect_started_at = time.perf_counter()

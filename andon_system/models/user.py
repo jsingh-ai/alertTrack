@@ -1,12 +1,21 @@
 import json
 
 from sqlalchemy import func
+from flask import current_app, has_app_context
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..extensions import db
 
 USER_ROLES = ("Admin", "Manager", "Operator", "Viewer")
 USER_SCOPE_MODES = ("restricted", "all")
+
+
+def _password_hash_config():
+    if has_app_context():
+        method = str(current_app.config.get("USER_PASSWORD_HASH_METHOD") or "pbkdf2:sha256:300000").strip()
+        salt_length = int(current_app.config.get("USER_PASSWORD_SALT_LENGTH", 16) or 16)
+        return method, max(8, salt_length)
+    return "pbkdf2:sha256:300000", 16
 
 
 class User(db.Model):
@@ -65,7 +74,8 @@ class User(db.Model):
     )
 
     def set_password(self, password: str) -> None:
-        self.password_hash = generate_password_hash(password)
+        method, salt_length = _password_hash_config()
+        self.password_hash = generate_password_hash(password, method=method, salt_length=salt_length)
 
     def check_password(self, password: str | None) -> bool:
         if not self.password_hash:

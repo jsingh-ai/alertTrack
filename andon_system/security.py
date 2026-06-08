@@ -89,6 +89,26 @@ def _safe_user_identity_id(user: User | None) -> int | None:
     return None
 
 
+def configured_password_hash_method() -> str:
+    if has_request_context():
+        return str(current_app.config.get("USER_PASSWORD_HASH_METHOD") or "pbkdf2:sha256:300000").strip()
+    return "pbkdf2:sha256:300000"
+
+
+def hash_user_password(password: str) -> str:
+    method = configured_password_hash_method()
+    salt_length = int(current_app.config.get("USER_PASSWORD_SALT_LENGTH", 16) or 16) if has_request_context() else 16
+    return generate_password_hash(password, method=method, salt_length=max(8, salt_length))
+
+
+def password_hash_needs_rehash(password_hash: str | None) -> bool:
+    raw_hash = str(password_hash or "").strip()
+    if not raw_hash:
+        return False
+    current_method = raw_hash.split("$", 1)[0]
+    return current_method != configured_password_hash_method()
+
+
 def generate_csrf_token() -> str:
     token = session.get(CSRF_SESSION_KEY)
     if not token:
