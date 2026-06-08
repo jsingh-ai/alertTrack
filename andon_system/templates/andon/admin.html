@@ -1172,7 +1172,7 @@
       return "Operator: pick one or more machine groups, then choose machines in those groups.";
     }
     if (role === "Viewer") {
-      return "Department: choose a department. Machine groups are optional.";
+      return "Department: choose a department. No machine or machine-group selection is required.";
     }
     if (role === "Manager") {
       return "Manager: pick machine groups, or leave blank to include all machine groups. Machines are assigned automatically.";
@@ -1185,12 +1185,14 @@
     const adminMode = role === "Admin";
     const operatorMode = role === "Operator";
     const viewerMode = role === "Viewer";
+    const managerMode = role === "Manager";
     const machineSelectionEnabled = operatorMode;
+    const showGroupScope = operatorMode || managerMode;
     userScopeRoleHint.textContent = roleScopeHint(role);
     userDepartmentFieldWrap.classList.toggle("d-none", !viewerMode);
     userScopeGroupList.querySelectorAll("input").forEach((input) => {
-      input.disabled = adminMode;
-      if (adminMode) {
+      input.disabled = !showGroupScope;
+      if (!showGroupScope) {
         input.checked = false;
       }
     });
@@ -1198,12 +1200,18 @@
     if (!viewerMode) {
       userDepartmentSelect.value = "";
     }
-    if (adminMode) {
+    if (!showGroupScope) {
       userScopeMachineIdsInput.value = "";
       userScopeMachineGroupIdsInput.value = "";
+    }
+    if (adminMode || viewerMode) {
+      userScopeMachineIdsInput.value = "";
+      userScopeMachineGroupIdsInput.value = "";
+    }
+    if (adminMode) {
       userScopeDepartmentIdsInput.value = "";
     }
-    userScopeGroupBlock.classList.toggle("d-none", adminMode);
+    userScopeGroupBlock.classList.toggle("d-none", !showGroupScope);
     userScopeMachineBlock.classList.toggle("d-none", !machineSelectionEnabled);
     userScopeAllMachines.disabled = !machineSelectionEnabled;
     if (!machineSelectionEnabled) {
@@ -1315,7 +1323,7 @@
       : (role === "Operator"
         ? selectedMachineDepartmentIds
         : (role === "Manager" ? machineDepartmentIdsForMachineIds(selectedMachineIds) : []));
-    userScopeMachineGroupIdsInput.value = selectedGroupIds.join(",");
+    userScopeMachineGroupIdsInput.value = role === "Operator" || role === "Manager" ? selectedGroupIds.join(",") : "";
     userScopeMachineIdsInput.value = role === "Operator" || role === "Manager" ? selectedMachineIds.join(",") : "";
     userScopeDepartmentIdsInput.value = selectedDepartmentIds.join(",");
   }
@@ -1374,6 +1382,8 @@
     userScopeModalUserName.textContent = displayName;
     userScopeModalHint.textContent = roleScopeHint(role);
     const viewerMode = role === "Viewer";
+    const managerMode = role === "Manager";
+    const showGroupScope = role === "Operator" || managerMode;
     if (userScopeModalDepartmentBlock && userScopeModalDepartmentSelect) {
       userScopeModalDepartmentBlock.classList.toggle("d-none", !viewerMode);
       userScopeModalDepartmentSelect.value = row.querySelector('[name="department_id"]')?.value || "";
@@ -1386,6 +1396,7 @@
       : normalizedGroupIds;
     modalScopeSelectedGroupIds = new Set(resolvedGroupIds);
     modalScopeSelectedMachineIds = new Set(uniqueSortedIds(machineIds));
+    userScopeModalGroupList.parentElement?.classList.toggle("d-none", !showGroupScope);
     renderUserScopeModalGroups();
     const machineSelectionEnabled = role === "Operator";
     userScopeModalMachineBlock.classList.toggle("d-none", !machineSelectionEnabled);
@@ -1395,6 +1406,9 @@
     if (!machineSelectionEnabled) {
       userScopeModalAllMachines.checked = false;
       modalScopeSelectedMachineIds = new Set();
+    }
+    if (!showGroupScope) {
+      modalScopeSelectedGroupIds = new Set();
     }
     renderUserScopeModalMachines();
     openUserScopeModalDialog();
@@ -1435,15 +1449,15 @@
         : (role === "Manager" ? machineDepartmentIdsForMachineIds(selectedMachineIds) : []));
     const primaryGroupId = selectedGroupIds.length ? selectedGroupIds[0] : "";
     const primaryDepartmentId = selectedDepartmentIds.length ? selectedDepartmentIds[0] : "";
-    row.querySelector('[name="machine_group_id"]').value = primaryGroupId ? String(primaryGroupId) : "";
+    row.querySelector('[name="machine_group_id"]').value = role === "Admin" ? (primaryGroupId ? String(primaryGroupId) : "") : "";
     row.querySelector('[name="department_id"]').value = primaryDepartmentId ? String(primaryDepartmentId) : "";
-    row.querySelector('[name="scope_machine_group_ids"]').value = selectedGroupIds.join(",");
-    row.querySelector('[name="scope_machine_ids"]').value = selectedMachineIds.join(",");
+    row.querySelector('[name="scope_machine_group_ids"]').value = role === "Operator" || role === "Manager" ? selectedGroupIds.join(",") : "";
+    row.querySelector('[name="scope_machine_ids"]').value = role === "Operator" || role === "Manager" ? selectedMachineIds.join(",") : "";
     row.querySelector('[name="scope_department_ids"]').value = selectedDepartmentIds.join(",");
-    row.dataset.userMachineGroupId = primaryGroupId ? String(primaryGroupId) : "";
+    row.dataset.userMachineGroupId = role === "Admin" && primaryGroupId ? String(primaryGroupId) : "";
     row.dataset.userDepartmentId = primaryDepartmentId ? String(primaryDepartmentId) : "";
-    row.dataset.userScopeMachineGroupIds = selectedGroupIds.join(",");
-    row.dataset.userScopeMachineIds = selectedMachineIds.join(",");
+    row.dataset.userScopeMachineGroupIds = role === "Operator" || role === "Manager" ? selectedGroupIds.join(",") : "";
+    row.dataset.userScopeMachineIds = role === "Operator" || role === "Manager" ? selectedMachineIds.join(",") : "";
     row.dataset.userScopeDepartmentIds = selectedDepartmentIds.join(",");
   }
 
@@ -2006,7 +2020,9 @@
     }
     if (role === "Viewer") {
       row.querySelector('[name="scope_machine_ids"]').value = "";
+      row.querySelector('[name="scope_machine_group_ids"]').value = "";
       row.querySelector('[name="scope_department_ids"]').value = departmentValue ? String(departmentValue) : "";
+      row.querySelector('[name="machine_group_id"]').value = "";
       return;
     }
     if (role === "Manager") {

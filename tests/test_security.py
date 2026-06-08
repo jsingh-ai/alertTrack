@@ -1030,7 +1030,6 @@ def test_admin_create_department_role_user_accepts_form_csrf(admin_login_client)
             "password": "DeptPass!2026",
             "role": "Viewer",
             "department_id": str(department.id),
-            "scope_department_ids": str(department.id),
         },
         headers={
             "Accept": "application/json",

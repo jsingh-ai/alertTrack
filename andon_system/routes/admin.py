@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime, timezone
 
 from sqlalchemy import func, insert, text, update
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 import time
 
 from flask import Blueprint, current_app, jsonify, flash, redirect, request, url_for
@@ -1251,6 +1251,8 @@ def create_user():
     scope_machine_ids = _int_list_from_form("scope_machine_ids")
     scope_machine_group_ids = _int_list_from_form("scope_machine_group_ids")
     scope_department_ids = _int_list_from_form("scope_department_ids")
+    if role == "Viewer" and department_id is not None and not scope_department_ids:
+        scope_department_ids = [department_id]
     email = (request.form.get("email") or "").strip() or None
     phone_number = (request.form.get("phone_number") or "").strip() or None
     if not display_name:
@@ -1259,6 +1261,12 @@ def create_user():
         return _validation_error("Username is required")
     if not password.strip():
         return _validation_error("Password is required")
+    duplicate_user = User.query.filter(User.username == username).one_or_none() if username else None
+    if duplicate_user is not None and UserCompanyAccess.query.filter_by(user_id=duplicate_user.id, company_id=company_id).one_or_none() is not None:
+        return _validation_error("Username is already in use")
+    duplicate_email = User.query.filter(User.email == email).one_or_none() if email else None
+    if duplicate_email is not None and duplicate_email.username != username:
+        return _validation_error("Email is already in use")
     machine_group, department, error_response = _resolve_membership_scope(
         company_id, role, scope_mode, machine_group_id, department_id
     )
@@ -1349,6 +1357,9 @@ def create_user():
         commit_started_at = time.perf_counter()
         db.session.commit()
         commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    except IntegrityError:
+        db.session.rollback()
+        return _validation_error("Username or email is already in use")
     except OperationalError:
         return _admin_mutation_busy_response()
 
@@ -1406,6 +1417,8 @@ def update_user(user_id):
     scope_machine_ids = _int_list_from_form("scope_machine_ids")
     scope_machine_group_ids = _int_list_from_form("scope_machine_group_ids")
     scope_department_ids = _int_list_from_form("scope_department_ids")
+    if role == "Viewer" and department_id is not None and not scope_department_ids:
+        scope_department_ids = [department_id]
     email = (request.form.get("email") or "").strip() or None
     phone_number = (request.form.get("phone_number") or "").strip() or None
 
