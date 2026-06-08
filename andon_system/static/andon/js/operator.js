@@ -325,7 +325,7 @@ async function boot() {
   });
   const metadataWarmupPromise = state.detailMetadataLoaded
     ? Promise.resolve()
-    : loadOperatorMetadata().then(() => {
+    : loadOperatorMetadata({ includeUsers: false }).then(() => {
       renderBoard();
     }).catch((_error) => {
       console.warn("Failed to preload operator metadata.");
@@ -611,15 +611,9 @@ function hydrateOperatorDepartmentsFromCache() {
 async function loadOperatorMetadata(options = {}) {
   const force = Boolean(options.force);
   const departmentId = Number(options.departmentId || 0) || null;
-  const includeUsers = options.includeUsers !== false;
+  const includeUsers = options.includeUsers === true;
   const requestKey = `${force ? "force" : "normal"}:${departmentId || "all"}:${includeUsers ? "users" : "no-users"}`;
   if (!departmentId && state.detailMetadataLoaded && !force) return;
-  if (departmentId && !force && operatorMetadataLoadPromise) {
-    await operatorMetadataLoadPromise;
-    if (state.detailMetadataLoaded && getProblemsForDepartment(departmentId).length > 0) {
-      return;
-    }
-  }
   if (departmentId && !force && state.detailMetadataLoaded && getProblemsForDepartment(departmentId).length > 0) {
     return;
   }
