@@ -4,7 +4,7 @@ import json
 import secrets
 from datetime import datetime, timezone
 
-from sqlalchemy import func, insert, text, update
+from sqlalchemy import delete, func, insert, text, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 import time
 
@@ -1432,10 +1432,25 @@ def create_user():
     invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
         payload_started_at = time.perf_counter()
-        access = UserCompanyAccess.query.filter_by(user_id=user_id, company_id=company_id).one_or_none()
-        if access is None:
-            return _error_or_404("User not found")
-        payload = _membership_payload(access)
+        payload = {
+            "id": user_id,
+            "display_name": display_name,
+            "username": username,
+            "work_id": work_id,
+            "email": email,
+            "phone_number": phone_number,
+            "role": role,
+            "scope_mode": "all" if role == "Admin" else scope_mode,
+            "department_id": user_department_id,
+            "department_name": department.name if department else None,
+            "machine_group_id": user_machine_group_id,
+            "machine_group_name": machine_group.name if machine_group else None,
+            "scope_machine_ids": scope_config.get("machine_ids") or [],
+            "scope_machine_group_ids": scope_config.get("machine_group_ids") or [],
+            "scope_department_ids": scope_config.get("department_ids") or [],
+            "is_active": True,
+            "has_password": True,
+        }
         payload_ms = (time.perf_counter() - payload_started_at) * 1000
         _log_admin_mutation_perf(
             "create_user",
@@ -1595,30 +1610,40 @@ def toggle_user(user_id):
 def delete_user(user_id):
     started_at = time.perf_counter()
     company_id = _company_id()
-    access = UserCompanyAccess.query.filter_by(user_id=user_id, company_id=company_id).one_or_none()
-    user = access.user if access else None
-    if user is None or access is None:
+    row = db.session.execute(
+        db.select(UserCompanyAccess.id, UserCompanyAccess.user_id).where(
+            UserCompanyAccess.user_id == user_id,
+            UserCompanyAccess.company_id == company_id,
+        )
+    ).first()
+    if row is None:
         return _error_or_404("User not found")
+    access_id = row.id
+    target_user_id = row.user_id
     lookup_started_at = time.perf_counter()
-    db.session.delete(access)
+    db.session.execute(delete(UserCompanyAccess).where(UserCompanyAccess.id == access_id))
     has_other_access = (
         db.session.query(UserCompanyAccess.id)
         .filter(
-            UserCompanyAccess.user_id == user.id,
-            UserCompanyAccess.id != access.id,
+            UserCompanyAccess.user_id == target_user_id,
+            UserCompanyAccess.id != access_id,
         )
         .limit(1)
         .first()
         is not None
     )
     if not has_other_access:
-        user.is_active = False
+        db.session.execute(
+            update(User)
+            .where(User.id == target_user_id)
+            .values(is_active=False)
+        )
     lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
     commit_started_at = time.perf_counter()
     db.session.commit()
     commit_ms = (time.perf_counter() - commit_started_at) * 1000
     cleanup_started_at = time.perf_counter()
-    _queue_user_reference_cleanup(company_id, user.id)
+    _queue_user_reference_cleanup(company_id, target_user_id)
     cleanup_queue_ms = (time.perf_counter() - cleanup_started_at) * 1000
     invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)

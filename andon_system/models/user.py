@@ -12,10 +12,10 @@ USER_SCOPE_MODES = ("restricted", "all")
 
 def _password_hash_config():
     if has_app_context():
-        method = str(current_app.config.get("USER_PASSWORD_HASH_METHOD") or "pbkdf2:sha256:300000").strip()
+        method = str(current_app.config.get("USER_PASSWORD_HASH_METHOD") or "pbkdf2:sha256:120000").strip()
         salt_length = int(current_app.config.get("USER_PASSWORD_SALT_LENGTH", 16) or 16)
         return method, max(8, salt_length)
-    return "pbkdf2:sha256:300000", 16
+    return "pbkdf2:sha256:120000", 16
 
 
 class User(db.Model):

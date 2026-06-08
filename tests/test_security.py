@@ -1091,6 +1091,50 @@ def test_admin_create_operator_user_accepts_normalized_group_machine_scope(admin
     assert payload["user"]["scope_machine_ids"] == [machine_id]
 
 
+def test_admin_created_user_can_login_with_entered_password(admin_login_client):
+    client, app = admin_login_client
+    csrf_token = _seed_admin_session_for_company(client, app)
+
+    with app.app_context():
+        company = Company.query.filter_by(slug="admin-test").one()
+        department = Department.query.filter_by(company_id=company.id, name="Pagerless Department").one()
+
+    create_response = client.post(
+        "/andon/admin/user/create",
+        data={
+            "csrf_token": csrf_token,
+            "display_name": "Login User",
+            "username": "login.user",
+            "password": "LoginPass!2026",
+            "role": "Viewer",
+            "department_id": str(department.id),
+        },
+        headers={
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+    )
+
+    assert create_response.status_code == 200
+
+    client.post("/andon/logout")
+    client.get("/andon/home")
+    with client.session_transaction() as session:
+        login_csrf = session[CSRF_SESSION_KEY]
+
+    login_response = client.post(
+        "/andon/login",
+        data={
+            "identity": "login.user",
+            "password": "LoginPass!2026",
+            "csrf_token": login_csrf,
+        },
+        follow_redirects=False,
+    )
+
+    assert login_response.status_code == 302
+
+
 def test_health_endpoint_returns_safe_json_without_auth(login_client):
     response = login_client.get("/health")
 
