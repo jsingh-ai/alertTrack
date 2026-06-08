@@ -323,6 +323,13 @@ async function boot() {
     console.warn("Unable to load operator departments during boot.");
     return null;
   });
+  const metadataWarmupPromise = state.detailMetadataLoaded
+    ? Promise.resolve()
+    : loadOperatorMetadata().then(() => {
+      renderBoard();
+    }).catch((_error) => {
+      console.warn("Failed to preload operator metadata.");
+    });
 
   await boardPromise;
   normalizeViewState();
@@ -338,12 +345,12 @@ async function boot() {
     renderViewControls();
     renderBoard();
   });
+  void metadataWarmupPromise;
   void refreshBoardState({
     includeRadius: true,
     includeAlerts: true,
     reason: "initial-hydrate",
   });
-  scheduleOperatorMetadataWarmup();
 }
 
 function getCachedOperatorSnapshot() {
@@ -607,6 +614,12 @@ async function loadOperatorMetadata(options = {}) {
   const includeUsers = options.includeUsers !== false;
   const requestKey = `${force ? "force" : "normal"}:${departmentId || "all"}:${includeUsers ? "users" : "no-users"}`;
   if (!departmentId && state.detailMetadataLoaded && !force) return;
+  if (departmentId && !force && operatorMetadataLoadPromise) {
+    await operatorMetadataLoadPromise;
+    if (state.detailMetadataLoaded && getProblemsForDepartment(departmentId).length > 0) {
+      return;
+    }
+  }
   if (departmentId && !force && state.detailMetadataLoaded && getProblemsForDepartment(departmentId).length > 0) {
     return;
   }
@@ -668,18 +681,6 @@ async function loadOperatorDepartments(options = {}) {
 async function ensureOperatorDepartmentsLoaded() {
   if (state.departmentsLoaded && Array.isArray(state.departments) && state.departments.length > 0) return;
   await loadOperatorDepartments({ force: true });
-}
-
-function scheduleOperatorMetadataWarmup() {
-  if (state.detailMetadataLoaded || operatorMetadataLoadPromise) return;
-  const runWarmup = () => {
-    void loadOperatorMetadata().then(() => {
-      renderBoard();
-    }).catch((_error) => {
-      console.warn("Failed to preload operator metadata.");
-    });
-  };
-  setTimeout(runWarmup, 0);
 }
 
 function wireEvents() {
