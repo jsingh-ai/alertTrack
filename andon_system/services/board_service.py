@@ -5,6 +5,7 @@ import time
 from types import SimpleNamespace
 
 from flask import current_app, has_request_context
+from sqlalchemy import or_
 from sqlalchemy.orm import joinedload, load_only, noload
 
 from ..company_context import get_current_company_id
@@ -479,7 +480,12 @@ def _load_operator_metadata_context(
     if user_department_ids:
         user_query = user_query.filter(UserCompanyAccess.department_id.in_(user_department_ids))
     if machine_group_names:
-        user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
+        user_query = user_query.outerjoin(UserCompanyAccess.machine_group).filter(
+            or_(
+                MachineGroup.name.in_(machine_group_names),
+                UserCompanyAccess.machine_group_id.is_(None),
+            )
+        )
 
     departments_started_at = time.perf_counter()
     departments = department_query.filter_by(is_active=True).order_by(Department.name.asc()).all()
@@ -511,7 +517,7 @@ def _load_operator_metadata_context(
     if include_users:
         visible_users = [
             access.user
-            for access in user_query.filter_by(is_active=True).order_by(UserCompanyAccess.id.asc()).all()
+            for access in user_query.filter(UserCompanyAccess.is_active.is_(True)).order_by(UserCompanyAccess.id.asc()).all()
             if access.user
             and access.user.is_active
             and (access.department is None or access.department.is_active)
@@ -876,7 +882,12 @@ def _load_board_context(
     if machine_group_names:
         machine_query = machine_query.filter(Machine.machine_type.in_(machine_group_names))
         if include_metadata:
-            user_query = user_query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
+            user_query = user_query.outerjoin(UserCompanyAccess.machine_group).filter(
+                or_(
+                    MachineGroup.name.in_(machine_group_names),
+                    UserCompanyAccess.machine_group_id.is_(None),
+                )
+            )
 
     machine_query = machine_query.filter(Machine.is_active.is_(True))
 
@@ -902,7 +913,7 @@ def _load_board_context(
     visible_users = (
         [
             access.user
-            for access in user_query.filter_by(is_active=True).order_by(UserCompanyAccess.id.asc()).all()
+            for access in user_query.filter(UserCompanyAccess.is_active.is_(True)).order_by(UserCompanyAccess.id.asc()).all()
             if access.user
             and access.user.is_active
             and (access.department is None or access.department.is_active)

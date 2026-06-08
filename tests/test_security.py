@@ -1669,6 +1669,98 @@ def test_operator_metadata_departments_exclude_inactive_departments(tmp_path, mo
     TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
 
 
+def test_operator_metadata_users_include_department_scoped_users_without_machine_group(tmp_path, monkeypatch):
+    database_path = tmp_path / "operator-metadata-users.sqlite3"
+    monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")
+
+    original_database_uri = TestingConfig.SQLALCHEMY_DATABASE_URI
+    TestingConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{database_path}"
+
+    app = create_app("testing")
+    with app.app_context():
+        db.create_all()
+        company = Company(name="Responder Company", slug="responder-company", is_active=True)
+        db.session.add(company)
+        db.session.flush()
+
+        department = Department(company_id=company.id, name="Quality", is_active=True)
+        machine_group = MachineGroup(company_id=company.id, name="Press", is_active=True)
+        db.session.add_all([department, machine_group])
+        db.session.flush()
+
+        department_user = User(
+            company_id=company.id,
+            display_name="Quality Responder",
+            username="quality.responder",
+            role="Viewer",
+            department_id=department.id,
+            is_active=True,
+        )
+        grouped_user = User(
+            company_id=company.id,
+            display_name="Press Responder",
+            username="press.responder",
+            role="Operator",
+            department_id=department.id,
+            machine_group_id=machine_group.id,
+            is_active=True,
+        )
+        db.session.add_all([department_user, grouped_user])
+        db.session.flush()
+
+        db.session.add_all(
+            [
+                UserCompanyAccess(
+                    user_id=department_user.id,
+                    company_id=company.id,
+                    role="Viewer",
+                    scope_mode="restricted",
+                    department_id=department.id,
+                    machine_group_id=None,
+                    is_active=True,
+                ),
+                UserCompanyAccess(
+                    user_id=grouped_user.id,
+                    company_id=company.id,
+                    role="Operator",
+                    scope_mode="restricted",
+                    department_id=department.id,
+                    machine_group_id=machine_group.id,
+                    is_active=True,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        payload = build_operator_metadata(
+            company_id=company.id,
+            current_user=SimpleNamespace(id=700),
+            membership=SimpleNamespace(
+                id=701,
+                role="Operator",
+                scope_mode="restricted",
+                department_id=department.id,
+                machine_group_id=machine_group.id,
+            ),
+            scope={
+                "company_id": company.id,
+                "department_id": department.id,
+                "department_ids": [department.id],
+                "machine_group_name": machine_group.name,
+                "machine_group_names": [machine_group.name],
+                "machine_ids": [],
+                "restricted": True,
+            },
+        )
+
+        visible_names = [user["display_name"] for user in payload["users"]]
+        assert visible_names == ["Quality Responder", "Press Responder"]
+
+        db.session.remove()
+        db.drop_all()
+    TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
+
+
 def test_operator_scope_filters_exclude_inactive_groups_departments_and_machines(tmp_path, monkeypatch):
     database_path = tmp_path / "operator-scope-filters.sqlite3"
     monkeypatch.setenv("TEST_DATABASE_URL", f"sqlite:///{database_path}")

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import time
 
 from flask import Blueprint, abort, current_app, g, jsonify, request
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import joinedload, load_only, noload
 
@@ -215,7 +215,12 @@ def users():
     if department_ids:
         query = query.filter(UserCompanyAccess.department_id.in_(department_ids))
     if machine_group_names:
-        query = query.join(UserCompanyAccess.machine_group).filter(MachineGroup.name.in_(machine_group_names))
+        query = query.outerjoin(UserCompanyAccess.machine_group).filter(
+            or_(
+                MachineGroup.name.in_(machine_group_names),
+                UserCompanyAccess.machine_group_id.is_(None),
+            )
+        )
     allowed_machine_groups = set()
     if machine_ids and company_id:
         machine_rows = Machine.query.options(noload("*")).with_entities(Machine.machine_type).filter(

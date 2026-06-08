@@ -109,7 +109,8 @@ function getScopedUsers(alert) {
     const userDepartmentId = Number(user.department_id || 0);
     const userMachineGroup = String(user.machine_group_name || "");
     const matchesDepartment = departmentId ? userDepartmentId === departmentId : true;
-    const matchesMachineGroup = machineGroupName ? userMachineGroup === machineGroupName : true;
+    // Department-scoped responders may not carry a machine-group assignment.
+    const matchesMachineGroup = machineGroupName ? (!userMachineGroup || userMachineGroup === machineGroupName) : true;
     return matchesDepartment && matchesMachineGroup;
   });
 }
