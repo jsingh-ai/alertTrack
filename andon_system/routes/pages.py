@@ -34,6 +34,7 @@ from ..security import (
     ensure_session_company,
     get_authenticated_user,
     get_current_membership,
+    get_default_membership,
     get_default_landing_endpoint,
     get_scope_filters,
     get_user_memberships,
