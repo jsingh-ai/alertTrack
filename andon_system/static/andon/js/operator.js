@@ -1752,20 +1752,12 @@ function renderOperatorCreatedNote(alert) {
 function renderAlertMessageThread(alert) {
   const createdNote = String(alert?.created_note || "").trim();
   const currentNote = String(alert?.note || "").trim();
-  const responderName = String(alert?.responder_name_text || "").trim();
   const bubbles = [];
   if (createdNote) {
     bubbles.push({
       side: "left",
       label: "Operator Message",
       text: createdNote,
-    });
-  }
-  if (currentNote && currentNote !== createdNote) {
-    bubbles.push({
-      side: "right",
-      label: responderName || "Response",
-      text: currentNote,
     });
   }
   if (!bubbles.length && currentNote) {
