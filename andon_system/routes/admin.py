@@ -392,13 +392,27 @@ def _resolve_scope_config(company_id: int, role: str, machine_ids: list[int], ma
     group_machine_ids = set()
 
     if role == "Operator":
+        if group_names_by_id:
+            rows = (
+                Machine.query.with_entities(Machine.id, Machine.department_id)
+                .join(Department, Department.id == Machine.department_id)
+                .filter(
+                    Machine.company_id == company_id,
+                    func.lower(func.trim(Machine.machine_type)).in_(list(_normalized_machine_group_names(group_names_by_id.values()))),
+                    Machine.is_active.is_(True),
+                    Department.is_active.is_(True),
+                )
+                .all()
+            )
+            group_machine_ids = {row.id for row in rows}
+            group_department_ids = {row.department_id for row in rows if row.department_id is not None}
         if not valid_group_ids:
             return None, _validation_error("Operator requires at least one machine group in scope")
-        if not valid_machine_ids:
-            return None, _validation_error("Operator requires at least one machine ID in scope")
-        resolved_department_ids = sorted(machine_department_ids)
+        resolved_machine_ids = set(valid_machine_ids)
+        resolved_machine_ids.update(group_machine_ids)
+        resolved_department_ids = sorted(group_department_ids | machine_department_ids)
         return {
-            "machine_ids": sorted(valid_machine_ids),
+            "machine_ids": sorted(resolved_machine_ids),
             "machine_group_ids": sorted(valid_group_ids),
             "department_ids": resolved_department_ids,
         }, None
@@ -494,6 +508,56 @@ def _validation_error(message: str):
         return jsonify({"ok": False, "message": message}), 400
     flash(message, "warning")
     return redirect(url_for("pages.admin_page"))
+
+
+def _hash_user_password(password: str) -> str:
+    method = str(current_app.config.get("USER_PASSWORD_HASH_METHOD") or "pbkdf2:sha256:300000").strip()
+    salt_length = int(current_app.config.get("USER_PASSWORD_SALT_LENGTH", 16) or 16)
+    return generate_password_hash(password, method=method, salt_length=max(8, salt_length))
+
+
+def _queue_user_reference_cleanup(company_id: int, user_id: int) -> None:
+    if company_id is None or user_id is None:
+        return
+    app = current_app._get_current_object()
+
+    def _run_cleanup():
+        with app.app_context():
+            try:
+                db.session.execute(
+                    update(AndonAlert)
+                    .where(
+                        AndonAlert.company_id == company_id,
+                        AndonAlert.operator_user_id == user_id,
+                    )
+                    .values(operator_user_id=None, operator_name_text=None)
+                )
+                db.session.execute(
+                    update(AndonAlert)
+                    .where(
+                        AndonAlert.company_id == company_id,
+                        AndonAlert.responder_user_id == user_id,
+                    )
+                    .values(responder_user_id=None, responder_name_text=None)
+                )
+                db.session.execute(
+                    update(AndonAlertEvent)
+                    .where(AndonAlertEvent.company_id == company_id, AndonAlertEvent.user_id == user_id)
+                    .values(user_id=None, user_name_text=None)
+                )
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("Unable to scrub removed user references company_id=%s user_id=%s", company_id, user_id)
+
+    try:
+        if socketio is not None:
+            socketio.start_background_task(_run_cleanup)
+            return
+    except Exception:
+        current_app.logger.exception("Unable to queue user cleanup company_id=%s user_id=%s", company_id, user_id)
+
+    _run_cleanup()
 
 
 @admin_bp.post("/department/create")
@@ -1303,7 +1367,7 @@ def create_user():
                     role=role,
                     email=email,
                     phone_number=phone_number,
-                    password_hash=generate_password_hash(password.strip()),
+                    password_hash=_hash_user_password(password.strip()),
                     department_id=user_department_id,
                     machine_group_id=user_machine_group_id,
                     is_active=True,
@@ -1328,7 +1392,7 @@ def create_user():
                     username=username or user.username,
                     email=email,
                     phone_number=phone_number,
-                    password_hash=generate_password_hash(password.strip()) if password.strip() else user.password_hash,
+                    password_hash=_hash_user_password(password.strip()) if password.strip() else user.password_hash,
                     role=role,
                     department_id=user_department_id,
                     machine_group_id=user_machine_group_id,
@@ -1456,7 +1520,7 @@ def update_user(user_id):
     user.machine_group_id = machine_group.id if role == "Admin" and machine_group else None
     user.department_id = department.id if role in {"Admin", "Viewer"} and department else None
     if password.strip():
-        user.set_password(password.strip())
+        user.password_hash = _hash_user_password(password.strip())
     access.role = role
     access.scope_mode = "all" if role == "Admin" else scope_mode
     access.machine_group_id = machine_group.id if role == "Admin" and machine_group else None
@@ -1529,34 +1593,13 @@ def toggle_user(user_id):
 
 @admin_bp.post("/user/<int:user_id>/delete")
 def delete_user(user_id):
+    started_at = time.perf_counter()
     company_id = _company_id()
     access = UserCompanyAccess.query.filter_by(user_id=user_id, company_id=company_id).one_or_none()
     user = access.user if access else None
     if user is None or access is None:
         return _error_or_404("User not found")
-
-    db.session.execute(
-        update(AndonAlert)
-        .where(
-            AndonAlert.company_id == company_id,
-            AndonAlert.operator_user_id == user.id,
-        )
-        .values(operator_user_id=None, operator_name_text=None)
-    )
-    db.session.execute(
-        update(AndonAlert)
-        .where(
-            AndonAlert.company_id == company_id,
-            AndonAlert.responder_user_id == user.id,
-        )
-        .values(responder_user_id=None, responder_name_text=None)
-    )
-    db.session.execute(
-        update(AndonAlertEvent)
-        .where(AndonAlertEvent.company_id == company_id, AndonAlertEvent.user_id == user.id)
-        .values(user_id=None, user_name_text=None)
-    )
-
+    lookup_started_at = time.perf_counter()
     db.session.delete(access)
     has_other_access = (
         db.session.query(UserCompanyAccess.id)
@@ -1570,10 +1613,38 @@ def delete_user(user_id):
     )
     if not has_other_access:
         user.is_active = False
+    lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+    commit_started_at = time.perf_counter()
     db.session.commit()
+    commit_ms = (time.perf_counter() - commit_started_at) * 1000
+    cleanup_started_at = time.perf_counter()
+    _queue_user_reference_cleanup(company_id, user.id)
+    cleanup_queue_ms = (time.perf_counter() - cleanup_started_at) * 1000
+    invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
+    invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
     if _is_ajax_request():
+        _log_admin_mutation_perf(
+            "delete_user",
+            started_at,
+            company_id=company_id,
+            user_id=user_id,
+            lookup_ms=f"{lookup_ms:.1f}",
+            commit_ms=f"{commit_ms:.1f}",
+            cleanup_queue_ms=f"{cleanup_queue_ms:.1f}",
+            invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+        )
         return _json_response("User removed", user_id=user_id)
+    _log_admin_mutation_perf(
+        "delete_user",
+        started_at,
+        company_id=company_id,
+        user_id=user_id,
+        lookup_ms=f"{lookup_ms:.1f}",
+        commit_ms=f"{commit_ms:.1f}",
+        cleanup_queue_ms=f"{cleanup_queue_ms:.1f}",
+        invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
+    )
     flash("User removed", "success")
     return redirect(url_for("pages.admin_page"))
 

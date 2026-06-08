@@ -343,7 +343,7 @@
                   </select>
                 </div>
                 <div class="col-12">
-                  <div class="admin-user-scope-tip" id="userScopeRoleHint">Pick one or more machine groups, then choose machines in those groups.</div>
+                  <div class="admin-user-scope-tip" id="userScopeRoleHint">Pick one or more machine groups. Machines are assigned automatically from those groups.</div>
                 </div>
               </div>
               <div class="admin-scope-controls">
@@ -1169,7 +1169,7 @@
 
   function roleScopeHint(role) {
     if (role === "Operator") {
-      return "Operator: pick one or more machine groups, then choose machines in those groups.";
+      return "Operator: pick one or more machine groups. Machines are assigned automatically from those groups.";
     }
     if (role === "Viewer") {
       return "Department: choose a department. No machine or machine-group selection is required.";
@@ -1183,10 +1183,10 @@
   function applyRoleScopeState() {
     const role = userRoleSelect.value || "Operator";
     const adminMode = role === "Admin";
-    const operatorMode = role === "Operator";
     const viewerMode = role === "Viewer";
     const managerMode = role === "Manager";
-    const machineSelectionEnabled = operatorMode;
+    const operatorMode = role === "Operator";
+    const machineSelectionEnabled = false;
     const showGroupScope = operatorMode || managerMode;
     userScopeRoleHint.textContent = roleScopeHint(role);
     userDepartmentFieldWrap.classList.toggle("d-none", !viewerMode);
@@ -1310,9 +1310,9 @@
       : selectedGroupIdsRaw;
     const selectedDepartmentId = Number(userDepartmentSelect.value || "");
     const selectedMachineCheckboxes = Array.from(userScopeMachineList.querySelectorAll(".js-user-scope-machine:checked"));
-    const selectedMachineIds = role === "Operator"
-      ? uniqueSortedIds(selectedMachineCheckboxes.map((input) => Number(input.value)))
-      : (role === "Manager" ? machineIdsForGroupIds(selectedGroupIds) : []);
+    const selectedMachineIds = role === "Operator" || role === "Manager"
+      ? machineIdsForGroupIds(selectedGroupIds)
+      : [];
     const selectedMachineDepartmentIds = uniqueSortedIds(
       selectedMachineCheckboxes
         .map((input) => Number(input.dataset.departmentId || ""))
@@ -1321,7 +1321,7 @@
     const selectedDepartmentIds = role === "Viewer"
       ? (Number.isInteger(selectedDepartmentId) && selectedDepartmentId > 0 ? [selectedDepartmentId] : [])
       : (role === "Operator"
-        ? selectedMachineDepartmentIds
+        ? machineDepartmentIdsForMachineIds(selectedMachineIds)
         : (role === "Manager" ? machineDepartmentIdsForMachineIds(selectedMachineIds) : []));
     userScopeMachineGroupIdsInput.value = role === "Operator" || role === "Manager" ? selectedGroupIds.join(",") : "";
     userScopeMachineIdsInput.value = role === "Operator" || role === "Manager" ? selectedMachineIds.join(",") : "";
@@ -1398,7 +1398,7 @@
     modalScopeSelectedMachineIds = new Set(uniqueSortedIds(machineIds));
     userScopeModalGroupList.parentElement?.classList.toggle("d-none", !showGroupScope);
     renderUserScopeModalGroups();
-    const machineSelectionEnabled = role === "Operator";
+    const machineSelectionEnabled = false;
     userScopeModalMachineBlock.classList.toggle("d-none", !machineSelectionEnabled);
     userScopeModalAllMachines.disabled = !machineSelectionEnabled;
     userScopeModalMachineList.classList.toggle("opacity-50", !machineSelectionEnabled);
@@ -1428,11 +1428,9 @@
         .map((input) => Number(input.value))
         .filter((machineId) => visibleMachineIds.has(machineId))
     );
-    const selectedMachineIds = role === "Operator"
-      ? selectedMachineIdsRaw
-      : (role === "Manager"
-        ? (selectedGroupIds.length ? uniqueSortedIds(filteredMachines.map((machine) => Number(machine.id))) : [])
-        : []);
+    const selectedMachineIds = role === "Operator" || role === "Manager"
+      ? (selectedGroupIds.length ? uniqueSortedIds(filteredMachines.map((machine) => Number(machine.id))) : [])
+      : [];
     const selectedDepartmentIds = role === "Viewer"
       ? (() => {
           const selected = Number(
@@ -2009,7 +2007,7 @@
       : selectedGroupIdsRaw;
     const managerMachineIds = machineIdsForGroupIds(selectedGroupIds);
     const managerDepartmentIds = machineDepartmentIdsForMachineIds(managerMachineIds);
-    const operatorMachineIds = parseCsvIds(row.querySelector('[name="scope_machine_ids"]')?.value || "");
+    const operatorMachineIds = machineIdsForGroupIds(selectedGroupIdsRaw);
     const operatorDepartmentIds = machineDepartmentIdsForMachineIds(operatorMachineIds);
     if (role === "Admin") {
       row.querySelector('[name="scope_machine_ids"]').value = "";
@@ -2033,7 +2031,10 @@
       return;
     }
     if (role === "Operator") {
+      row.querySelector('[name="scope_machine_group_ids"]').value = selectedGroupIdsRaw.join(",");
+      row.querySelector('[name="scope_machine_ids"]').value = operatorMachineIds.join(",");
       row.querySelector('[name="scope_department_ids"]').value = operatorDepartmentIds.join(",");
+      row.querySelector('[name="department_id"]').value = "";
       return;
     }
     row.querySelector('[name="scope_department_ids"]').value = "";
@@ -2639,13 +2640,8 @@
     const role = scopeRoleFromRow(rowToUpdate);
     const groupCount = modalScopeGroupIdsFromDom().length;
     const departmentValue = (userScopeModalDepartmentSelect?.value || rowToUpdate.querySelector('[name="department_id"]')?.value || "");
-    const machineCount = Array.from(userScopeModalMachineList.querySelectorAll(".js-user-modal-scope-machine:checked")).length;
     if (role === "Operator" && groupCount === 0) {
       showToast(`${roleLabel(role)} role must have at least one machine group selected.`);
-      return;
-    }
-    if (role === "Operator" && machineCount === 0) {
-      showToast("Operator must have at least one machine selected.");
       return;
     }
     if (role === "Viewer" && !departmentValue) {
@@ -2721,17 +2717,11 @@
   userCreateForm.addEventListener("submit", (event) => {
     syncScopeHiddenInputs();
     const role = userRoleSelect.value || "";
-    const machineIds = parseCsvIds(userScopeMachineIdsInput.value);
     const groupIds = parseCsvIds(userScopeMachineGroupIdsInput.value);
     const departmentIds = parseCsvIds(userScopeDepartmentIdsInput.value);
     if (role === "Operator" && groupIds.length === 0) {
       event.preventDefault();
       showToast(`${roleLabel(role)} role must have at least one machine group selected.`);
-      return;
-    }
-    if (role === "Operator" && machineIds.length === 0) {
-      event.preventDefault();
-      showToast("Operator must have at least one machine selected in the Machines list.");
       return;
     }
     if (role === "Viewer" && departmentIds.length === 0) {

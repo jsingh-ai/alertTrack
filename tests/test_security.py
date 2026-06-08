@@ -1076,7 +1076,6 @@ def test_admin_create_operator_user_accepts_normalized_group_machine_scope(admin
             "password": "OperatorPass!2026",
             "role": "Operator",
             "scope_machine_group_ids": str(group_id),
-            "scope_machine_ids": str(machine_id),
         },
         headers={
             "Accept": "application/json",
