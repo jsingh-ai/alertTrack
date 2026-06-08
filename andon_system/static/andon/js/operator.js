@@ -1047,13 +1047,6 @@ async function actOnActiveAlert(machineId = 0, alertIdHint = 0) {
       alertId = activeAlert?.id;
     }
     if (!alertId || !activeAlert) return;
-    await refreshBoardState({ reason: "before-resolve" });
-    liveMachine = state.board.machines.find((machine) => Number(machine.id) === effectiveMachineId);
-    activeAlerts = getMachineActiveAlerts(liveMachine);
-    activeAlert = specificAlertRequested
-      ? (activeAlerts.find((alert) => Number(alert.id) === Number(alertId)) || null)
-      : (activeAlerts.find((alert) => Number(alert.id) === Number(alertId)) || getPrimaryActiveAlert(liveMachine) || null);
-    if (!activeAlert) return;
     if (activeAlert.status === "OPEN") {
       window.alert("This alert must be acknowledged from the board before it can be closed here.");
       return;
