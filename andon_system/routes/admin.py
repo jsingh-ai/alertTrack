@@ -21,7 +21,7 @@ from ..models.issue import IssueCategory, IssueProblem
 from ..models.machine import Machine
 from ..models.machine_group import MachineGroup
 from ..models.pager_device import PagerDevice
-from ..models.user import USER_ROLES, USER_SCOPE_MODES, User, UserCompanyAccess
+from ..models.user import USER_ROLES, USER_SCOPE_MODES, User, UserBoard, UserBoardItem, UserCompanyAccess, UserViewPreference
 from ..security import fingerprint_pager_token, hash_pager_token, require_admin_authentication
 from ..services.cache_service import invalidate_cache
 from ..services.radius_service import resolve_radius_machine_id
@@ -1326,10 +1326,10 @@ def create_user():
     if not password.strip():
         return _validation_error("Password is required")
     duplicate_user = User.query.filter(User.username == username).one_or_none() if username else None
-    if duplicate_user is not None and UserCompanyAccess.query.filter_by(user_id=duplicate_user.id, company_id=company_id).one_or_none() is not None:
+    if duplicate_user is not None:
         return _validation_error("Username is already in use")
     duplicate_email = User.query.filter(User.email == email).one_or_none() if email else None
-    if duplicate_email is not None and duplicate_email.username != username:
+    if duplicate_email is not None:
         return _validation_error("Email is already in use")
     machine_group, department, error_response = _resolve_membership_scope(
         company_id, role, scope_mode, machine_group_id, department_id
@@ -1351,54 +1351,27 @@ def create_user():
         _configure_admin_pg_transaction()
         user_department_id = department.id if role in {"Admin", "Viewer"} and department else None
         user_machine_group_id = machine_group.id if role == "Admin" and machine_group else None
-        user = None
-        if username:
-            user = User.query.filter_by(username=username).one_or_none()
-        if user is None and email:
-            user = User.query.filter_by(email=email).one_or_none()
-        if user is None:
-            user_row = db.session.execute(
-                insert(User)
-                .values(
-                    company_id=company_id,
-                    employee_id=work_id,
-                    display_name=display_name,
-                    username=username,
-                    role=role,
-                    email=email,
-                    phone_number=phone_number,
-                    password_hash=_hash_user_password(password.strip()),
-                    department_id=user_department_id,
-                    machine_group_id=user_machine_group_id,
-                    is_active=True,
-                )
-                .returning(User.id),
-            ).first()
-            if user_row is None:
-                db.session.rollback()
-                return _error_or_404("User not found")
-            user_id = user_row.id
-        else:
-            existing_access = UserCompanyAccess.query.filter_by(user_id=user.id, company_id=company_id).one_or_none()
-            if existing_access is not None:
-                db.session.rollback()
-                return _validation_error("This user already has access to the selected company")
-            db.session.execute(
-                update(User)
-                .where(User.id == user.id)
-                .values(
-                    display_name=display_name,
-                    employee_id=work_id,
-                    username=username or user.username,
-                    email=email,
-                    phone_number=phone_number,
-                    password_hash=_hash_user_password(password.strip()) if password.strip() else user.password_hash,
-                    role=role,
-                    department_id=user_department_id,
-                    machine_group_id=user_machine_group_id,
-                ),
+        user_row = db.session.execute(
+            insert(User)
+            .values(
+                company_id=company_id,
+                employee_id=work_id,
+                display_name=display_name,
+                username=username,
+                role=role,
+                email=email,
+                phone_number=phone_number,
+                password_hash=_hash_user_password(password.strip()),
+                department_id=user_department_id,
+                machine_group_id=user_machine_group_id,
+                is_active=True,
             )
-            user_id = user.id
+            .returning(User.id),
+        ).first()
+        if user_row is None:
+            db.session.rollback()
+            return _error_or_404("User not found")
+        user_id = user_row.id
 
         access_row = db.session.execute(
             insert(UserCompanyAccess)
@@ -1610,41 +1583,42 @@ def toggle_user(user_id):
 def delete_user(user_id):
     started_at = time.perf_counter()
     company_id = _company_id()
-    row = db.session.execute(
-        db.select(UserCompanyAccess.id, UserCompanyAccess.user_id).where(
-            UserCompanyAccess.user_id == user_id,
-            UserCompanyAccess.company_id == company_id,
-        )
-    ).first()
-    if row is None:
+    user_exists = db.session.execute(
+        db.select(User.id).where(User.id == user_id)
+    ).scalar_one_or_none()
+    if user_exists is None:
         return _error_or_404("User not found")
-    access_id = row.id
-    target_user_id = row.user_id
+
     lookup_started_at = time.perf_counter()
-    db.session.execute(delete(UserCompanyAccess).where(UserCompanyAccess.id == access_id))
-    has_other_access = (
-        db.session.query(UserCompanyAccess.id)
-        .filter(
-            UserCompanyAccess.user_id == target_user_id,
-            UserCompanyAccess.id != access_id,
-        )
-        .limit(1)
-        .first()
-        is not None
+    board_ids = db.session.execute(
+        db.select(UserBoard.id).where(UserBoard.user_id == user_id)
+    ).scalars().all()
+    db.session.execute(
+        update(AndonAlert)
+        .where(AndonAlert.operator_user_id == user_id)
+        .values(operator_user_id=None, operator_name_text=None)
     )
-    if not has_other_access:
-        db.session.execute(
-            update(User)
-            .where(User.id == target_user_id)
-            .values(is_active=False)
-        )
+    db.session.execute(
+        update(AndonAlert)
+        .where(AndonAlert.responder_user_id == user_id)
+        .values(responder_user_id=None, responder_name_text=None)
+    )
+    db.session.execute(
+        update(AndonAlertEvent)
+        .where(AndonAlertEvent.user_id == user_id)
+        .values(user_id=None, user_name_text=None)
+    )
+    if board_ids:
+        db.session.execute(delete(UserBoardItem).where(UserBoardItem.board_id.in_(board_ids)))
+    db.session.execute(delete(UserBoard).where(UserBoard.user_id == user_id))
+    db.session.execute(delete(UserViewPreference).where(UserViewPreference.user_id == user_id))
+    db.session.execute(delete(UserCompanyAccess).where(UserCompanyAccess.user_id == user_id))
+    db.session.execute(delete(User).where(User.id == user_id))
     lookup_ms = (time.perf_counter() - lookup_started_at) * 1000
+
     commit_started_at = time.perf_counter()
     db.session.commit()
     commit_ms = (time.perf_counter() - commit_started_at) * 1000
-    cleanup_started_at = time.perf_counter()
-    _queue_user_reference_cleanup(company_id, target_user_id)
-    cleanup_queue_ms = (time.perf_counter() - cleanup_started_at) * 1000
     invalidate_started_at = time.perf_counter()
     _invalidate_company_caches(company_id)
     invalidate_queue_ms = (time.perf_counter() - invalidate_started_at) * 1000
@@ -1656,7 +1630,6 @@ def delete_user(user_id):
             user_id=user_id,
             lookup_ms=f"{lookup_ms:.1f}",
             commit_ms=f"{commit_ms:.1f}",
-            cleanup_queue_ms=f"{cleanup_queue_ms:.1f}",
             invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
         )
         return _json_response("User removed", user_id=user_id)
@@ -1667,7 +1640,6 @@ def delete_user(user_id):
         user_id=user_id,
         lookup_ms=f"{lookup_ms:.1f}",
         commit_ms=f"{commit_ms:.1f}",
-        cleanup_queue_ms=f"{cleanup_queue_ms:.1f}",
         invalidate_queue_ms=f"{invalidate_queue_ms:.1f}",
     )
     flash("User removed", "success")

@@ -91,8 +91,8 @@ def _safe_user_identity_id(user: User | None) -> int | None:
 
 def configured_password_hash_method() -> str:
     if has_request_context():
-        return str(current_app.config.get("USER_PASSWORD_HASH_METHOD") or "pbkdf2:sha256:120000").strip()
-    return "pbkdf2:sha256:120000"
+        return str(current_app.config.get("USER_PASSWORD_HASH_METHOD") or "pbkdf2:sha256:30000").strip()
+    return "pbkdf2:sha256:30000"
 
 
 def hash_user_password(password: str) -> str:

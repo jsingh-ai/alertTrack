@@ -1135,6 +1135,108 @@ def test_admin_created_user_can_login_with_entered_password(admin_login_client):
     assert login_response.status_code == 302
 
 
+def test_admin_create_user_rejects_existing_username_even_without_company_access(admin_login_client):
+    client, app = admin_login_client
+    csrf_token = _seed_admin_session_for_company(client, app)
+
+    with app.app_context():
+        company = Company.query.filter_by(slug="admin-test").one()
+        other_company = Company(name="Other Company", slug="other-company", is_active=True)
+        db.session.add(other_company)
+        db.session.flush()
+        department = Department.query.filter_by(company_id=company.id, name="Pagerless Department").one()
+        department_id = department.id
+        existing = User(
+            company_id=other_company.id,
+            display_name="Existing Quality",
+            username="quality",
+            role="Viewer",
+            is_active=True,
+        )
+        existing.set_password("OldPass!2026")
+        db.session.add(existing)
+        db.session.commit()
+
+    response = client.post(
+        "/andon/admin/user/create",
+        data={
+            "csrf_token": csrf_token,
+            "display_name": "Quality User",
+            "username": "quality",
+            "password": "quality123",
+            "role": "Viewer",
+            "department_id": str(department_id),
+        },
+        headers={
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["message"] == "Username is already in use"
+
+
+def test_admin_delete_user_fully_purges_username_for_reuse(admin_login_client):
+    client, app = admin_login_client
+    csrf_token = _seed_admin_session_for_company(client, app)
+
+    with app.app_context():
+        company = Company.query.filter_by(slug="admin-test").one()
+        department = Department.query.filter_by(company_id=company.id, name="Pagerless Department").one()
+
+    create_response = client.post(
+        "/andon/admin/user/create",
+        data={
+            "csrf_token": csrf_token,
+            "display_name": "Reusable User",
+            "username": "reusable.user",
+            "password": "ReusePass!2026",
+            "role": "Viewer",
+            "department_id": str(department.id),
+        },
+        headers={
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+    )
+    assert create_response.status_code == 200
+    created_payload = create_response.get_json()
+    created_user_id = created_payload["user"]["id"]
+
+    delete_response = client.post(
+        f"/andon/admin/user/{created_user_id}/delete",
+        data={"csrf_token": csrf_token},
+        headers={
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+    )
+    assert delete_response.status_code == 200
+
+    recreate_response = client.post(
+        "/andon/admin/user/create",
+        data={
+            "csrf_token": csrf_token,
+            "display_name": "Reusable User Again",
+            "username": "reusable.user",
+            "password": "ReusePass!2026",
+            "role": "Viewer",
+            "department_id": str(department.id),
+        },
+        headers={
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+    )
+    assert recreate_response.status_code == 200
+    recreate_payload = recreate_response.get_json()
+    assert recreate_payload["ok"] is True
+    assert recreate_payload["user"]["username"] == "reusable.user"
+
+
 def test_health_endpoint_returns_safe_json_without_auth(login_client):
     response = login_client.get("/health")
 
