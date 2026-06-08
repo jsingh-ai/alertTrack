@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import time
+from types import SimpleNamespace
 
 from flask import current_app, has_request_context
 from sqlalchemy.orm import joinedload, load_only, noload
