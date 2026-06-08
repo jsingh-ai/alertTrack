@@ -1,10 +1,10 @@
 const boardUrl = "/api/andon/operator-snapshot";
 const operatorMetadataUrl = "/api/andon/operator-metadata";
-const operatorViewStorageKey = "andon-operator-view";
 const operatorMetadataCacheScope = [
   String(window.AndonRealtimeConfig?.companyId ?? "none"),
   String((document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "").slice(0, 16) || "anon"),
 ].join(":");
+const operatorViewStorageKey = `andon-operator-view-v2:${operatorMetadataCacheScope}`;
 const operatorMetadataCacheKey = `andon-operator-metadata-cache-v2:${operatorMetadataCacheScope}`;
 const operatorDepartmentsCacheKey = `andon-operator-departments-cache-v2:${operatorMetadataCacheScope}`;
 const operatorSnapshotCacheKey = `andon-operator-snapshot-cache-v1:${operatorMetadataCacheScope}`;
@@ -2080,13 +2080,11 @@ function onDocumentClick(event) {
 async function restoreViewState() {
   try {
     const remote = await window.AndonPreferences?.load?.("operator");
-    if (remote && Object.keys(remote).length) {
-      state.view.machineGroup = typeof remote.machineGroup === "string" ? remote.machineGroup : "";
-      state.view.machineId = typeof remote.machineId === "string" || typeof remote.machineId === "number" ? String(remote.machineId) : "";
-      state.view.locked = Boolean(remote.locked);
-      operatorLastPersistedViewKey = getOperatorViewStateKey(state.view);
-      return;
-    }
+    state.view.machineGroup = typeof remote?.machineGroup === "string" ? remote.machineGroup : defaultOperatorMachineGroup;
+    state.view.machineId = typeof remote?.machineId === "string" || typeof remote?.machineId === "number" ? String(remote.machineId) : "";
+    state.view.locked = remote && Object.prototype.hasOwnProperty.call(remote, "locked") ? Boolean(remote.locked) : true;
+    operatorLastPersistedViewKey = getOperatorViewStateKey(state.view);
+    return;
   } catch (_error) {
     // Fall back to local storage when remote preferences are unavailable.
   }

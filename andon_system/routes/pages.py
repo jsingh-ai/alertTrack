@@ -389,7 +389,7 @@ def login_page():
     commit_started_at = time.perf_counter()
     db.session.commit()
     commit_ms = (time.perf_counter() - commit_started_at) * 1000
-    membership = memberships[0]
+    membership = get_default_membership(user)
     redirect_started_at = time.perf_counter()
 
     # Avoid re-loading memberships or company access checks in redirect resolution.

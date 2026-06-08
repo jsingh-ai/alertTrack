@@ -22,7 +22,7 @@ from andon_system.models.pager_device import PagerDevice
 from andon_system.models.user import User, UserCompanyAccess
 from andon_system.routes.admin import _resolve_scope_config
 from andon_system.routes.pages import _session_cookie_domain_matches_request
-from andon_system.security import ADMIN_SESSION_KEY, CSRF_SESSION_KEY, USER_SESSION_KEY, get_scope_filters
+from andon_system.security import ADMIN_SESSION_KEY, CSRF_SESSION_KEY, USER_SESSION_KEY, get_default_membership, get_scope_filters
 from andon_system.services.board_service import _operator_metadata_cache_key, build_operator_metadata
 
 
@@ -1741,6 +1741,32 @@ def test_operator_scope_config_matches_machine_group_names_after_normalization(t
         db.session.remove()
         db.drop_all()
     TestingConfig.SQLALCHEMY_DATABASE_URI = original_database_uri
+
+
+def test_get_default_membership_prefers_users_primary_company(monkeypatch):
+    current_user = SimpleNamespace(id=10, company_id=7)
+    non_primary = SimpleNamespace(company_id=3, role="Operator", company=SimpleNamespace(id=3, slug="operator-company"))
+    primary = SimpleNamespace(company_id=7, role="Admin", company=SimpleNamespace(id=7, slug="admin-company"))
+
+    monkeypatch.setattr("andon_system.security.get_user_memberships", lambda user=None: [non_primary, primary])
+    monkeypatch.setattr("andon_system.security.get_authenticated_user", lambda: current_user)
+
+    selected = get_default_membership()
+
+    assert selected is primary
+
+
+def test_get_default_membership_prefers_single_admin_membership_when_primary_missing(monkeypatch):
+    current_user = SimpleNamespace(id=12, company_id=99)
+    operator_membership = SimpleNamespace(company_id=3, role="Operator", company=SimpleNamespace(id=3, slug="operator-company"))
+    admin_membership = SimpleNamespace(company_id=7, role="Admin", company=SimpleNamespace(id=7, slug="admin-company"))
+
+    monkeypatch.setattr("andon_system.security.get_user_memberships", lambda user=None: [operator_membership, admin_membership])
+    monkeypatch.setattr("andon_system.security.get_authenticated_user", lambda: current_user)
+
+    selected = get_default_membership()
+
+    assert selected is admin_membership
 
 
 def test_cached_pager_device_lookup_does_not_hit_db(monkeypatch):

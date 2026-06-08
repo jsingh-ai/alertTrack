@@ -9,7 +9,7 @@ from flask import current_app, g, has_request_context, session
 
 from .extensions import db
 from .models.company import Company
-from .security import can_access_company, get_accessible_companies, is_authenticated
+from .security import can_access_company, get_accessible_companies, get_default_membership, get_authenticated_user, is_authenticated
 
 CURRENT_COMPANY_ID_SESSION_KEY = "andon_company_id"
 CURRENT_COMPANY_SLUG_SESSION_KEY = "andon_company_slug"
@@ -122,6 +122,7 @@ def get_current_company():
     if has_request_context() and is_authenticated():
         memberships = get_accessible_companies()
         if memberships:
+            current_user = get_authenticated_user()
             session_company_id = session.get(CURRENT_COMPANY_ID_SESSION_KEY)
             session_slug = session.get(CURRENT_COMPANY_SLUG_SESSION_KEY)
             company = None
@@ -135,7 +136,8 @@ def get_current_company():
             if company is None:
                 company = next((item for item in memberships if item.slug == session_slug), None)
             if company is None:
-                company = next((item for item in memberships if item.slug == DEFAULT_COMPANY_SLUG), memberships[0])
+                default_membership = get_default_membership(user=current_user)
+                company = getattr(default_membership, "company", None) or next((item for item in memberships if item.slug == DEFAULT_COMPANY_SLUG), memberships[0])
             g.current_company = company
             session[CURRENT_COMPANY_ID_SESSION_KEY] = company.id
             session[CURRENT_COMPANY_SLUG_SESSION_KEY] = company.slug
@@ -178,7 +180,8 @@ def get_current_company():
     if has_request_context() and is_authenticated():
         memberships = get_accessible_companies()
         if memberships and (company is None or all(item.id != company.id for item in memberships)):
-            company = memberships[0]
+            default_membership = get_default_membership(user=get_authenticated_user())
+            company = getattr(default_membership, "company", None) or memberships[0]
     if company is None:
         company = next((item for item in DEFAULT_COMPANIES if item.slug == DEFAULT_COMPANY_SLUG), DEFAULT_COMPANIES[2])
 

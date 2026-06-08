@@ -711,9 +711,23 @@ def get_accessible_companies(user: User | None = None) -> list[Company]:
     return [membership.company for membership in get_user_memberships(user=user) if membership.company]
 
 
+def _preferred_membership(memberships: list[UserCompanyAccess], user: User | None = None) -> UserCompanyAccess | None:
+    if not memberships:
+        return None
+    current_user = user or get_authenticated_user()
+    if current_user is not None:
+        primary_membership = next((item for item in memberships if item.company_id == current_user.company_id), None)
+        if primary_membership is not None:
+            return primary_membership
+    admin_memberships = [item for item in memberships if getattr(item, "role", None) == "Admin"]
+    if len(admin_memberships) == 1:
+        return admin_memberships[0]
+    return memberships[0]
+
+
 def get_default_membership(user: User | None = None) -> UserCompanyAccess | None:
     memberships = get_user_memberships(user=user)
-    return memberships[0] if memberships else None
+    return _preferred_membership(memberships, user=user)
 
 
 def get_default_landing_endpoint(user: User | None = None, membership: UserCompanyAccess | None = None) -> str:
@@ -779,7 +793,7 @@ def ensure_session_company(user: User | None = None) -> UserCompanyAccess | None
             g.current_user_membership = membership
         _perf_log("ensure_session_company(current_ok)", started_at, company_slug=current_company.slug)
         return membership
-    default_membership = memberships[0]
+    default_membership = _preferred_membership(memberships, user=current_user)
     if default_membership and default_membership.company:
         set_current_company_slug(default_membership.company.slug)
         if has_request_context():
