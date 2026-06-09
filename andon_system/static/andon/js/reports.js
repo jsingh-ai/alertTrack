@@ -19,6 +19,14 @@ let reportRefreshTimeoutId = null;
 let reportLoadRequestId = 0;
 let reportsStaleWhileHidden = false;
 
+function getReportPreferenceSnapshot() {
+  return JSON.stringify({
+    start: reportStart?.value || "",
+    end: reportEnd?.value || "",
+    machineGroup: getSelectedMachineGroup(),
+  });
+}
+
 async function loadReportPreferences(defaultStartValue, defaultEndValue) {
   try {
     const saved = await window.AndonPreferences?.load?.("reports");
@@ -507,10 +515,14 @@ if (reportEnd && !reportEnd.value) reportEnd.value = defaultEndDate;
 if (reportMachineGroupButtons) {
   setSelectedMachineGroup("");
 }
+const initialReportPreferenceSnapshot = getReportPreferenceSnapshot();
+loadReports();
 loadReportPreferences(defaultStartDate, defaultEndDate).finally(() => {
   if (!reportStart.value) reportStart.value = defaultStartDate;
   if (!reportEnd.value) reportEnd.value = defaultEndDate;
-  loadReports();
+  if (getReportPreferenceSnapshot() !== initialReportPreferenceSnapshot) {
+    loadReports();
+  }
 });
 
 function openDetailModal(title, row, kind) {

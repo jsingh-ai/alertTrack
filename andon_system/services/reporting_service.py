@@ -18,6 +18,10 @@ from .cache_service import get_cached, set_cached
 REPORT_SUMMARY_CACHE_TTL_SECONDS = 15
 REPORT_DETAILS_CACHE_TTL_SECONDS = 30
 REPORT_MACHINE_STATS_CACHE_TTL_SECONDS = 10
+REPORT_SUMMARY_MACHINE_CHART_LIMIT = 12
+REPORT_SUMMARY_DEPARTMENT_CHART_LIMIT = 12
+REPORT_SUMMARY_TOP_MACHINES_LIMIT = 25
+REPORT_SUMMARY_TOP_PROBLEMS_LIMIT = 25
 
 
 def format_local_datetime(value, tz_name="America/Chicago"):
@@ -36,13 +40,18 @@ def build_report_summary(filters: dict):
     if cached is not None:
         return cached
     rows = _summary_alert_rows(filters)
+    by_machine_group = _group_count_from_rows(rows, "machine_group", "machine_group")
+    by_department = _group_count_from_rows(rows, "department_id", "department_name")
+    by_machine = _group_count_from_rows(rows, "machine_id", "machine_name")
+    top_machines = _top_machines_from_rows(rows)
+    top_problems = _top_problems_from_rows(rows)
     result = {
         "kpis": _build_kpis_from_rows(rows),
-        "by_machine_group": _group_count_from_rows(rows, "machine_group", "machine_group"),
-        "by_department": _group_count_from_rows(rows, "department_id", "department_name"),
-        "by_machine": _group_count_from_rows(rows, "machine_id", "machine_name"),
-        "top_machines": _top_machines_from_rows(rows),
-        "top_problems": _top_problems_from_rows(rows),
+        "by_machine_group": by_machine_group,
+        "by_department": by_department[:REPORT_SUMMARY_DEPARTMENT_CHART_LIMIT],
+        "by_machine": by_machine[:REPORT_SUMMARY_MACHINE_CHART_LIMIT],
+        "top_machines": top_machines[:REPORT_SUMMARY_TOP_MACHINES_LIMIT],
+        "top_problems": top_problems[:REPORT_SUMMARY_TOP_PROBLEMS_LIMIT],
         "calls_per_hour": _calls_per_hour_from_rows(rows),
     }
     set_cached(cache_key, result, REPORT_SUMMARY_CACHE_TTL_SECONDS)
@@ -268,7 +277,7 @@ def _summary_alert_rows(filters):
         .outerjoin(IssueCategory, IssueCategory.id == AndonAlert.issue_category_id)
         .outerjoin(IssueProblem, IssueProblem.id == AndonAlert.issue_problem_id)
     )
-    return query.order_by(AndonAlert.created_at.asc()).all()
+    return query.all()
 
 
 def _base_alert_query(filters):
