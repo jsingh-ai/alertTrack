@@ -66,6 +66,17 @@ def _configure_perf_focus_logging(app: Flask) -> None:
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 
+def _configure_console_logging(app: Flask) -> None:
+    if not app.config.get("ANDON_ERRORS_ONLY_LOGS"):
+        return
+
+    app.logger.setLevel(logging.ERROR)
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
+    logging.getLogger("engineio").setLevel(logging.ERROR)
+    logging.getLogger("socketio").setLevel(logging.ERROR)
+    logging.getLogger("geventwebsocket").setLevel(logging.ERROR)
+
+
 def _register_sqlalchemy_perf_listeners() -> None:
     global _SA_PERF_LISTENERS_REGISTERED
     if _SA_PERF_LISTENERS_REGISTERED:
@@ -434,8 +445,9 @@ def create_app(config_name: str | None = None) -> Flask:
     config_key = config_name or os.getenv("FLASK_CONFIG") or os.getenv("APP_ENV") or "default"
     app.config.from_object(config_by_name.get(config_key, config_by_name["default"]))
     _configure_perf_focus_logging(app)
-    if not app.config.get("ANDON_HTTP_ACCESS_LOGS"):
+    if not app.config.get("ANDON_HTTP_ACCESS_LOGS") and not app.config.get("ANDON_ERRORS_ONLY_LOGS"):
         logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    _configure_console_logging(app)
     if app.config.get("ANDON_PAGER_API_ONLY"):
         app.config["SOCKETIO_ENABLED"] = False
     _maybe_apply_proxy_fix(app)
