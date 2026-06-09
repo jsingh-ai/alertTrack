@@ -4,8 +4,10 @@ const operatorMetadataCacheScope = [
   String(window.AndonRealtimeConfig?.companyId ?? "none"),
   String((document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "").slice(0, 16) || "anon"),
 ].join(":");
-const operatorMetadataCacheKey = `andon-operator-metadata-cache-v1:${operatorMetadataCacheScope}`;
+const boardUsersMetadataCacheKey = `andon-board-users-metadata-cache-v1:${operatorMetadataCacheScope}`;
 const operatorMetadataCacheTtlMs = 5 * 60 * 1000;
+const boardAlertsCacheKey = `andon-board-alerts-cache-v1:${operatorMetadataCacheScope}`;
+const boardAlertsCacheTtlMs = 15 * 1000;
 
 const openAlertsList = document.getElementById("openAlertsList");
 const workingAlertsList = document.getElementById("workingAlertsList");
@@ -283,6 +285,31 @@ function render() {
   tickTimers();
 }
 
+function getCachedBoardAlerts() {
+  try {
+    const raw = window.sessionStorage.getItem(boardAlertsCacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const cachedAt = Number(parsed.cachedAt || 0);
+    if (!cachedAt || (Date.now() - cachedAt) > boardAlertsCacheTtlMs) return null;
+    return Array.isArray(parsed.data) ? parsed.data : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function setCachedBoardAlerts(alerts) {
+  try {
+    window.sessionStorage.setItem(
+      boardAlertsCacheKey,
+      JSON.stringify({ cachedAt: Date.now(), data: Array.isArray(alerts) ? alerts : [] }),
+    );
+  } catch (_error) {
+    // Ignore storage failures in locked-down kiosk environments.
+  }
+}
+
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -295,11 +322,12 @@ async function fetchJson(url, options = {}) {
 async function loadAlerts() {
   const alertsData = await fetchJson(alertsUrl);
   state.alerts = Array.isArray(alertsData) ? alertsData : [];
+  setCachedBoardAlerts(state.alerts);
 }
 
 function getCachedOperatorMetadata() {
   try {
-    const raw = window.sessionStorage.getItem(operatorMetadataCacheKey);
+    const raw = window.sessionStorage.getItem(boardUsersMetadataCacheKey);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
@@ -314,7 +342,7 @@ function getCachedOperatorMetadata() {
 function setCachedOperatorMetadata(metadata) {
   try {
     window.sessionStorage.setItem(
-      operatorMetadataCacheKey,
+      boardUsersMetadataCacheKey,
       JSON.stringify({ cachedAt: Date.now(), data: metadata || {} }),
     );
   } catch (_error) {
@@ -336,7 +364,7 @@ function hydrateOperatorMetadataFromCache() {
 async function loadOperatorMetadata(options = {}) {
   const preferCache = options.preferCache !== false;
   if (preferCache && hydrateOperatorMetadataFromCache()) return;
-  const metadata = await fetchJson(operatorMetadataUrl);
+  const metadata = await fetchJson(`${operatorMetadataUrl}?include_issue_groups=0`);
   applyOperatorMetadata(metadata);
   setCachedOperatorMetadata(metadata);
 }
@@ -526,6 +554,11 @@ function scheduleRefresh(delayMs = 120) {
 }
 
 async function refreshImmediately() {
+  const cachedAlerts = getCachedBoardAlerts();
+  if (cachedAlerts) {
+    state.alerts = cachedAlerts;
+    render();
+  }
   await loadAlerts();
   render();
 }

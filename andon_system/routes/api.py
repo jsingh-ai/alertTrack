@@ -362,6 +362,7 @@ def operator_metadata():
     service_metrics = {}
     service_started_at = time.perf_counter()
     departments_only = str(request.args.get("departments_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+    include_issue_groups = str(request.args.get("include_issue_groups") or "").strip().lower() not in {"0", "false", "no", "off"}
     include_users = str(request.args.get("include_users") or "").strip().lower() not in {"0", "false", "no", "off"}
     department_id = request.args.get("department_id", type=int)
     metadata_department_ids_override = [department_id] if department_id else None
@@ -371,7 +372,7 @@ def operator_metadata():
         membership=membership,
         scope=scope,
         metrics=service_metrics,
-        include_issue_groups=not departments_only,
+        include_issue_groups=(not departments_only) and include_issue_groups,
         include_users=(not departments_only) and include_users,
         metadata_department_ids_override=metadata_department_ids_override,
     )
