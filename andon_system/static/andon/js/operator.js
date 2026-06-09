@@ -91,6 +91,11 @@ let departmentButtonsMarkupCacheValue = "";
 let problemOptionsMarkupCacheKey = "";
 let problemOptionsMarkupCacheValue = "";
 let localMutationRefreshLockUntil = 0;
+
+function shouldSuppressLocalRefresh() {
+  return createAlertInFlight || Date.now() < localMutationRefreshLockUntil;
+}
+
 function normalizeDepartmentName(name) {
   return String(name || "").trim().toLowerCase();
 }
@@ -281,7 +286,10 @@ async function boot() {
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("resize", scheduleSingleMachineFit, { passive: true });
   window.visualViewport?.addEventListener("resize", scheduleSingleMachineFit, { passive: true });
-  window.AndonRefreshBus?.onRefresh(scheduleOperatorRefresh);
+  window.AndonRefreshBus?.onRefresh(() => {
+    if (shouldSuppressLocalRefresh()) return;
+    scheduleOperatorRefresh();
+  });
   window.AndonRealtime?.onEvent((event) => {
     if (["alert_created", "alert_updated", "alert_resolved", "alert_cancelled", "machine_updated", "admin_metadata_updated"].includes(event.type)) {
       if (Date.now() < localMutationRefreshLockUntil) return;
@@ -1814,6 +1822,9 @@ function renderAlertTimerBlocks(alert) {
 }
 
 async function refreshBoardState(options = {}) {
+  if (createAlertInFlight) {
+    return;
+  }
   if (operatorRefreshPromise) {
     operatorRefreshQueued = true;
     await operatorRefreshPromise;
@@ -1844,6 +1855,9 @@ async function refreshBoardState(options = {}) {
 }
 
 function scheduleOperatorRefresh() {
+  if (createAlertInFlight) {
+    return;
+  }
   if (operatorRefreshTimeoutId) {
     clearTimeout(operatorRefreshTimeoutId);
   }
